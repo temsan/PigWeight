@@ -23,13 +23,34 @@ def download_model():
     else:
         print(f"Model already exists at {MODEL_PATH}")
 
+def install_requirements():
+    print("Installing required packages from requirements.txt...")
+    try:
+        requirements_path = os.path.join(os.path.dirname(__file__), 'requirements.txt')
+        if not os.path.exists(requirements_path):
+            print("Error: requirements.txt not found!")
+            raise FileNotFoundError("requirements.txt not found")
+            
+        subprocess.check_call([
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            requirements_path
+        ])
+        print("All required packages installed successfully")
+    except subprocess.CalledProcessError as e:
+        print(f"Error installing packages: {str(e)}")
+        raise
+
 def convert_to_onnx():
     if not os.path.exists(ONNX_PATH) or os.path.getmtime(MODEL_PATH) > os.path.getmtime(ONNX_PATH):
         print(f"Converting model to ONNX format...")
         ensure_dir(os.path.dirname(ONNX_PATH))
         
         # Install required packages if not already installed
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "torch", "onnx", "ultralytics"])
+        install_requirements()
         
         # Load YOLOv5 model
         import torch
