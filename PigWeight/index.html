@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <title>PigWeight MVP</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="js/stream.js"></script>
   <style>
   body {
     background: #f6f8fa;
@@ -26,6 +28,12 @@
     flex-direction: column;
     justify-content: flex-start;
     align-items: center;
+  }
+  #videoElement {
+    width: 100%;
+    max-width: 1280px;
+    margin: 20px auto;
+    background: #000;
   }
   h2 {
     margin-top: 0;
@@ -346,7 +354,7 @@
     // --- Конфиг для MVP (можно заменить на fetch('/config')) ---
     const config = {
       cameras: [
-        {id: 'cam1', name: 'Камера 1', url: 'http://localhost:8081/camera1.mjpg'},
+        {id: 'cam1', name: 'Камера 1', url: 'http://localhost:8000/stream/stream.m3u8'},
         {id: 'cam2', name: 'Камера 2', url: 'http://127.0.0.1:8081/cam2.mjpg'}
       ],
       weight_api_url: 'http://127.0.0.1:5000/weight'

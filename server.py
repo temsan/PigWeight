@@ -1,10 +1,13 @@
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import ssl
 import os
 import sys
 import urllib.request
 import subprocess
 import torch
+from rtsp_manager import RTSPManager
 
 MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"
 MODEL_PATH = "models/yolo11n.pt"
