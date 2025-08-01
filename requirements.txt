@@ -17,17 +17,13 @@ onnxruntime>=1.12.0
 ultralytics>=8.0.0
 matplotlib>=3.4.0
 
+# Веб-сервер
+Flask>=2.0.0
+
 # Видео и стриминг
 av>=9.0.0
 python-ffmpeg>=1.0.0
 ffmpeg-python>=0.2.0
-
-# Веб-сервер
-flask>=2.0.0
-flask-cors>=3.0.0
-
-# HLS плеер для фронтенда
-hls.js>=1.4.0
 
 # Веб-сервер
 flask>=2.0.0

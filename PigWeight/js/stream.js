@@ -1,5 +1,5 @@
 // Конфигурация камер
-const config = {
+window.streamConfig = {
   cameras: [
     {
       id: 'cam1',
@@ -7,14 +7,14 @@ const config = {
       rtspUrl: 'rtsp://admin:Qwerty.123@10.15.6.24:554/1/2'  // Используем второй поток (704x576)
     }
   ],
-  apiUrl: 'http://localhost:5000/api'
+  apiUrl: 'http://localhost:8000'
 };
 
 let activeStream = null;
 let hlsPlayer = null;
 
 async function startStream(cameraId) {
-  const camera = config.cameras.find(cam => cam.id === cameraId);
+  const camera = window.streamConfig.cameras.find(cam => cam.id === cameraId);
   if (!camera) return;
 
   try {
@@ -24,7 +24,7 @@ async function startStream(cameraId) {
     }
 
     // Запрашиваем новый стрим
-    const response = await fetch(`${config.apiUrl}/stream/start`, {
+    const response = await fetch(`${window.streamConfig.apiUrl}/api/stream/start`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -98,8 +98,8 @@ async function stopStream(cameraId) {
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
   // Автоматически запускаем первую камеру
-  if (config.cameras.length > 0) {
-    startStream(config.cameras[0].id);
+  if (window.streamConfig.cameras.length > 0) {
+    startStream(window.streamConfig.cameras[0].id);
   }
 });
 

@@ -1,5 +1,4 @@
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import ssl
 import os
@@ -73,36 +72,53 @@ def convert_to_onnx():
     else:
         print(f"ONNX model already exists at {ONNX_PATH} and is up to date")
 
-class CORSRequestHandler(SimpleHTTPRequestHandler):
-    def end_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        super().end_headers()
+def create_app():
+    app = Flask(__name__, static_folder='PigWeight', static_url_path='')
+    CORS(app)
+    rtsp_manager = RTSPManager()
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'X-Requested-With')
-        self.end_headers()
+    @app.route('/')
+    def index():
+        return app.send_static_file('index.html')
+
+    @app.route('/api/stream/start', methods=['POST'])
+    def start_stream():
+        data = request.json
+        camera_id = data.get('camera_id')
+        rtsp_url = data.get('rtsp_url')
+        if not camera_id or not rtsp_url:
+            return jsonify({'error': 'Missing camera_id or rtsp_url'}), 400
+        stream_path = rtsp_manager.start_stream(camera_id, rtsp_url)
+        if stream_path:
+            return jsonify({'stream_url': stream_path})
+        return jsonify({'error': 'Failed to start stream'}), 500
+
+    @app.route('/api/stream/stop', methods=['POST'])
+    def stop_stream():
+        data = request.json
+        camera_id = data.get('camera_id')
+        if not camera_id:
+            return jsonify({'error': 'Missing camera_id'}), 400
+        rtsp_manager.stop_stream(camera_id)
+        return jsonify({'status': 'success'})
+
+    @app.route('/stream/<path:filename>')
+    def serve_stream(filename):
+        return send_from_directory('stream', filename)
+
+    return app
 
 def main():
-    # Download and convert model
     try:
+        install_requirements()
         download_model()
         convert_to_onnx()
     except Exception as e:
         print(f"Error preparing model: {str(e)}")
         return
-
-    # Start HTTP server
-    port = 8000
-    httpd = HTTPServer(('0.0.0.0', port), CORSRequestHandler)
-    print(f'Server started at http://localhost:{port}')
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nShutting down server...")
-        httpd.server_close()
+    print('Server starting at http://localhost:8000')
+    app = create_app()
+    app.run(host='0.0.0.0', port=8000)
 
 if __name__ == '__main__':
     main()
