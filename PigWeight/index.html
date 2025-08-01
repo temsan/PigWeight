@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>PigWeight MVP</title>
+  <style>
+  body {
+    background: #f6f8fa;
+    font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+  #main-container {
+    min-width: 0;
+    width: 100vw;
+    min-height: 100vh;
+    margin: 0;
+    background: #fff;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+  }
+  h2 {
+    margin-top: 0;
+    font-weight: 600;
+    color: #222;
+    letter-spacing: 1px;
+  }
+  #controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  #controls label {
+    font-weight: 500;
+    color: #444;
+  }
+  #controls select, #controls input, #controls button {
+    font-size: 1rem;
+    padding: 7px 12px;
+    border-radius: 7px;
+    border: 1px solid #ccc;
+    outline: none;
+    transition: border 0.2s, box-shadow 0.2s;
+  }
+  #controls select:focus, #controls input:focus {
+    border: 1.5px solid #0078d7;
+    box-shadow: 0 0 0 2px #0078d733;
+  }
+  #controls button {
+    background: #0078d7;
+    color: #fff;
+    border: none;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 2px 8px #0078d722;
+  }
+  #controls button:hover {
+    background: #005fa3;
+  }
+  .main-flex {
+    display: flex;
+    flex-direction: row;
+    gap: 2vw;
+    align-items: stretch;
+    justify-content: center;
+    margin: 0 auto 8px auto;
+    width: 100%;
+    max-width: 100vw;
+    height: auto;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow-x: hidden;
+    overflow-y: hidden;
+  }
+  .video-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 8px;
+    justify-content: center;
+  }
+  #videoStream {
+    flex-shrink: 0;
+    width: 62vw;
+    height: 100%;
+    max-width: 62vw;
+    max-height: 60vh;
+    aspect-ratio: 4/3;
+    display: block;
+    margin: 0;
+    border-radius: 12px;
+    box-shadow: 0 2px 24px #b6c6e633;
+    background: #f3f6fa;
+    min-width: 0;
+    min-height: 0;
+  }
+  #results {
+    min-width: 0;
+    max-width: 260px;
+    width: 18vw;
+    height: 100%;
+    min-width: 180px;
+    min-height: 0;
+    background: linear-gradient(135deg, #f7faff 60%, #e6f0fa 100%);
+    border-radius: 18px;
+    box-shadow: 0 4px 24px #b6c6e633;
+    padding: 1.2vw 0.8vw 0.8vw 0.8vw;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5vw;
+    align-items: stretch;
+    font-size: 2vw;
+    font-weight: 600;
+    color: #2a2a2a;
+    box-sizing: border-box;
+    justify-content: center;
+  }
+  #results label {
+    font-size: 1.1vw;
+    color: #6a7a8c;
+    font-weight: 500;
+    margin-right: 8px;
+  }
+  #results input {
+    font-size: 2vw;
+    width: 7vw;
+    min-width: 60px;
+    padding: 0.7vw 1vw;
+    border-radius: 10px;
+    border: 1.5px solid #b6c6e6;
+    background: #f7faff;
+    color: #2a2a2a;
+    font-weight: 600;
+    text-align: right;
+    box-shadow: 0 1px 4px #b6c6e622;
+    transition: border 0.2s, box-shadow 0.2s;
+  }
+  #results input:focus {
+    border: 1.5px solid #8bb6e6;
+    box-shadow: 0 0 0 2px #b6c6e644;
+  }
+  #saveManualBtn {
+    font-size: 1.2vw;
+    padding: 1vw 0;
+    margin-left: 0;
+    margin-top: 1vw;
+    align-self: stretch;
+    background: linear-gradient(90deg, #b6c6e6 0%, #e6f0fa 100%);
+    color: #2a2a2a;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    box-shadow: 0 2px 8px #b6c6e622;
+    transition: background 0.2s, color 0.2s;
+  }
+  #saveManualBtn:hover {
+    background: linear-gradient(90deg, #8bb6e6 0%, #d6e6fa 100%);
+    color: #0078d7;
+  }
+  #modelStatus {
+    margin: 10px 0 0 0;
+    color: #8bb6e6;
+    font-size: 1rem;
+  }
+  #history {
+    width: 100%;
+    margin-top: 10px;
+    border-radius: 10px;
+    overflow: auto;
+    box-shadow: 0 2px 8px #b6c6e622;
+    max-height: 18vh;
+    font-size: 1vw;
+    min-font-size: 12px;
+  }
+  #history th, #history td {
+    padding: 8px 12px;
+    text-align: center;
+  }
+  #history th {
+    background: #e6f0fa;
+    color: #2a2a2a;
+    font-weight: 600;
+  }
+  #history tr:nth-child(even) {
+    background: #f7faff;
+  }
+  #history tr:nth-child(odd) {
+    background: #f3f6fa;
+  }
+  .toggle-group {
+    display: flex;
+    gap: 10px;
+  }
+  .toggle-btn {
+    display: inline-block;
+    padding: 7px 18px;
+    border-radius: 7px;
+    border: 1.5px solid #0078d7;
+    background: #f6f8fa;
+    color: #0078d7;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+    box-shadow: 0 1px 4px #0078d711;
+    user-select: none;
+  }
+  .toggle-btn.selected {
+    background: #0078d7;
+    color: #fff;
+    box-shadow: 0 2px 8px #0078d733;
+  }
+  .toggle-btn:hover {
+    background: #e3eefd;
+    color: #005fa3;
+  }
+  .toggle-group input[type="radio"] {
+    display: none;
+  }
+  .unit-label {
+    font-size: 1.1vw;
+    color: #8ca0b8;
+    margin-left: 8px;
+    font-weight: 500;
+    vertical-align: middle;
+  }
+  #videoCanvas {
+    position: absolute;
+    left: 0; top: 0;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .video-wrapper {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+  }
+  #debugDetections {
+    font-size: 0.98rem;
+    color: #444;
+    background: #f7faff;
+    border-radius: 8px;
+    margin: 8px auto 0 auto;
+    padding: 8px 14px;
+    max-width: 700px;
+    word-break: break-all;
+    box-shadow: 0 2px 8px #b6c6e622;
+  }
+  #fpsInfo {
+    font-size: 1.05rem;
+    color: #0078d7;
+    margin: 4px auto 0 auto;
+    text-align: center;
+    font-weight: 500;
+  }
+  #weightUpdateTime {
+    font-size: 1.05rem;
+    color: #8bb6e6;
+    margin: 8px 0 0 0;
+    text-align: left;
+    font-weight: 500;
+  }
+  @media (max-width: 900px) {
+    #main-container { min-width: 0; max-width: 100vw; }
+    .main-flex { flex-direction: column; gap: 10px; height: auto; overflow-y: hidden; }
+    #videoStream { width: 100vw; max-width: 100vw; height: auto; }
+    #results { width: 100vw; min-width: 0; max-width: 100vw; align-items: stretch; font-size: 1.1rem; }
+    #results label { font-size: 1rem; }
+    #results input { font-size: 1.1rem; width: 80px; min-width: 50px; }
+    #saveManualBtn { font-size: 1rem; padding: 10px 0; }
+    #history { max-height: 120px; font-size: 0.95rem; }
+  }
+  @media (max-width: 700px) {
+    #main-container { padding: 10px; }
+    #controls { flex-direction: column; gap: 8px; }
+    #results { flex-direction: column; gap: 8px; }
+    #videoStream { width: 100%; height: auto; }
+  }
+  </style>
+</head>
+<body>
+  <div id="main-container">
+    <h2>PigWeight Monitor</h2>
+    <div id="controls" style="display:flex; flex-direction:row; align-items:flex-end; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <span style="font-weight:500; color:#444;">Камера:</span>
+        <div id="cameraRadios" class="toggle-group"></div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:4px; margin-left:1em;">
+        <span style="font-weight:500; color:#444;">Модель:</span>
+        <div id="modelRadios" class="toggle-group"></div>
+      </div>
+      <div style="display:flex; flex-direction:column; justify-content:flex-end; height:100%;">
+        <button id="countBtn" style="min-width:120px;">Посчитать</button>
+      </div>
+    </div>
+    <div class="main-flex">
+      <div style="display:flex; flex-direction:column; align-items:center;">
+        <div class="video-controls">
+          <input type="file" id="videoFileInput" accept="video/mp4,video/webm,video/ogg">
+          <button id="videoPlayPauseBtn">Стоп</button>
+          <label style="margin-left:16px; font-size:1rem;">
+            <input type="checkbox" id="showBoxesCheckbox" style="vertical-align:middle; margin-right:4px;">Показывать рамки и номера
+          </label>
+        </div>
+        <div class="video-wrapper" style="width:100%;height:100%;max-width:100%;">
+          <video id="videoStream" width="100%" height="100%" style="max-width:100%; border-radius:12px;" autoplay loop muted playsinline></video>
+          <canvas id="videoCanvas"></canvas>
+        </div>
+        <div id="fpsInfo"></div>
+        <div id="debugDetections"></div>
+      </div>
+      <div id="results">
+        <div id="weightUpdateTime"></div>
+        <div><label for="manualCount">Количество:</label><input type="number" id="manualCount" min="1"><span class="unit-label">шт.</span></div>
+        <div><label for="manualTotalWeight">Общий вес:</label><input type="number" id="manualTotalWeight" min="0" step="0.1"><span class="unit-label">кг</span></div>
+        <div><label for="manualAvgWeight">Средний вес:</label><input type="number" id="manualAvgWeight" min="0" step="0.01"><span class="unit-label">кг</span></div>
+        <button id="saveManualBtn">Сохранить</button>
+      </div>
+    </div>
+    <div id="modelStatus"></div>
+    <div id="debugModels" style="margin:1em 0; color:#555;"></div>
+    <table id="history">
+      <thead>
+        <tr><th>Дата</th><th>Камера</th><th>Кол-во</th><th>Общий вес</th><th>Средний вес</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <script>
+    // --- Конфиг для MVP (можно заменить на fetch('/config')) ---
+    const config = {
+      cameras: [
+        {id: 'cam1', name: 'Камера 1', url: 'http://localhost:8081/camera1.mjpg'},
+        {id: 'cam2', name: 'Камера 2', url: 'http://127.0.0.1:8081/cam2.mjpg'}
+      ],
+      weight_api_url: 'http://127.0.0.1:5000/weight'
+    };
+
+    // --- UI ---
+    const video = document.getElementById('videoStream');
+    const videoCanvas = document.getElementById('videoCanvas');
+    const showBoxesCheckbox = document.getElementById('showBoxesCheckbox');
+    const videoFileInput = document.getElementById('videoFileInput');
+    const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
+    const countBtn = document.getElementById('countBtn');
+    const manualCount = document.getElementById('manualCount');
+    const manualTotalWeight = document.getElementById('manualTotalWeight');
+    const manualAvgWeight = document.getElementById('manualAvgWeight');
+    const historyTable = document.getElementById('history').querySelector('tbody');
+    const cameraRadios = document.getElementById('cameraRadios');
+    const modelRadios = document.getElementById('modelRadios');
+    let selectedCameraId = null;
+    let selectedModel = null;
+    let cocoModel = null;
+    let yoloSession = null;
+    let ssdModel = null;
+    let isVideoPlaying = true;
+    const debugDetections = document.getElementById('debugDetections');
+    let realtimeInterval = null;
+    const fpsInfo = document.getElementById('fpsInfo');
+    let genTimes = [];
+    const weightUpdateTime = document.getElementById('weightUpdateTime');
+    let weightUpdateTimes = [];
+
+    // --- Радиокнопки для камер ---
+    cameraRadios.innerHTML = '';
+    config.cameras.forEach((cam, idx) => {
+      const id = 'cam_radio_' + cam.id;
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'cameraRadio';
+      radio.value = cam.id;
+      radio.id = id;
+      if (idx === 0) radio.checked = true;
+      radio.style.display = 'none';
+      radio.addEventListener('change', () => {
+        if (radio.checked) {
+          selectedCameraId = cam.id;
+          // Если выбрана камера, сбрасываем видео
+          if (video.srcObject) {
+            video.srcObject = null;
+            video.removeAttribute('src');
+          }
+          video.src = cam.url;
+          video.load();
+          // Всегда play, всегда isVideoPlaying = true
+          video.onloadeddata = () => {
+            video.play();
+            isVideoPlaying = true;
+            videoPlayPauseBtn.textContent = 'Стоп';
+            startRealtimeInference();
+          };
+          // Если поток не грузится — показать ошибку
+          video.onerror = () => {
+            modelStatus.textContent = 'Ошибка загрузки потока камеры!';
+          };
+          // На всякий случай сразу play (для быстрых потоков)
+          video.play();
+          isVideoPlaying = true;
+          videoPlayPauseBtn.textContent = 'Стоп';
+          // Обновить стили
+          Array.from(cameraRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
+          label.classList.add('selected');
+        }
+      });
+      const label = document.createElement('label');
+      label.htmlFor = id;
+      label.textContent = cam.name;
+      label.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
+      cameraRadios.appendChild(radio);
+      cameraRadios.appendChild(label);
+    });
+    // Установить первую камеру по умолчанию
+    selectedCameraId = config.cameras[0].id;
+    video.src = config.cameras[0].url;
+    video.load();
+    video.onloadeddata = () => {
+      video.play();
+      isVideoPlaying = true;
+      videoPlayPauseBtn.textContent = 'Стоп';
+      startRealtimeInference();
+    };
+
+    // --- Радиокнопки для моделей ---
+    const models = [
+      {value: 'coco-ssd', label: 'COCO-SSD', type: 'tfjs'},
+      {value: 'yolo11n', label: 'YOLO11n (ONNX)', type: 'onnx', url: 'http://localhost:8000/models/yolo11n.onnx'},
+      {value: 'ssd-mobilenet', label: 'SSD MobileNet V2 (COCO)', type: 'tfjs'}
+    ];
+    modelRadios.innerHTML = '';
+    models.forEach((m, idx) => {
+      const id = 'model_radio_' + m.value;
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'modelRadio';
+      radio.value = m.value;
+      radio.id = id;
+      if (idx === 0) radio.checked = true;
+      radio.style.display = 'none';
+      radio.addEventListener('change', async () => {
+        if (radio.checked) {
+          selectedModel = m.value;
+          // Прозрачная загрузка кастомных весов
+          if (m.type === 'onnx' && m.url) {
+            if (!yoloSession || yoloSession.modelUrl !== m.url) {
+              modelStatus.textContent = 'Загрузка весов ' + m.label + '...';
+              try {
+                yoloSession = await ort.InferenceSession.create(m.url);
+                yoloSession.modelUrl = m.url; // помечаем url для повторной загрузки
+                modelStatus.textContent = 'Модель ' + m.label + ' загружена!';
+              } catch (e) {
+                modelStatus.textContent = 'Ошибка загрузки весов ' + m.label + ': ' + e;
+                yoloSession = null;
+              }
+            }
+          }
+          startRealtimeInference();
+          runRealtimeInference();
+          setTimeout(runRealtimeInference, 200);
+          setTimeout(runRealtimeInference, 400);
+          Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
+          label.classList.add('selected');
+        }
+      });
+      const label = document.createElement('label');
+      label.htmlFor = id;
+      label.textContent = m.label;
+      label.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
+      modelRadios.appendChild(radio);
+      modelRadios.appendChild(label);
+    });
+    // Установить YOLO11n модель по умолчанию
+    selectedModel = models[1].value;
+    // Выбрать соответствующую радиокнопку
+    const yoloRadio = document.querySelector('input[name="modelRadio"][value="yolo11n"]');
+    if (yoloRadio) {
+      yoloRadio.checked = true;
+      // Обновить стили кнопок
+      Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
+      const yoloLabel = document.querySelector('label[for="' + yoloRadio.id + '"]');
+      if (yoloLabel) yoloLabel.classList.add('selected');
+    }
+
+    // --- Съём кадра из MJPEG ---
+    function grabFrame() {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    }
+
+    // --- Заглушки моделей (ручная имитация) ---
+    // YOLOv8n: считает количество ярких пятен (по порогу яркости)
+    async function runCVModel_yolov8n(imageData) {
+      const data = imageData.data;
+      let brightPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        // Яркость = (R+G+B)/3
+        const brightness = (data[i] + data[i+1] + data[i+2]) / 3;
+        if (brightness > 200) brightPixels++;
+      }
+      // Эмпирически: 1 особь на 5000 ярких пикселей
+      return Math.max(1, Math.round(brightPixels / 5000));
+    }
+    // SSD MobileNet V2: считает среднюю яркость и делит на константу
+    async function runCVModel_ssd_mobilenet(imageData) {
+      const data = imageData.data;
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += (data[i] + data[i+1] + data[i+2]) / 3;
+      }
+      const avg = sum / (data.length / 4);
+      // Эмпирически: 1 особь на каждые 20 единиц средней яркости
+      return Math.max(1, Math.round(avg / 20));
+    }
+    // Tiny YOLOv4: считает количество тёмных областей (по порогу)
+    async function runCVModel_tiny_yolo(imageData) {
+      const data = imageData.data;
+      let darkPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const brightness = (data[i] + data[i+1] + data[i+2]) / 3;
+        if (brightness < 50) darkPixels++;
+      }
+      // Эмпирически: 1 особь на 7000 тёмных пикселей
+      return Math.max(1, Math.round(darkPixels / 7000));
+    }
+    // --- Универсальный вызов ---
+    async function runCVModelAll(imageData) {
+      const yolov8n = await runCVModel_yolov8n(imageData);
+      const ssd = await runCVModel_ssd_mobilenet(imageData);
+      const tiny = await runCVModel_tiny_yolo(imageData);
+      return {yolov8n, ssd, tiny};
+    }
+    // --- Подсчёт особей через COCO-SSD ---
+    async function runCVModel_coco(imageElement) {
+      if (!cocoModel) {
+        modelStatus.textContent = 'Модель COCO-SSD не загружена!';
+        return 0;
+      }
+      // Получаем предсказания
+      const predictions = await cocoModel.detect(imageElement);
+      // В COCO-SSD нет класса 'pig', используем 'sheep', 'cow', 'dog', 'cat', 'horse', 'bear', 'zebra', 'giraffe', 'bird', 'person', 'animal' (если есть)
+      // Для теста считаем все 'sheep', 'cow', 'dog', 'cat', 'horse', 'bear', 'zebra', 'giraffe', 'bird', 'person' как "особь"
+      const animalClasses = ['sheep','cow','dog','cat','horse','bear','zebra','giraffe','bird','person'];
+      const count = predictions.filter(p => animalClasses.includes(p.class) && p.score > 0.5).length;
+      return count;
+    }
+    // --- Подсчёт особей через YOLOv8n (ONNX.js) ---
+    async function runCVModel_yolov8n(imageElement) {
+      if (!yoloSession) {
+        modelStatus.textContent = 'Модель YOLOv8n не загружена!';
+        return 0;
+      }
+      // Преобразуем <img> в тензор 1x3x640x640 float32
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 640;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(imageElement, 0, 0, 640, 640);
+      const imgData = ctx.getImageData(0, 0, 640, 640);
+      const input = new Float32Array(1 * 3 * 640 * 640);
+      for (let y = 0; y < 640; y++) {
+        for (let x = 0; x < 640; x++) {
+          const idx = (y * 640 + x) * 4;
+          const r = imgData.data[idx] / 255;
+          const g = imgData.data[idx + 1] / 255;
+          const b = imgData.data[idx + 2] / 255;
+          input[0 * 3 * 640 * 640 + 0 * 640 * 640 + y * 640 + x] = r;
+          input[0 * 3 * 640 * 640 + 1 * 640 * 640 + y * 640 + x] = g;
+          input[0 * 3 * 640 * 640 + 2 * 640 * 640 + y * 640 + x] = b;
+        }
+      }
+      const tensor = new ort.Tensor('float32', input, [1, 3, 640, 640]);
+      const feeds = {images: tensor};
+      const results = await yoloSession.run(feeds);
+      // YOLOv8n: output 'output0' [1, N, 85] (x, y, w, h, conf, 80 classes)
+      const output = results[Object.keys(results)[0]].data;
+      const numDetections = output.length / 85;
+      let count = 0;
+      for (let i = 0; i < numDetections; i++) {
+        const conf = output[i * 85 + 4];
+        // Класс pig в COCO отсутствует, считаем все animal-like классы (15:dog, 16:horse, 17:sheep, 18:cow, 20:elephant, 21:bear, 22:zebra, 23:giraffe)
+        let maxClass = -1, maxProb = 0;
+        for (let c = 0; c < 80; c++) {
+          const prob = output[i * 85 + 5 + c];
+          if (prob > maxProb) { maxProb = prob; maxClass = c; }
+        }
+        if (conf > 0.5 && [15,16,17,18,20,21,22,23].includes(maxClass)) count++;
+      }
+      return count;
+    }
+    // --- Подсчёт особей через SSD MobileNet V2 (TF.js) ---
+    async function runCVModel_ssd(imageElement) {
+      if (!ssdModel) {
+        modelStatus.textContent = 'Модель SSD MobileNet V2 не загружена!';
+        return 0;
+      }
+      const tfimg = tf.browser.fromPixels(imageElement);
+      const expanded = tfimg.expandDims(0);
+      const result = await ssdModel.executeAsync(expanded);
+      // result[0] - detection_boxes, result[1] - detection_scores, result[2] - detection_classes, result[3] - num_detections
+      const scores = result[1].dataSync();
+      const classes = result[2].dataSync();
+      let count = 0;
+      // Классы animal-like: 17 (cat), 18 (dog), 19 (horse), 20 (sheep), 21 (cow), 1 (person)
+      for (let i = 0; i < scores.length; i++) {
+        if (scores[i] > 0.5 && [17,18,19,20,21,1].includes(classes[i])) count++;
+      }
+      tfimg.dispose();
+      expanded.dispose();
+      result.forEach(t => t.dispose && t.dispose());
+      return count;
+    }
+    // --- Анализ трёх кадров и усреднение ---
+    async function analyzeThreeFramesCoco() {
+      const results = [];
+      for (let i = 0; i < 3; i++) {
+        // Для COCO-SSD нужен не imageData, а сам <img>
+        const count = await runCVModel_coco(video);
+        results.push(count);
+        await new Promise(r => setTimeout(r, 200));
+      }
+      return Math.round(results.reduce((a, b) => a + b, 0) / results.length);
+    }
+
+    // --- Отрисовка рамок и номеров ---
+    function drawBoxes(boxes) {
+      if (!showBoxesCheckbox.checked) {
+        videoCanvas.width = 0; videoCanvas.height = 0;
+        return;
+      }
+      const w = video.videoWidth || 640;
+      const h = video.videoHeight || 480;
+      videoCanvas.width = w;
+      videoCanvas.height = h;
+      const ctx = videoCanvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+      
+        // Используем только класс cow как наиболее похожий на свиней
+      const pigBoxes = boxes.filter(box => box.class === 19); // 19:cow      // Сначала рисуем полупрозрачные цветные прямоугольники
+      pigBoxes.forEach(box => {
+        const color = '#ff6b6b'; // красный для всех детекций
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.2; // полупрозрачная заливка
+        ctx.fillRect(box.x, box.y, box.w, box.h);
+      });
+      
+      // Затем рисуем рамки и номера
+      ctx.lineWidth = 3;
+      ctx.font = 'bold 22px Segoe UI, Arial';
+      ctx.textBaseline = 'top';
+      pigBoxes.forEach((box, i) => {
+        // Рамка
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.85;
+        ctx.strokeRect(box.x, box.y, box.w, box.h);
+        
+        // Фон для номера
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = color;
+        ctx.fillRect(box.x, box.y-26, 36, 24);
+        
+        // Номер
+        ctx.fillStyle = '#fff';
+        ctx.fillText((i+1).toString(), box.x+8, box.y-24);
+        
+        // Подпись класса
+        const label = 'pig';
+        ctx.font = 'bold 16px Segoe UI, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(box.x + box.w - 50, box.y-26, 50, 24);
+        ctx.fillStyle = color;
+        ctx.fillText(label, box.x + box.w - 45, box.y-24);
+      });
+    }
+
+    // --- Модифицированный инференс с рамками ---
+    async function runRealtimeInference() {
+      // Время генерации (инференса)
+      const t0 = performance.now();
+      if (video.readyState < 2) {
+        drawBoxes([]);
+        debugDetections.innerHTML = '';
+        return;
+      }
+      let count = 0;
+      let boxes = [];
+      let debugInfo = '';
+      // --- Кастомные модели по свиньям ---
+      if (selectedModel === 'yolov8n-pig') {
+        // YOLOv8n (Pig, OpenImages): класс pig = 15
+        if (!yoloSession) { debugDetections.innerHTML = 'Модель не загружена!'; return; }
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 640;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, 640, 640);
+        const imgData = ctx.getImageData(0, 0, 640, 640);
+        const input = new Float32Array(1 * 3 * 640 * 640);
+        for (let y = 0; y < 640; y++) {
+          for (let x = 0; x < 640; x++) {
+            const idx = (y * 640 + x) * 4;
+            const r = imgData.data[idx] / 255;
+            const g = imgData.data[idx + 1] / 255;
+            const b = imgData.data[idx + 2] / 255;
+            input[0 * 3 * 640 * 640 + 0 * 640 * 640 + y * 640 + x] = r;
+            input[0 * 3 * 640 * 640 + 1 * 640 * 640 + y * 640 + x] = g;
+            input[0 * 3 * 640 * 640 + 2 * 640 * 640 + y * 640 + x] = b;
+          }
+        }
+        const tensor = new ort.Tensor('float32', input, [1, 3, 640, 640]);
+        const feeds = {images: tensor};
+        const results = await yoloSession.run(feeds);
+        const output = results[Object.keys(results)[0]].data;
+        const numDetections = output.length / 85;
+        let dets = [];
+        let debugArr = [];
+        for (let i = 0; i < numDetections; i++) {
+          const conf = output[i * 85 + 4];
+          let maxClass = -1, maxProb = 0;
+          for (let c = 0; c < 80; c++) {
+            const prob = output[i * 85 + 5 + c];
+            if (prob > maxProb) { maxProb = prob; maxClass = c; }
+          }
+          if (conf > 0.05) {
+            const x = output[i * 85 + 0] * w / 640 - (output[i * 85 + 2] * w / 640) / 2;
+            const y = output[i * 85 + 1] * h / 640 - (output[i * 85 + 3] * h / 640) / 2;
+            const bw = output[i * 85 + 2] * w / 640;
+            const bh = output[i * 85 + 3] * h / 640;
+            debugArr.push(`${i+1}. class: <b>${maxClass}</b>, conf: ${conf.toFixed(2)}, bbox: [${x.toFixed(0)}, ${y.toFixed(0)}, ${bw.toFixed(0)}, ${bh.toFixed(0)}]`);
+          }
+          if (conf > 0.5 && maxClass === 15) { // pig = 15
+            const x = output[i * 85 + 0] * w / 640 - (output[i * 85 + 2] * w / 640) / 2;
+            const y = output[i * 85 + 1] * h / 640 - (output[i * 85 + 3] * h / 640) / 2;
+            const bw = output[i * 85 + 2] * w / 640;
+            const bh = output[i * 85 + 3] * h / 640;
+            dets.push({x, y, w: bw, h: bh});
+          }
+        }
+        count = dets.length;
+        boxes = dets;
+        debugInfo = '<b>YOLOv8n (Pig, OpenImages) детекции:</b><br>' + debugArr.join('<br>');
+      } else if (selectedModel === 'yolov5-agripest') {
+        // YOLOv5 (Pig, AgriPest): класс pig = 0
+        if (!yoloSession) { debugDetections.innerHTML = 'Модель не загружена!'; return; }
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 640;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, 640, 640);
+        const imgData = ctx.getImageData(0, 0, 640, 640);
+        const input = new Float32Array(1 * 3 * 640 * 640);
+        for (let y = 0; y < 640; y++) {
+          for (let x = 0; x < 640; x++) {
+            const idx = (y * 640 + x) * 4;
+            const r = imgData.data[idx] / 255;
+            const g = imgData.data[idx + 1] / 255;
+            const b = imgData.data[idx + 2] / 255;
+            input[0 * 3 * 640 * 640 + 0 * 640 * 640 + y * 640 + x] = r;
+            input[0 * 3 * 640 * 640 + 1 * 640 * 640 + y * 640 + x] = g;
+            input[0 * 3 * 640 * 640 + 2 * 640 * 640 + y * 640 + x] = b;
+          }
+        }
+        const tensor = new ort.Tensor('float32', input, [1, 3, 640, 640]);
+        const feeds = {images: tensor};
+        const results = await yoloSession.run(feeds);
+        const output = results[Object.keys(results)[0]].data;
+        const numDetections = output.length / 85;
+        let dets = [];
+        let debugArr = [];
+        for (let i = 0; i < numDetections; i++) {
+          const conf = output[i * 85 + 4];
+          let maxClass = -1, maxProb = 0;
+          for (let c = 0; c < 80; c++) {
+            const prob = output[i * 85 + 5 + c];
+            if (prob > maxProb) { maxProb = prob; maxClass = c; }
+          }
+          if (conf > 0.05) {
+            const x = output[i * 85 + 0] * w / 640 - (output[i * 85 + 2] * w / 640) / 2;
+            const y = output[i * 85 + 1] * h / 640 - (output[i * 85 + 3] * h / 640) / 2;
+            const bw = output[i * 85 + 2] * w / 640;
+            const bh = output[i * 85 + 3] * h / 640;
+            debugArr.push(`${i+1}. class: <b>${maxClass}</b>, conf: ${conf.toFixed(2)}, bbox: [${x.toFixed(0)}, ${y.toFixed(0)}, ${bw.toFixed(0)}, ${bh.toFixed(0)}]`);
+          }
+          if (conf > 0.5 && maxClass === 0) { // pig = 0
+            const x = output[i * 85 + 0] * w / 640 - (output[i * 85 + 2] * w / 640) / 2;
+            const y = output[i * 85 + 1] * h / 640 - (output[i * 85 + 3] * h / 640) / 2;
+            const bw = output[i * 85 + 2] * w / 640;
+            const bh = output[i * 85 + 3] * h / 640;
+            dets.push({x, y, w: bw, h: bh});
+          }
+        }
+        count = dets.length;
+        boxes = dets;
+        debugInfo = '<b>YOLOv5 (Pig, AgriPest) детекции:</b><br>' + debugArr.join('<br>');
+      }
+      // --- YOLO11n модель ---
+      else if (selectedModel === 'yolo11n') {
+        if (!yoloSession) { debugDetections.innerHTML = 'Модель YOLO11n не загружена!'; return; }
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 640;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, 640, 640);
+        const imgData = ctx.getImageData(0, 0, 640, 640);
+        const input = new Float32Array(1 * 3 * 640 * 640);
+        for (let y = 0; y < 640; y++) {
+          for (let x = 0; x < 640; x++) {
+            const idx = (y * 640 + x) * 4;
+            const r = imgData.data[idx] / 255;
+            const g = imgData.data[idx + 1] / 255;
+            const b = imgData.data[idx + 2] / 255;
+            input[0 * 3 * 640 * 640 + 0 * 640 * 640 + y * 640 + x] = r;
+            input[0 * 3 * 640 * 640 + 1 * 640 * 640 + y * 640 + x] = g;
+            input[0 * 3 * 640 * 640 + 2 * 640 * 640 + y * 640 + x] = b;
+          }
+        }
+        const tensor = new ort.Tensor('float32', input, [1, 3, 640, 640]);
+        const feeds = {images: tensor};
+        const results = await yoloSession.run(feeds);
+        const output = results[Object.keys(results)[0]].data;
+        const numDetections = output.length / 85;
+        let dets = [];
+        let classCounts = {};
+        let classConfs = {};
+        // COCO class names (80):
+        const cocoNames = [
+          'person','bicycle','car','motorcycle','airplane','bus','train','truck','boat','traffic light',
+          'fire hydrant','stop sign','parking meter','bench','bird','cat','dog','horse','sheep','cow',
+          'elephant','bear','zebra','giraffe','backpack','umbrella','handbag','tie','suitcase','frisbee',
+          'skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket','bottle',
+          'wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange',
+          'broccoli','carrot','hot dog','pizza','donut','cake','chair','couch','potted plant','bed',
+          'dining table','toilet','tv','laptop','mouse','remote','keyboard','cell phone','microwave','oven',
+          'toaster','sink','refrigerator','book','clock','vase','scissors','teddy bear','hair drier','toothbrush'
+        ];
+        for (let i = 0; i < numDetections; i++) {
+          const conf = output[i * 85 + 4];
+          let maxClass = -1, maxProb = 0;
+          for (let c = 0; c < 80; c++) {
+            const prob = output[i * 85 + 5 + c];
+            if (prob > maxProb) { maxProb = prob; maxClass = c; }
+          }
+          if (conf > 0.15) {
+            const x = output[i * 85 + 0] * w / 640 - (output[i * 85 + 2] * w / 640) / 2;
+            const y = output[i * 85 + 1] * h / 640 - (output[i * 85 + 3] * h / 640) / 2;
+            const bw = output[i * 85 + 2] * w / 640;
+            const bh = output[i * 85 + 3] * h / 640;
+            dets.push({x, y, w: bw, h: bh, class: maxClass, conf: conf});
+            const name = cocoNames[maxClass] || maxClass;
+            classCounts[name] = (classCounts[name] || 0) + 1;
+            if (!classConfs[name]) classConfs[name] = [];
+            classConfs[name].push(conf);
+          }
+        }
+        // Для поля count учитываем животных (классы 15-23, включая pig=18)
+        // 15:dog, 16:cat, 17:horse, 18:sheep, 19:cow, 20:elephant, 21:bear, 22:zebra, 23:giraffe
+        // Считаем только cow как наиболее похожий класс на свиней
+        count = dets.filter(d => d.class === 19).length; // 19:cow
+        boxes = dets; // передаем все детекции, фильтрация будет в drawBoxes
+        // Сначала показываем pig класс (sheep в COCO)
+        let pigSummary = [];
+        if (classCounts['sheep']) {
+          const avgConf = (classConfs['sheep'].reduce((a,b)=>a+b,0)/classConfs['sheep'].length).toFixed(2);
+          pigSummary.push(`pig (sheep): <b>${classCounts['sheep']}</b> (conf: ${avgConf})`);
+        }
+
+        // Затем показываем другие animal-like классы
+        const animalClasses = ['dog','cat','horse','cow','elephant','bear','zebra','giraffe'];
+        let animalSummary = Object.entries(classCounts)
+          .filter(([name]) => animalClasses.includes(name))
+          .map(([name, cnt]) => {
+            const avgConf = (classConfs[name].reduce((a,b)=>a+b,0)/classConfs[name].length).toFixed(2);
+            return `${name}: <b>${cnt}</b> (conf: ${avgConf})`;
+          });
+        
+        // Затем добавляем топ-5 остальных классов с высокой уверенностью
+        let otherSummary = Object.entries(classCounts)
+          .filter(([name]) => !animalClasses.includes(name))
+          .sort((a,b) => {
+            const aConf = classConfs[a[0]].reduce((x,y)=>x+y,0)/classConfs[a[0]].length;
+            const bConf = classConfs[b[0]].reduce((x,y)=>x+y,0)/classConfs[b[0]].length;
+            return bConf - aConf;
+          })
+          .slice(0,5)
+          .map(([name, cnt]) => {
+            const avgConf = (classConfs[name].reduce((a,b)=>a+b,0)/classConfs[name].length).toFixed(2);
+            return `${name}: <b>${cnt}</b> (conf: ${avgConf})`;
+          });
+        
+        let summary = [
+          pigSummary.length ? '<b>Pigs:</b> ' + pigSummary.join(', ') : '',
+          animalSummary.length ? '<b>Other animals:</b> ' + animalSummary.join(', ') : '',
+          otherSummary.length ? '<b>Other top-5:</b> ' + otherSummary.join(', ') : ''
+        ].filter(s => s).join('<br>');
+        if (!summary) summary = 'Нет детекций';
+        debugInfo = `<b>YOLO11n сводка (топ-5 классов):</b> ${summary}`;
+      }
+      // --- Стандартные публичные модели ---
+      else if (selectedModel === 'coco-ssd') {
+        if (!cocoModel) return;
+        const predictions = await cocoModel.detect(video);
+        const animalClasses = ['sheep','cow','dog','cat','horse','bear','zebra','giraffe','bird','person'];
+        const filtered = predictions.filter(p => animalClasses.includes(p.class) && p.score > 0.5);
+        count = filtered.length;
+        boxes = filtered.map(p => ({x: p.bbox[0], y: p.bbox[1], w: p.bbox[2], h: p.bbox[3]}));
+        debugInfo = '<b>COCO-SSD детекции:</b><br>' +
+          predictions.map((p,i) =>
+            `${i+1}. class: <b>${p.class}</b>, score: ${p.score.toFixed(2)}, bbox: [${p.bbox.map(x=>x.toFixed(0)).join(', ')}]`)
+          .join('<br>');
+      } else if (selectedModel === 'yolov8n') {
+        if (!yoloSession) return;
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 640;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, 640, 640);
+        const imgData = ctx.getImageData(0, 0, 640, 640);
+        const input = new Float32Array(1 * 3 * 640 * 640);
+        for (let y = 0; y < 640; y++) {
+          for (let x = 0; x < 640; x++) {
+            const idx = (y * 640 + x) * 4;
+            const r = imgData.data[idx] / 255;
+            const g = imgData.data[idx + 1] / 255;
+            const b = imgData.data[idx + 2] / 255;
+            input[0 * 3 * 640 * 640 + 0 * 640 * 640 + y * 640 + x] = r;
+            input[0 * 3 * 640 * 640 + 1 * 640 * 640 + y * 640 + x] = g;
+            input[0 * 3 * 640 * 640 + 2 * 640 * 640 + y * 640 + x] = b;
+          }
+        }
+        const tensor = new ort.Tensor('float32', input, [1, 3, 640, 640]);
+        const feeds = {images: tensor};
+        const results = await yoloSession.run(feeds);
+        const output = results[Object.keys(results)[0]].data;
+        const numDetections = output.length / 85;
+        let dets = [];
+        let debugArr = [];
+        for (let i = 0; i < numDetections; i++) {
+          const conf = output[i * 85 + 4];
+          let maxClass = -1, maxProb = 0;
+          for (let c = 0; c < 80; c++) {
+            const prob = output[i * 85 + 5 + c];
+            if (prob > maxProb) { maxProb = prob; maxClass = c; }
+          }
+          if (conf > 0.05) { // показываем все, но рамки только для animal-like
+            // YOLO bbox: x_center, y_center, w, h (нормированные)
+            const x = output[i * 85 + 0] * w / 640 - (output[i * 85 + 2] * w / 640) / 2;
+            const y = output[i * 85 + 1] * h / 640 - (output[i * 85 + 3] * h / 640) / 2;
+            const bw = output[i * 85 + 2] * w / 640;
+            const bh = output[i * 85 + 3] * h / 640;
+            debugArr.push(`${i+1}. class: <b>${maxClass}</b>, conf: ${conf.toFixed(2)}, bbox: [${x.toFixed(0)}, ${y.toFixed(0)}, ${bw.toFixed(0)}, ${bh.toFixed(0)}]`);
+          }
+          if (conf > 0.5 && [15,16,17,18,20,21,22,23].includes(maxClass)) {
+            dets.push({x, y, w: bw, h: bh});
+          }
+        }
+        count = dets.length;
+        boxes = dets;
+        debugInfo = '<b>YOLOv8n детекции:</b><br>' + debugArr.join('<br>');
+      } else if (selectedModel === 'ssd-mobilenet') {
+        if (!ssdModel) return;
+        const tfimg = tf.browser.fromPixels(video);
+        const expanded = tfimg.expandDims(0);
+        const result = await ssdModel.executeAsync(expanded);
+        const scores = result[1].dataSync();
+        const classes = result[2].dataSync();
+        const boxesRaw = result[0].dataSync();
+        let dets = [];
+        let debugArr = [];
+        for (let i = 0; i < scores.length; i++) {
+          if (scores[i] > 0.05) {
+            const ymin = boxesRaw[i*4+0], xmin = boxesRaw[i*4+1], ymax = boxesRaw[i*4+2], xmax = boxesRaw[i*4+3];
+            debugArr.push(`${i+1}. class: <b>${classes[i]}</b>, score: ${scores[i].toFixed(2)}, bbox: [${(xmin*video.videoWidth).toFixed(0)}, ${(ymin*video.videoHeight).toFixed(0)}, ${((xmax-xmin)*video.videoWidth).toFixed(0)}, ${((ymax-ymin)*video.videoHeight).toFixed(0)}]`);
+          }
+          if (scores[i] > 0.5 && [17,18,19,20,21,1].includes(classes[i])) {
+            const ymin = boxesRaw[i*4+0], xmin = boxesRaw[i*4+1], ymax = boxesRaw[i*4+2], xmax = boxesRaw[i*4+3];
+            dets.push({
+              x: xmin * video.videoWidth,
+              y: ymin * video.videoHeight,
+              w: (xmax-xmin) * video.videoWidth,
+              h: (ymax-ymin) * video.videoHeight
+            });
+          }
+        }
+        count = dets.length;
+        boxes = dets;
+        debugInfo = '<b>SSD MobileNet V2 детекции:</b><br>' + debugArr.join('<br>');
+        tfimg.dispose();
+        expanded.dispose();
+        result.forEach(t => t.dispose && t.dispose());
+      }
+      manualCount.value = count;
+      // Автоматически пересчитываем средний вес, если общий вес есть
+      const total = parseFloat(manualTotalWeight.value);
+      if (count > 0 && total > 0) {
+        manualAvgWeight.value = (total / count).toFixed(2);
+      }
+      drawBoxes(boxes);
+      debugDetections.innerHTML = debugInfo || '<span style="color:#888">Нет детекций</span>';
+      const t1 = performance.now();
+      genTimes.push(t1 - t0);
+      if (genTimes.length > 10) genTimes.shift();
+      const avgGen = genTimes.length ? (genTimes.reduce((a, b) => a + b, 0) / genTimes.length) : 0;
+      fpsInfo.textContent = `Время генерации: ${avgGen.toFixed(0)} мс`;
+    }
+
+    function startRealtimeInference() {
+      if (realtimeInterval) clearInterval(realtimeInterval);
+      runRealtimeInference(); // сразу обновить результат и рамки
+      realtimeInterval = setInterval(runRealtimeInference, 2000);
+    }
+    window.onload = startRealtimeInference;
+
+    // --- Кнопка "Посчитать" ---
+    countBtn.addEventListener('click', () => {
+      runRealtimeInference();
+    });
+
+    // --- Сохранение ручного ввода ---
+    saveManualBtn.onclick = () => {
+      const count = parseInt(manualCount.value);
+      const totalWeight = parseFloat(manualTotalWeight.value);
+      let avgWeight = parseFloat(manualAvgWeight.value);
+      if (!count || !totalWeight) {
+        alert('Введите количество и общий вес!');
+        return;
+      }
+      if (!avgWeight || isNaN(avgWeight)) avgWeight = (totalWeight / count).toFixed(2);
+      // Сохраняем в историю
+      // Определяем имя выбранной камеры
+      let cameraName = '';
+      const camRadio = document.querySelector('input[name="cameraRadio"]:checked');
+      if (camRadio) {
+        const cam = config.cameras.find(c => c.id === camRadio.value);
+        if (cam) cameraName = cam.name;
+      }
+      const history = JSON.parse(localStorage.getItem('history') || '[]');
+      history.unshift({
+        date: new Date().toLocaleString(),
+        camera: cameraName,
+        count,
+        total_weight: totalWeight,
+        avg_weight: avgWeight
+      });
+      localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+      updateHistory();
+    };
+
+    // --- Автоматический пересчёт среднего веса ---
+    function recalcAvgWeight() {
+      const count = parseFloat(manualCount.value);
+      const total = parseFloat(manualTotalWeight.value);
+      if (count > 0 && total > 0) {
+        manualAvgWeight.value = (total / count).toFixed(2);
+      } else {
+        manualAvgWeight.value = '';
+      }
+    }
+    manualCount.addEventListener('input', recalcAvgWeight);
+    manualTotalWeight.addEventListener('input', recalcAvgWeight);
+
+    // --- Загрузка моделей ---
+    async function loadCocoModel() {
+      modelStatus.textContent = 'Загрузка модели COCO-SSD...';
+      cocoModel = await cocoSsd.load();
+      modelStatus.textContent = 'Модель COCO-SSD загружена!';
+    }
+    async function loadYoloModel() {
+      modelStatus.textContent = 'Загрузка модели YOLO11n...';
+      try {
+        yoloSession = await ort.InferenceSession.create('../models/yolo11n.onnx');
+        modelStatus.textContent = 'Модель YOLO11n загружена!';
+      } catch (e) {
+        modelStatus.textContent = 'Ошибка загрузки модели YOLO11n: ' + e;
+        console.error('Ошибка загрузки модели YOLO11n:', e);
+      }
+    }
+    async function loadSSDModel() {
+      modelStatus.textContent = 'Загрузка модели SSD MobileNet V2...';
+      ssdModel = await tf.loadGraphModel('https://storage.googleapis.com/tfjs-models/savedmodel/ssd_mobilenet_v2/model.json');
+      modelStatus.textContent = 'Модель SSD MobileNet V2 загружена!';
+    }
+    // Загрузка моделей: сначала YOLO11n, затем остальные параллельно
+    async function loadAllModels() {
+      // Сначала загружаем YOLO11n
+      await loadYoloModel();
+      
+      // Затем загружаем остальные модели параллельно
+      await Promise.all([loadCocoModel(), loadSSDModel()]);
+      
+      modelStatus.textContent = 'Все модели загружены! Используется YOLO11n';
+      
+      // Автоматически запускаем инференс после загрузки моделей
+      startRealtimeInference();
+    }
+    loadAllModels();
+
+    // --- Выбор mp4-файла ---
+    videoFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const url = URL.createObjectURL(file);
+        video.src = url;
+        video.load();
+        // Инференс только после загрузки видео
+        video.onloadeddata = () => {
+          video.play();
+          isVideoPlaying = true;
+          videoPlayPauseBtn.textContent = 'Стоп';
+          startRealtimeInference();
+        };
+        // Сбросить выбор камеры
+        Array.from(cameraRadios.querySelectorAll('input')).forEach(r => r.checked = false);
+        Array.from(cameraRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
+      }
+    });
+
+    // (убрано, теперь обработка в onloadeddata выше)
+
+    // --- Кнопка Стоп/Старт ---
+    videoPlayPauseBtn.addEventListener('click', () => {
+      if (isVideoPlaying) {
+        video.pause();
+        isVideoPlaying = false;
+        videoPlayPauseBtn.textContent = 'Старт';
+      } else {
+        video.play();
+        isVideoPlaying = true;
+        videoPlayPauseBtn.textContent = 'Стоп';
+        startRealtimeInference();
+        setTimeout(() => { drawBoxes([]); }, 100);
+      }
+    });
+
+    // --- История ---
+    function updateHistory() {
+      const history = JSON.parse(localStorage.getItem('history') || '[]');
+      historyTable.innerHTML = history.map(r => `<tr>
+        <td>${r.date}</td>
+        <td>${r.camera}</td>
+        <td>${r.count}</td>
+        <td>${r.total_weight}</td>
+        <td>${r.avg_weight}</td>
+      </tr>`).join('');
+    }
+    updateHistory();
+  </script>
+</body>
+</html>
