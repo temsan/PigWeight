@@ -3,3 +3,5 @@
 __pycache__
 *.mp4
 *.mkv
+*.ts
+*.m3u8
