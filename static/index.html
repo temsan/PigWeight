@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>PigWeight MVP</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="js/stream.js"></script>
+  <!-- onnxruntime-web for client-side inference -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <style>
+  body {
+    background: #f6f8fa;
+    font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+  #main-container {
+    min-width: 0;
+    width: 100vw;
+    min-height: 100vh;
+    margin: 0;
+    background: #fff;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+  }
+  #videoElement {
+    width: 100%;
+    max-width: 1280px;
+    margin: 20px auto;
+    background: #000;
+  }
+  h2 {
+    margin-top: 0;
+    font-weight: 600;
+    color: #222;
+    letter-spacing: 1px;
+  }
+  #controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  #controls label {
+    font-weight: 500;
+    color: #444;
+  }
+  #controls select, #controls input, #controls button {
+    font-size: 1rem;
+    padding: 7px 12px;
+    border-radius: 7px;
+    border: 1px solid #ccc;
+    outline: none;
+    transition: border 0.2s, box-shadow 0.2s;
+  }
+  #controls select:focus, #controls input:focus {
+    border: 1.5px solid #0078d7;
+    box-shadow: 0 0 0 2px #0078d733;
+  }
+  /* Base button style (как у "Сохранить"): минимализм, скругление, тень */
+  #controls button, .pill{
+    background: linear-gradient(90deg, #b6c6e6 0%, #e6f0fa 100%);
+    color: #2a2a2a;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform .06s ease;
+    box-shadow: 0 2px 8px #b6c6e622;
+    border-radius: 10px;
+    padding: 8px 14px;
+  }
+  #controls button:hover, .pill:hover {
+    background: linear-gradient(90deg, #8bb6e6 0%, #d6e6fa 100%);
+    color: #0078d7;
+    box-shadow: 0 3px 10px #b6c6e644;
+    transform: translateY(-1px);
+  }
+  #controls button:active, .pill:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px #b6c6e633;
+  }
+  .pill.danger{
+    background: linear-gradient(90deg, #ff9b9b 0%, #ffd1d1 100%);
+    color:#6b0d0d;
+  }
+  .pill.danger:hover{
+    background: linear-gradient(90deg, #ff7f7f 0%, #ffc0c0 100%);
+    color:#a00;
+  }
+  /* Тумблеры-радио в стиле минимализма */
+  .toggle-btn{
+    padding:8px 12px;
+    border-radius:10px;
+    border:1.5px solid #b6c6e6;
+    background:#f7faff;
+    color:#2a2a2a;
+    font-weight:600;
+    box-shadow:0 1px 4px #b6c6e622;
+  }
+  .toggle-btn.selected{
+    background: linear-gradient(90deg, #8bb6e6 0%, #d6e6fa 100%);
+    color:#0b4f94;
+    border-color:#8bb6e6;
+    box-shadow:0 2px 8px #b6c6e633;
+  }
+  .main-flex {
+    display: flex;
+    flex-direction: row;
+    gap: 2vw;
+    align-items: stretch;
+    justify-content: center;
+    margin: 0 auto 8px auto;
+    width: 100%;
+    max-width: 100vw;
+    height: auto;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow-x: hidden;
+    overflow-y: hidden;
+  }
+  .video-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 8px;
+    justify-content: center;
+  }
+  #videoStream {
+    width: 100%;
+    height: auto;
+    max-width: 1280px;
+    max-height: 78vh;
+    display: block;
+    margin: 8px auto 0 auto;
+    border-radius: 12px;
+    box-shadow: 0 2px 24px #b6c6e633;
+    background: #000;
+    object-fit: contain;
+  }
+  #results {
+    min-width: 0;
+    max-width: 260px;
+    width: 18vw;
+    height: 100%;
+    min-width: 180px;
+    min-height: 0;
+    background: linear-gradient(135deg, #f7faff 60%, #e6f0fa 100%);
+    border-radius: 18px;
+    box-shadow: 0 4px 24px #b6c6e633;
+    padding: 1.2vw 0.8vw 0.8vw 0.8vw;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5vw;
+    align-items: stretch;
+    font-size: 2vw;
+    font-weight: 600;
+    color: #2a2a2a;
+    box-sizing: border-box;
+    justify-content: flex-start; /* не центрируем, чтобы были видны статусы */
+  }
+  #results label {
+    font-size: 1.1vw;
+    color: #6a7a8c;
+    font-weight: 500;
+    margin-right: 8px;
+  }
+  #results input {
+    font-size: 2vw;
+    width: 7vw;
+    min-width: 60px;
+    padding: 0.7vw 1vw;
+    border-radius: 10px;
+    border: 1.5px solid #b6c6e6;
+    background: #f7faff;
+    color: #2a2a2a;
+    font-weight: 600;
+    text-align: right;
+    box-shadow: 0 1px 4px #b6c6e622;
+    transition: border 0.2s, box-shadow 0.2s;
+  }
+  /* Добавим стиль для <img> MJPEG при отсутствии <video> HLS */
+  #videoStream {
+    background: #000;
+    object-fit: contain;
+  }
+  /* Single-row toolbar: keep all controls aligned horizontally */
+  .top-toolbar.minimal{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    width:100%;
+    max-width:1280px;
+    padding:10px 12px;
+    border-radius:12px;
+    background:#fff;
+    box-shadow:0 4px 16px #b6c6e633;
+    position:sticky;
+    top:0;
+    z-index:10;
+    flex-wrap:wrap;
+  }
+  .top-toolbar.minimal .toggle-btn,
+  .top-toolbar.minimal .pill,
+  .top-toolbar.minimal .file-input-btn,
+  .top-toolbar.minimal input[type="range"],
+  .top-toolbar.minimal #countBtn {
+    height:36px;
+    line-height:34px;
+    box-sizing:border-box;
+    vertical-align:middle;
+  }
+  /* Minimalistic button style (match "Сохранить") */
+  #controls button, .pill{
+    background: linear-gradient(90deg, #b6c6e6 0%, #e6f0fa 100%);
+    color: #2a2a2a;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform .06s ease;
+    box-shadow: 0 2px 8px #b6c6e622;
+    border-radius: 10px;
+    padding: 6px 12px;
+  }
+  #controls button:hover, .pill:hover {
+    background: linear-gradient(90deg, #8bb6e6 0%, #d6e6fa 100%);
+    color: #0078d7;
+    box-shadow: 0 3px 10px #b6c6e644;
+    transform: translateY(-1px);
+  }
+  #controls button:active, .pill:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px #b6c6e633;
+  }
+  .pill.danger{
+    background: linear-gradient(90deg, #ff9b9b 0%, #ffd1d1 100%);
+    color:#6b0d0d;
+  }
+  .pill.danger:hover{
+    background: linear-gradient(90deg, #ff7f7f 0%, #ffc0c0 100%);
+    color:#a00;
+  }
+  .toggle-group.compact .toggle-btn{
+    padding:6px 12px;
+    border-radius:10px;
+  }
+  .toggle-btn{
+    padding:6px 12px;
+    border-radius:10px;
+    border:1.5px solid #b6c6e6;
+    background:#f7faff;
+    color:#2a2a2a;
+    font-weight:600;
+    box-shadow:0 1px 4px #b6c6e622;
+  }
+  .toggle-btn.selected{
+    background: linear-gradient(90deg, #8bb6e6 0%, #d6e6fa 100%);
+    color:#0b4f94;
+    border-color:#8bb6e6;
+    box-shadow:0 2px 8px #b6c6e633;
+  }
+  .file-input-btn{
+    position:relative;
+    overflow:hidden;
+    padding:6px 12px;
+    border-radius:10px;
+    border:1.5px dashed #b6c6e6;
+    background:#f7faff;
+    color:#2a2a2a;
+    font-weight:600;
+    box-shadow:0 1px 4px #b6c6e622;
+    display:inline-flex;
+    align-items:center;
+  }
+  .file-input-btn input{
+    position:absolute;
+    inset:0;
+    opacity:0;
+    cursor:pointer;
+  }
+  .seek-times{ color:#6a7a8c; font-weight:600; }
+  /* Top toolbar ergonomic layout + styled buttons */
+  .top-toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    width:100%;
+    max-width:1280px;
+    padding:10px 12px;
+    border-radius:16px;
+    background:linear-gradient(180deg,#ffffff 0%, #f6f9ff 100%);
+    box-shadow:0 10px 28px rgba(22,41,89,0.12);
+    position:sticky;
+    top:0;
+    z-index:10;
+    border:1px solid #e1e9f6;
+  }
+  .toolbar-left,.toolbar-center,.toolbar-right{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .toolbar-group{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:4px 8px;
+    border-radius:12px;
+    background:#f3f7ff;
+    border:1px solid #e2ecff;
+  }
+  .toolbar-label{
+    font-size:0.95rem;
+    color:#3a558c;
+    font-weight:700;
+    margin-right:2px;
+  }
+  .toggle-group.compact .toggle-btn{
+    padding:8px 12px;
+    border-radius:10px;
+  }
+  .file-input-btn{
+    position:relative;
+    overflow:hidden;
+    padding:8px 14px;
+    border-radius:12px;
+    border:1.5px dashed #9bb3d9;
+    color:#2c477a;
+    background:#eef5ff;
+    cursor:pointer;
+    font-weight:700;
+    box-shadow:0 4px 12px rgba(155,179,217,0.18);
+  }
+  .file-input-btn:hover{
+    background:#e3eeff;
+  }
+  .file-input-btn input{
+    position:absolute;
+    inset:0;
+    opacity:0;
+    cursor:pointer;
+  }
+  .seek-wrap{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:260px;
+    padding:4px 8px;
+    border-radius:12px;
+    background:#f6f9ff;
+    border:1px solid #e2ecff;
+  }
+  .seek-wrap input[type="range"]{
+    width:220px;
+    accent-color:#2d7ef7;
+  }
+  .seek-times{
+    color:#3a558c;
+    font-size:0.9rem;
+    min-width:110px;
+    text-align:right;
+    font-weight:600;
+  }
+  /* Top toolbar ergonomic layout */
+  .top-toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    width:100%;
+    max-width:1280px;
+    padding:10px 12px;
+    border-radius:12px;
+    background:#ffffff;
+    box-shadow:0 6px 18px rgba(0,0,0,0.06);
+    position:sticky;
+    top:0;
+    z-index:10;
+  }
+  .toolbar-left,.toolbar-center,.toolbar-right{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .toolbar-group{
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .toolbar-label{
+    font-size:0.95rem;
+    color:#556;
+    font-weight:600;
+    margin-right:4px;
+  }
+  .toggle-group.compact .toggle-btn{
+    padding:6px 12px;
+    border-radius:8px;
+  }
+  .pill{
+    padding:6px 12px;
+    border-radius:999px;
+    border:1px solid #cdd6e2;
+    background:#f6f8fb;
+    color:#234;
+    cursor:pointer;
+    font-weight:600;
+    transition:all .15s ease;
+  }
+  .pill:hover{ background:#e9eef7; }
+  .pill.primary{
+    background:#2d7ef7; color:#fff; border-color:#2d7ef7;
+  }
+  .pill.primary:hover{ background:#1e6be0; }
+  .pill.danger{
+    background:#ff5b5b; color:#fff; border-color:#ff5b5b;
+  }
+  .pill.danger:hover{ background:#e14a4a; }
+  .file-input-btn{
+    position:relative;
+    overflow:hidden;
+    padding:6px 12px;
+    border-radius:999px;
+    border:1px dashed #9bb3d9;
+    color:#335;
+    background:#f0f5ff;
+    cursor:pointer;
+    font-weight:600;
+  }
+  .file-input-btn input{
+    position:absolute;
+    inset:0;
+    opacity:0;
+    cursor:pointer;
+  }
+  .seek-wrap{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:240px;
+  }
+  .seek-wrap input[type="range"]{
+    width:220px;
+  }
+  .seek-times{
+    color:#556;
+    font-size:0.9rem;
+    min-width:110px;
+    text-align:right;
+  }
+  #results input:focus {
+    border: 1.5px solid #8bb6e6;
+    box-shadow: 0 0 0 2px #b6c6e644;
+  }
+  #saveManualBtn {
+    font-size: 1.2vw;
+    padding: 1vw 0;
+    margin-left: 0;
+    margin-top: 1vw;
+    align-self: stretch;
+    background: linear-gradient(90deg, #b6c6e6 0%, #e6f0fa 100%);
+    color: #2a2a2a;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    box-shadow: 0 2px 8px #b6c6e622;
+    transition: background 0.2s, color 0.2s;
+  }
+  #saveManualBtn:hover {
+    background: linear-gradient(90deg, #8bb6e6 0%, #d6e6fa 100%);
+    color: #0078d7;
+  }
+  #modelStatus {
+    margin: 10px 0 0 0;
+    color: #8bb6e6;
+    font-size: 1rem;
+  }
+  #history {
+    width: 100%;
+    margin-top: 10px;
+    border-radius: 10px;
+    overflow: auto;
+    box-shadow: 0 2px 8px #b6c6e622;
+    max-height: 18vh;
+    font-size: 1vw;
+    min-font-size: 12px;
+  }
+  #history th, #history td {
+    padding: 8px 12px;
+    text-align: center;
+  }
+  #history th {
+    background: #e6f0fa;
+    color: #2a2a2a;
+    font-weight: 600;
+  }
+  #history tr:nth-child(even) {
+    background: #f7faff;
+  }
+  #history tr:nth-child(odd) {
+    background: #f3f6fa;
+  }
+  .toggle-group {
+    display: flex;
+    gap: 10px;
+  }
+  .toggle-btn {
+    display: inline-block;
+    padding: 7px 18px;
+    border-radius: 7px;
+    border: 1.5px solid #0078d7;
+    background: #f6f8fa;
+    color: #0078d7;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+    box-shadow: 0 1px 4px #0078d711;
+    user-select: none;
+  }
+  .toggle-btn.selected {
+    background: #0078d7;
+    color: #fff;
+    box-shadow: 0 2px 8px #0078d733;
+  }
+  .toggle-btn:hover {
+    background: #e3eefd;
+    color: #005fa3;
+  }
+  #countBtn {
+    padding: 7px 18px;
+    border-radius: 7px;
+    border: 1.5px solid #0078d7;
+    background: #0078d7;
+    color: #fff;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+    box-shadow: 0 2px 8px #0078d733;
+    height: 36px;
+    min-width: 120px;
+  }
+  #countBtn:hover {
+    background: #005fa3;
+  }
+  #controls > div {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 60px;
+  }
+  
+  /* Ensure all buttons have the same height */
+  .toggle-btn, #countBtn {
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+  
+  /* Make sure the button container has proper height */
+  #controls > div:last-child {
+    display: flex;
+    align-items: flex-end;
+  }
+  .toggle-group input[type="radio"] {
+    display: none;
+  }
+  .unit-label {
+    font-size: 1.1vw;
+    color: #8ca0b8;
+    margin-left: 8px;
+    font-weight: 500;
+    vertical-align: middle;
+  }
+  #videoCanvas {
+    position: absolute;
+    left: 0; top: 0;
+    pointer-events: none;
+    z-index: 2;
+  }
+  #overlayCanvas{
+    position:absolute;
+    left:0; top:0;
+    pointer-events:none;
+    z-index:3;
+  }
+  .video-wrapper {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+  #debugDetections {
+    font-size: 0.98rem;
+    color: #444;
+    background: #f7faff;
+    border-radius: 8px;
+    margin: 8px auto 0 auto;
+    padding: 8px 14px;
+    max-width: 700px;
+    word-break: break-all;
+    box-shadow: 0 2px 8px #b6c6e622;
+  }
+  #fpsInfo {
+    font-size: 1.05rem;
+    color: #0078d7;
+    margin: 4px auto 0 auto;
+    text-align: center;
+    font-weight: 500;
+  }
+  #weightUpdateTime {
+    font-size: 1.05rem;
+    color: #8bb6e6;
+    margin: 8px 0 0 0;
+    text-align: left;
+    font-weight: 500;
+  }
+  @media (max-width: 900px) {
+    #main-container { min-width: 0; max-width: 100vw; }
+    .main-flex { flex-direction: column; gap: 10px; height: auto; overflow-y: hidden; }
+    #videoStream { width: 100vw; max-width: 100vw; height: auto; }
+    #results { width: 100vw; min-width: 0; max-width: 100vw; align-items: stretch; font-size: 1.1rem; }
+    #results label { font-size: 1rem; }
+    #results input { font-size: 1.1rem; width: 80px; min-width: 50px; }
+    #saveManualBtn { font-size: 1rem; padding: 10px 0; }
+    #history { max-height: 120px; font-size: 0.95rem; }
+  }
+  @media (max-width: 700px) {
+    #main-container { padding: 10px; }
+    #controls { flex-direction: column; gap: 8px; }
+    #results { flex-direction: column; gap: 8px; }
+    #videoStream { width: 100%; height: auto; }
+  }
+  </style>
+</head>
+<body>
+  <div id="main-container">
+    <h2>PigWeight Monitor</h2>
+
+    <!-- ЕДИНАЯ ВЕРХНЯЯ ПАНЕЛЬ УПРАВЛЕНИЯ -->
+    <div class="top-toolbar minimal" id="topToolbar">
+      <!-- Группа: Камеры -->
+      <div class="toolbar-group">
+        <span class="toolbar-label">Камеры:</span>
+        <div id="cameraRadios" class="toggle-group compact"></div>
+      </div>
+
+      <!-- Группа: Модель -->
+      <div class="toolbar-group">
+        <span class="toolbar-label">Модель:</span>
+        <div id="modelRadios" class="toggle-group compact"></div>
+        <select id="modelSelect" class="pill" style="height:36px; display:none;"></select>
+      </div>
+      <!-- Группа: Режим инференса -->
+      <div class="toolbar-group">
+        <span class="toolbar-label">Обработка:</span>
+        <div class="toggle-group compact" id="inferModeGroup">
+          <input type="radio" name="inferMode" id="inferServer" value="server" style="display:none;" checked>
+          <label for="inferServer" class="toggle-btn selected">На сервере</label>
+          <input type="radio" name="inferMode" id="inferClient" value="client" style="display:none;">
+          <label for="inferClient" class="toggle-btn">На клиенте</label>
+        </div>
+      </div>
+
+      <!-- Группа: Файл -->
+      <label class="file-input-btn" id="fileInputLabel">
+        Выбрать файл
+        <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
+      </label>
+
+      <!-- Одна кнопка для файла (Стоп), а для live пауза скрыта по умолчанию -->
+      <button id="fileStopBtn" class="pill danger">Стоп</button>
+      <button id="videoPlayPauseBtn" class="pill" style="display:none;">Стоп</button>
+
+      <!-- Слайдер времени -->
+      <div class="seek-wrap">
+        <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0">
+        <div class="seek-times"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
+      </div>
+
+      <!-- Посчитать -->
+      <button id="countBtn" class="pill primary">Посчитать</button>
+
+      <!-- Статус без alert -->
+      <span id="streamStatus" style="min-width:160px;color:#3a558c;font-weight:600;"></span>
+    </div>
+
+    <div class="main-flex">
+      <div style="display:flex; flex-direction:column; align-items:center; width:100%;">
+        <div class="video-wrapper">
+          <img id="videoStream" />
+          <canvas id="overlayCanvas"></canvas>
+          <canvas id="videoCanvas" style="display:none;"></canvas>
+        </div>
+        <div id="fpsInfo"></div>
+        <div id="debugDetections"></div>
+      </div>
+      <div id="results">
+        <div id="weightUpdateTime"></div>
+        <div><label for="manualCount">Количество:</label><input type="number" id="manualCount" min="1"><span class="unit-label">шт.</span></div>
+        <div><label for="manualTotalWeight">Общий вес:</label><input type="number" id="manualTotalWeight" min="0" step="0.1"><span class="unit-label">кг</span></div>
+        <div><label for="manualAvgWeight">Средний вес:</label><input type="number" id="manualAvgWeight" min="0" step="0.01"><span class="unit-label">кг</span></div>
+        <button id="saveManualBtn">Сохранить</button>
+      </div>
+    </div>
+    <div id="modelStatus"></div>
+    <div id="debugModels" style="margin:1em 0; color:#555;"></div>
+    <table id="history">
+      <thead>
+        <tr><th>Дата</th><th>Камера</th><th>Кол-во</th><th>Общий вес</th><th>Средний вес</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <script>
+    // --- Конфиг для MVP (переходим на обработанный MJPEG /api/video_feed) ---
+    const config = {
+      cameras: [
+        { id: 'cam1', name: 'Камера 1', url: '/api/video_feed?camera=cam1' }
+      ],
+      weight_api_url: 'http://127.0.0.1:5000/weight'
+    };
+
+    // --- UI ---
+    const video = document.getElementById('videoStream');
+    const inferModeGroup = document.getElementById('inferModeGroup');
+    let inferMode = 'server'; // 'server' | 'client'
+    const videoCanvas = document.getElementById('videoCanvas');
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const streamStatus = document.getElementById('streamStatus');
+    const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
+    const countBtn = document.getElementById('countBtn');
+    const manualCount = document.getElementById('manualCount');
+    const manualTotalWeight = document.getElementById('manualTotalWeight');
+    const manualAvgWeight = document.getElementById('manualAvgWeight');
+    const historyTable = document.getElementById('history').querySelector('tbody');
+    const cameraRadios = document.getElementById('cameraRadios');
+    const modelRadios = document.getElementById('modelRadios');
+    const fileInput = document.getElementById('videoFileInput');
+    const fileStopBtn = document.getElementById('fileStopBtn') || document.getElementById('filePauseBtn') || document.getElementById('filePlayPauseBtn');
+    const seekRange = document.getElementById('seekRange');
+    const curTime = document.getElementById('curTime');
+    const durTime = document.getElementById('durTime');
+    let selectedCameraId = null;
+    let isVideoPlaying = true;
+    let fileSession = { id: 'file1', camera: 'cam_file1', duration: 0 };
+    const debugDetections = document.getElementById('debugDetections');
+    const fpsInfo = document.getElementById('fpsInfo');
+    const weightUpdateTime = document.getElementById('weightUpdateTime');
+
+    // Client-side inference state
+    let ortSession = null;
+    let clientModelPath = 'models/yolo11n-seg.onnx'; // default client model
+    let clientLoopActive = false;
+    let lastInferTime = 0;
+    const CLIENT_TARGET = 640; // letterbox to 640x640
+    const CLIENT_FPS = 8; // approximate
+    // Counting line params (keep in sync conceptually with server)
+    let lineY = 0.5; // relative (0..1) of video height
+    let lineOffset = 6; // px tolerance
+    let clientCount = 0;
+    let tracks = new Map(); // id -> {cx, cy, lastY}
+    let nextTrackId = 1;
+
+    // Автовоспроизведение при выборе файла (без alert), одна кнопка "Стоп", перемотка в паузе
+    if (fileInput) {
+      fileInput.addEventListener('change', async () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        // Обновляем подпись кнопки на имя файла
+        const fileLabel = document.getElementById('fileInputLabel');
+        if (fileLabel) {
+          const maxLen = 36;
+          const name = f.name || 'файл выбран';
+          fileLabel.firstChild.nodeValue = (name.length > maxLen ? (name.slice(0, maxLen-3) + '...') : name);
+        }
+        const cam = 'cam_file1';
+        const fid = 'file1';
+        try {
+          // Отправляем локальный файл на сервер как multipart без разрастания UI
+          const form = new FormData();
+          form.append('camera', cam);
+          form.append('id', fid);
+          form.append('file', f, f.name);
+
+          const resp = await fetch('/api/video_file/open', {
+            method: 'POST',
+            body: form
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.error || 'open failed');
+
+          fileSession = { id: fid, camera: cam, duration: data.duration || 0 };
+          // Настройка таймлайна
+          seekRange.min = 0;
+          seekRange.max = data.duration || 0;
+          seekRange.value = 0;
+          curTime.textContent = '0.0';
+          durTime.textContent = (data.duration || 0).toFixed(1);
+
+          // Режим файла: скрыть live-паузу, показать файл-Стоп
+          selectedCameraId = cam;
+          document.getElementById('videoPlayPauseBtn').style.display = 'none';
+          document.getElementById('fileStopBtn').style.display = '';
+          isVideoPlaying = true;
+
+          // Синхронизация canvas размеров после смены src
+          const syncOnLoad = () => {
+            const rect = video.getBoundingClientRect();
+            overlayCanvas.width = video.clientWidth || rect.width || 640;
+            overlayCanvas.height = video.clientHeight || rect.height || 480;
+            overlayCanvas.style.width = (video.clientWidth || rect.width) + 'px';
+            overlayCanvas.style.height = (video.clientHeight || rect.height) + 'px';
+          };
+          video.addEventListener('load', syncOnLoad, { once: true });
+
+          // Автоплей файла:
+          const firstFrameUrl = `/api/video_file/frame?id=${encodeURIComponent(fid)}&camera=${encodeURIComponent(cam)}&t=0&ts=${Date.now()}`;
+          const playUrl = `/api/video_file/play?id=${encodeURIComponent(fid)}&camera=${encodeURIComponent(cam)}&rate=1.0&ts=${Date.now()}`;
+
+          // Показать первый кадр
+          video.src = firstFrameUrl;
+
+          // Переключиться на поток после отрисовки первого кадра или таймаута
+          let switched = false;
+          const switchToPlay = () => {
+            if (switched) return;
+            switched = true;
+            video.src = playUrl;
+          };
+          video.addEventListener('load', switchToPlay, { once: true });
+          setTimeout(switchToPlay, 300);
+
+          // Переключение опроса/клиентской петли в зависимости от режима
+          if (inferMode === 'server') {
+            stopClientLoop();
+            startPollingCount();
+          } else {
+            stopPollingCount();
+            startClientLoop();
+          }
+        } catch (e) {
+          console.warn('Open file failed:', e);
+          const statusEl = document.getElementById('streamStatus');
+          if (statusEl) {
+            statusEl.textContent = 'Ошибка открытия файла';
+            statusEl.style.color = '#e14a4a';
+            setTimeout(() => { statusEl.textContent = ''; statusEl.style.color = ''; }, 4000);
+          }
+        }
+      });
+    }
+    if (fileStopBtn) {
+      fileStopBtn.addEventListener('click', () => {
+        const { id, camera } = fileSession;
+        if (!id) return;
+        const t = parseFloat(seekRange.value || '0') || 0;
+        video.src = `/api/video_file/frame?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+        isVideoPlaying = false;
+        curTime.textContent = t.toFixed(1);
+      });
+    }
+    if (seekRange) {
+      seekRange.addEventListener('input', async () => {
+        const t = parseFloat(seekRange.value || '0') || 0;
+        curTime.textContent = t.toFixed(1);
+        // Если пауза в файловом режиме — выполнить инференс по окну из 3-5 кадров вокруг точки
+        if (!isVideoPlaying && fileSession.id) {
+          // окно: t-0.1, t, t+0.1 (3 кадра); можно расширить до 5
+          const candidates = [Math.max(0, t - 0.1), t, t + 0.1];
+          let shown = false;
+          for (const tt of candidates) {
+            const url = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(tt)}&ts=${Date.now()}`;
+            // показываем первый успешный кадр
+            try {
+              video.src = url;
+              shown = true;
+              break;
+            } catch(_) {}
+          }
+          if (!shown) {
+            // fallback: текущая точка
+            video.src = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+          }
+        }
+      });
+    }
+
+    // --- Радиокнопки для камер ---
+    cameraRadios.innerHTML = '';
+    config.cameras.forEach((cam, idx) => {
+      const id = 'cam_radio_' + cam.id;
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'cameraRadio';
+      radio.value = cam.id;
+      radio.id = id;
+      if (idx === 0) radio.checked = true;
+      radio.style.display = 'none';
+      radio.addEventListener('change', () => {
+        if (radio.checked) {
+          selectedCameraId = cam.id;
+          // Переключаемся на live: показываем live-паузу, скрываем файловый Стоп
+          document.getElementById('videoPlayPauseBtn').style.display = '';
+          document.getElementById('fileStopBtn').style.display = 'none';
+
+          // В зависимости от режима: серверный MJPEG или (в будущем) клиентская обработка сырого потока
+          video.removeAttribute('src');
+          if (inferMode === 'server') {
+            stopClientLoop();
+            video.src = cam.url + `&ts=${Date.now()}`;
+            startPollingCount();
+          } else {
+            video.src = cam.url + `&ts=${Date.now()}`;
+            stopPollingCount();
+            startClientLoop();
+          }
+          isVideoPlaying = true;
+          videoPlayPauseBtn.textContent = 'Стоп';
+          Array.from(cameraRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
+          label.classList.add('selected');
+        }
+      });
+      const label = document.createElement('label');
+      label.htmlFor = id;
+      label.textContent = cam.name;
+      label.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
+      cameraRadios.appendChild(radio);
+      cameraRadios.appendChild(label);
+    });
+    selectedCameraId = (config.cameras[0] && config.cameras[0].id) || 'cam1';
+    // Стартовый источник учитывает режим
+    const baseLive = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?camera=${encodeURIComponent(selectedCameraId)}`);
+    video.src = baseLive + `&ts=${Date.now()}`;
+    // default start in server mode
+    startPollingCount();
+
+    // --- Загрузка списка моделей с сервера ---
+    async function loadModels() {
+      try {
+        // 1) Получаем список .pt с бэкенда (могут отсутствовать, это нормально)
+        let serverModels = [];
+        try {
+          const resp = await fetch('/api/models', { cache: 'no-store' });
+          if (resp.ok) {
+            const data = await resp.json();
+            serverModels = Array.isArray(data?.models) ? data.models.filter(m => typeof m === 'string') : [];
+          }
+        } catch(_) {}
+
+        // 2) Проверяем локально доступные стандартные имена (.pt и .onnx) через HEAD
+        async function headExists(path){
+          try{
+            const r = await fetch(path, { method:'HEAD', cache:'no-store' });
+            return r.ok;
+          }catch{ return false; }
+        }
+        // У нас фактически одна модель в двух форматах: seg и base.
+        // Держим пары: *.pt (сервер) и *.onnx (клиент).
+        const localCandidates = [
+          'yolo11n-seg.pt','yolo11n-seg.onnx',
+          'yolo11n.pt','yolo11n.onnx'
+        ];
+        const localFound = [];
+        for (const name of localCandidates){
+          if (await headExists(`models/${name}`)) localFound.push(name);
+        }
+
+        // 3) Если локальные не нашлись, но пользователь сообщил, что они есть —
+        //    форсируем их показ. Это нужно если HEAD запрещён сервером статики.
+        let showModels = [...new Set([...(serverModels||[]), ...localFound])];
+        if (showModels.length === 0) {
+          showModels = ['yolo11n-seg.pt','yolo11n.pt','yolo11n-seg.onnx','yolo11n.onnx'];
+        }
+
+        // 4) Отрисовка радиокнопок и select
+        modelRadios.innerHTML = '';
+        const modelSelect = document.getElementById('modelSelect');
+        modelSelect.innerHTML = '';
+
+        showModels.forEach((m, idx) => {
+          const id = 'model_radio_' + idx;
+          const inp = document.createElement('input');
+          inp.type = 'radio';
+          inp.name = 'modelRadio';
+          inp.value = m;
+          inp.id = id;
+          inp.style.display = 'none';
+          if (idx === 0) inp.checked = true;
+
+          const lbl = document.createElement('label');
+          lbl.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
+          lbl.htmlFor = id;
+          lbl.textContent = m;
+
+          inp.addEventListener('change', async () => {
+            if (!inp.checked) return;
+            await applyModel(m);
+            Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
+            lbl.classList.add('selected');
+            modelSelect.value = m;
+          });
+
+          modelRadios.appendChild(inp);
+          modelRadios.appendChild(lbl);
+
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = m;
+          modelSelect.appendChild(opt);
+        });
+
+        modelSelect.style.display = 'inline-block';
+        modelSelect.addEventListener('change', async () => {
+          const m = modelSelect.value;
+          await applyModel(m);
+          Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach((btn, idx) => {
+            btn.classList.toggle('selected', showModels[idx] === m);
+          });
+        });
+
+        // 5) Автовыбор: .pt (сервер) предпочтительнее, иначе .onnx (клиент)
+        const preferred = showModels.find(n => n.toLowerCase().endsWith('.pt')) || showModels.find(n => n.toLowerCase().endsWith('.onnx')) || showModels[0];
+        await applyModel(preferred);
+        modelSelect.value = preferred;
+        Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach((btn, idx) => {
+          btn.classList.toggle('selected', showModels[idx] === preferred);
+        });
+      } catch (e) {
+        console.warn('Ошибка загрузки списка моделей', e);
+        // Жёсткий fallback: все четыре известных имени
+        const showModels = ['yolo11n-seg.pt','yolo11n.pt','yolo11n-seg.onnx','yolo11n.onnx'];
+        modelRadios.innerHTML = '';
+        const modelSelect = document.getElementById('modelSelect');
+        modelSelect.innerHTML = '';
+        showModels.forEach((m, idx) => {
+          const id = 'model_radio_' + idx;
+          const inp = document.createElement('input');
+          inp.type = 'radio';
+          inp.name = 'modelRadio';
+          inp.value = m;
+          inp.id = id;
+          inp.style.display = 'none';
+          if (idx === 0) inp.checked = true;
+
+          const lbl = document.createElement('label');
+          lbl.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
+          lbl.htmlFor = id;
+          lbl.textContent = m;
+
+          inp.addEventListener('change', async () => {
+            if (!inp.checked) return;
+            await applyModel(m);
+            Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
+            lbl.classList.add('selected');
+            modelSelect.value = m;
+          });
+
+          modelRadios.appendChild(inp);
+          modelRadios.appendChild(lbl);
+
+          const opt = document.createElement('option');
+          opt.value = m; opt.textContent = m; modelSelect.appendChild(opt);
+        });
+        modelSelect.style.display = 'inline-block';
+        modelSelect.addEventListener('change', async () => {
+          const m = modelSelect.value;
+          await applyModel(m);
+          Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach((btn, idx) => {
+            btn.classList.toggle('selected', showModels[idx] === m);
+          });
+        });
+        await applyModel(showModels[0]);
+        modelSelect.value = showModels[0];
+      }
+    }
+    async function applyModel(m) {
+      try {
+        const cam = selectedCameraId || 'cam1';
+        const isOnnx = m.toLowerCase().endsWith('.onnx');
+        if (!isOnnx) {
+          // server-side model
+          await fetch(`/api/video_config?camera=${encodeURIComponent(cam)}&seg_model_path=${encodeURIComponent('models/' + m)}`, { method:'GET', cache:'no-store' });
+          stopClientLoop();
+          // reload current source
+          if (video.src.includes('/api/video_file/')) {
+            if (isVideoPlaying && fileSession.id) {
+              video.src = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
+            } else if (fileSession.id) {
+              const t = parseFloat(seekRange.value || '0') || 0;
+              video.src = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+            }
+          } else {
+            const liveUrl = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?camera=${encodeURIComponent(cam)}`) + `&ts=${Date.now()}`;
+            video.src = liveUrl;
+          }
+          startPollingCount();
+        } else {
+          // client-side model
+          clientModelPath = 'models/' + m;
+          stopPollingCount();
+          await ensureOrtSession();
+          if (inferMode === 'client') startClientLoop();
+        }
+        // статус
+        const statusEl = document.getElementById('streamStatus');
+        if (statusEl) {
+          statusEl.textContent = `Модель: ${m}`;
+          statusEl.style.color = '#3a558c';
+          setTimeout(() => { statusEl.textContent=''; }, 2500);
+        }
+      } catch(e) {
+        console.warn('Model switch failed', e);
+      }
+    }
+    loadModels();
+
+    // --- РЕЖИМ ОБРАБОТКИ: переключатель сервер/клиент ---
+    const inferServerInput = document.getElementById('inferServer');
+    const inferClientInput = document.getElementById('inferClient');
+    const inferServerLabel = document.querySelector('label[for="inferServer"]');
+    const inferClientLabel = document.querySelector('label[for="inferClient"]');
+
+    // вспомогательная функция проверки готовности кадра для клиентского инференса
+    function hasFrameReady(){
+      const iw = video.videoWidth || video.naturalWidth || 0;
+      const ih = video.videoHeight || video.naturalHeight || 0;
+      return iw > 0 && ih > 0;
+    }
+
+    // вспомогательная функция проверки готовности кадра для клиентского инференса
+    function hasFrameReady(){
+      const iw = video.videoWidth || video.naturalWidth || 0;
+      const ih = video.videoHeight || video.naturalHeight || 0;
+      return iw > 0 && ih > 0;
+    }
+
+    // Provide stopPollingCount definition before any usage
+    function stopPollingCount(){
+      if (pollingTimer){ clearInterval(pollingTimer); pollingTimer = null; }
+    }
+
+    function setInferMode(mode){
+      if (mode === inferMode) return;
+      inferMode = mode;
+      [inferServerLabel, inferClientLabel].forEach(l => l.classList.remove('selected'));
+      (mode === 'server' ? inferServerLabel : inferClientLabel).classList.add('selected');
+
+      const cam = selectedCameraId || (config.cameras[0] && config.cameras[0].id) || 'cam1';
+      const isFile = (video.src || '').includes('/api/video_file/');
+      if (mode === 'server') {
+        // серверная обработка: включаем опрос счётчика, выключаем клиентскую петлю
+        stopClientLoop();
+        startPollingCount();
+        if (isFile) {
+          if (isVideoPlaying && fileSession.id) {
+            video.src = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
+          } else if (fileSession.id) {
+            const t = parseFloat(seekRange.value || '0') || 0;
+            video.src = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+          }
+        } else {
+          video.src = `/api/video_feed?camera=${encodeURIComponent(cam)}&ts=${Date.now()}`;
+        }
+      } else {
+        // клиентская обработка: отключаем опрос сервера, включаем клиентскую петлю
+        stopPollingCount();
+        // гарантируем, что есть источник изображения
+        if (!video.src) {
+          const liveUrl = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?camera=${encodeURIComponent(cam)}`) + `&ts=${Date.now()}`;
+          video.src = liveUrl;
+        }
+        // ждём первый кадр, затем стартуем петлю
+        const start = async () => {
+          if (!hasFrameReady()){
+            await new Promise(res => {
+              const onload = () => { video.removeEventListener('load', onload); res(); };
+              video.addEventListener('load', onload, { once:true });
+              setTimeout(res, 700); // таймаут на всякий случай
+            });
+          }
+          try { await ensureOrtSession(); } catch(_) {}
+          // сбросим счётчик и треки при переходе в клиент
+          tracks = new Map(); nextTrackId = 1; clientCount = 0;
+          startClientLoop();
+        };
+        start();
+      }
+    }
+
+    // поддержка клика и переключения радиокнопок
+    function activateServerMode(){
+      inferServerInput.checked = true;
+      inferClientInput.checked = false;
+      inferServerLabel.classList.add('selected');
+      inferClientLabel.classList.remove('selected');
+      setInferMode('server');
+      // если выбрана групповая модель с .onnx, при серверном режиме подменим на .pt (если доступно)
+      const selectedGroupBtn = modelRadios.querySelector('.toggle-btn.selected');
+      if (selectedGroupBtn){
+        const base = selectedGroupBtn.textContent.replace(/\s*\(.*\)\s*$/,''); // имя группы
+        // попробуем найти в select вариант .pt этой группы
+        const ptOpt = Array.from(document.getElementById('modelSelect').options).find(o => o.value.toLowerCase().startsWith(base.toLowerCase()) && o.value.toLowerCase().endsWith('.pt'));
+        const toApply = ptOpt ? ptOpt.value : null;
+        if (toApply) { applyModel(toApply); document.getElementById('modelSelect').value = toApply; }
+      }
+      setStatus('Режим: сервер', '#2c5', 1200);
+    }
+    async function activateClientMode(){
+      inferServerInput.checked = false;
+      inferClientInput.checked = true;
+      setInferMode('client');
+      setStatus('Режим: клиент', '#2c5', 1200);
+    }
+    inferServerLabel.addEventListener('click', (e) => { e.preventDefault(); activateServerMode(); });
+    inferClientLabel.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const cam = selectedCameraId || (config.cameras[0] && config.cameras[0].id) || 'cam1';
+      if (!video.src){
+        video.src = `/api/video_feed?camera=${encodeURIComponent(cam)}&ts=${Date.now()}`;
+      }
+      if (!hasFrameReady()){
+        await new Promise(res => {
+          const onload = () => { video.removeEventListener('load', onload); res(); };
+          video.addEventListener('load', onload, { once:true });
+          setTimeout(res, 700);
+        });
+      }
+      try { await ensureOrtSession(); } catch(_) {}
+      await activateClientMode();
+    });
+
+    // --- КЛИЕНТСКИЙ ИНФЕРЕНС (ONNXRuntime Web, WASM) ---
+    async function ensureOrtSession(){
+      if (ortSession) return ortSession;
+      try{
+        const providers = ['webgl','wasm'];
+        ort.env.wasm.numThreads = 1;
+        ortSession = await ort.InferenceSession.create(clientModelPath, { executionProviders: providers, graphOptimizationLevel: 'all' });
+        return ortSession;
+      }catch(e){
+        console.warn('ORT session init failed, fallback to wasm only', e);
+        ortSession = await ort.InferenceSession.create(clientModelPath, { executionProviders: ['wasm'] });
+        return ortSession;
+      }
+    }
+
+    function letterboxToSquare(img, size){
+      const iw = img.videoWidth || img.naturalWidth || img.width;
+      const ih = img.videoHeight || img.naturalHeight || img.height;
+      const scale = Math.min(size / iw, size / ih);
+      const nw = Math.round(iw * scale);
+      const nh = Math.round(ih * scale);
+      const dx = Math.floor((size - nw) / 2);
+      const dy = Math.floor((size - nh) / 2);
+      const off = document.createElement('canvas');
+      off.width = size; off.height = size;
+      const ictx = off.getContext('2d');
+      ictx.fillStyle = '#000';
+      ictx.fillRect(0,0,size,size);
+      ictx.drawImage(img, 0, 0, iw, ih, dx, dy, nw, nh);
+      return {canvas: off, dx, dy, nw, nh, scale};
+    }
+
+    function toTensorCHWFloat(canvas){
+      const ctx = canvas.getContext('2d');
+      const { data, width, height } = ctx.getImageData(0,0,canvas.width, canvas.height);
+      const size = width * height;
+      const arr = new Float32Array(size * 3);
+      for (let i = 0; i < size; i++){
+        const r = data[i*4] / 255.0;
+        const g = data[i*4+1] / 255.0;
+        const b = data[i*4+2] / 255.0;
+        arr[i] = r;
+        arr[i + size] = g;
+        arr[i + size*2] = b;
+      }
+      return new ort.Tensor('float32', arr, [1,3,height,width]);
+    }
+
+    function nms(boxes, iouTh=0.45){
+      boxes.sort((a,b)=>b.score - a.score);
+      const res=[];
+      const used = new Array(boxes.length).fill(false);
+      function iou(a,b){
+        const x1 = Math.max(a.x, b.x);
+        const y1 = Math.max(a.y, b.y);
+        const x2 = Math.min(a.x+a.w, b.x+b.w);
+        const y2 = Math.min(a.y+a.h, b.y+b.h);
+        const inter = Math.max(0, x2-x1) * Math.max(0, y2-y1);
+        const ua = a.w*a.h + b.w*b.h - inter;
+        return ua>0 ? inter/ua : 0;
+      }
+      for (let i=0;i<boxes.length;i++){
+        if (used[i]) continue;
+        res.push(boxes[i]);
+        for (let j=i+1;j<boxes.length;j++){
+          if (used[j]) continue;
+          if (iou(boxes[i], boxes[j]) > iouTh) used[j] = true;
+        }
+      }
+      return res;
+    }
+
+    function postprocessYOLO(output, imgW, imgH, dx, dy, scale, confTh=0.25){
+      let arr = null, num=0, attrs=0;
+      if (Array.isArray(output)) {
+        const t = output.find(o => o.data) || output[0];
+        arr = t.data; num = t.dims[1] || t.dims[0]; attrs = t.dims[t.dims.length-1];
+      } else if (output.data) {
+        arr = output.data; num = output.dims[1] || output.dims[0]; attrs = output.dims[output.dims.length-1];
+      } else {
+        const key = Object.keys(output)[0];
+        const t = output[key];
+        arr = t.data; num = t.dims[1] || t.dims[0]; attrs = t.dims[t.dims.length-1];
+      }
+      const boxes=[];
+      for (let i=0;i<num;i++){
+        const off = i*attrs;
+        const cx = arr[off+0], cy = arr[off+1], w = arr[off+2], h = arr[off+3];
+        const obj = arr[off+4] ?? 1.0;
+        let best=0, clsId=-1;
+        for (let k=5;k<attrs;k++){
+          const v = arr[off+k];
+          if (v>best){ best=v; clsId=k-5; }
+        }
+        const score = obj * best;
+        if (score < confTh) continue;
+        const x1 = (cx - w/2);
+        const y1 = (cy - h/2);
+        const rx1 = (x1 - dx) / scale;
+        const ry1 = (y1 - dy) / scale;
+        const rw = w / scale;
+        const rh = h / scale;
+        boxes.push({x: rx1, y: ry1, w: rw, h: rh, class: clsId, score});
+      }
+      boxes.forEach(b=>{
+        b.x = Math.max(0, Math.min(imgW-1, b.x));
+        b.y = Math.max(0, Math.min(imgH-1, b.y));
+        b.w = Math.max(1, Math.min(imgW - b.x, b.w));
+        b.h = Math.max(1, Math.min(imgH - b.y, b.h));
+      });
+      return nms(boxes, 0.45);
+    }
+
+    function drawOverlay(boxes){
+      // гарантируем валидные размеры холста
+      const w = video.clientWidth || video.videoWidth || 640;
+      const h = video.clientHeight || video.videoHeight || 480;
+      if (w <= 0 || h <= 0) return;
+      overlayCanvas.width = w;
+      overlayCanvas.height = h;
+      const ctx = overlayCanvas.getContext('2d');
+      ctx.clearRect(0,0,w,h);
+
+      const yLine = Math.round(h * lineY);
+      ctx.strokeStyle = 'rgba(0,180,255,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, yLine);
+      ctx.lineTo(w, yLine);
+      ctx.stroke();
+
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(8,8,120,28);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 16px Segoe UI, Arial';
+      ctx.fillText(`Count: ${clientCount}`, 16, 28);
+
+      boxes.forEach(b=>{
+        ctx.strokeStyle = '#00ff88';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = 'rgba(0,255,136,0.2)';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        const cx = b.x + b.w/2;
+        const cy = b.y + b.h/2;
+        ctx.fillStyle = '#0ff';
+        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2); ctx.fill();
+      });
+    }
+
+    function updateTracksAndCount(boxes){
+      // фильтруем класс "cow" если доступен (COCO id = 18), иначе используем все боксы
+      const COW_CLASS_ID = 18;
+      const filtered = boxes.filter(b => b.class === COW_CLASS_ID || (typeof b.class === 'string' && b.class.toLowerCase() === 'cow'));
+      const used = new Set();
+      const newTracks = new Map();
+      (filtered.length ? filtered : boxes).forEach(b=>{
+        const cx = b.x + b.w/2, cy = b.y + b.h/2;
+        let bestId = -1, bestD = 1e9;
+        tracks.forEach((t, id)=>{
+          const dx = t.cx - cx, dy = t.cy - cy;
+          const d = dx*dx + dy*dy;
+          if (d < bestD && !used.has(id)) { bestD = d; bestId = id; }
+        });
+        // уменьшили радиус привязки
+        if (bestId === -1 || bestD > 80*80){
+          const id = nextTrackId++;
+          newTracks.set(id, {cx, cy, lastY: cy});
+        } else {
+          const t = tracks.get(bestId);
+          const yLine = overlayCanvas.height * lineY;
+          // считаем пересечение сверху вниз через коридор +/- lineOffset
+          const crossedDown = (t.lastY <= (yLine - lineOffset) && cy >= (yLine + lineOffset));
+          if (crossedDown) clientCount += 1;
+          newTracks.set(bestId, {cx, cy, lastY: cy});
+          used.add(bestId);
+        }
+      });
+      tracks = newTracks;
+    }
+
+    async function clientInferOnce(){
+      const iw = video.videoWidth || video.naturalWidth || 0;
+      const ih = video.videoHeight || video.naturalHeight || 0;
+      if (!iw || !ih) return null;
+
+      const lb = letterboxToSquare(video, CLIENT_TARGET);
+      const tensor = toTensorCHWFloat(lb.canvas);
+      const session = await ensureOrtSession();
+      const feeds = {};
+      // безопасное имя входа
+      const inputName = (session.inputNames && session.inputNames.length ? session.inputNames[0] : 'images');
+      feeds[inputName] = tensor;
+      const t0 = performance.now();
+      const results = await session.run(feeds);
+      const t1 = performance.now();
+      lastInferTime = t1 - t0;
+
+      const outKey = Object.keys(results)[0];
+      const out = results[outKey];
+      // чуть выше порог уверенности для стабильности
+      const boxes = postprocessYOLO(out, iw, ih, lb.dx, lb.dy, lb.scale, 0.40);
+      updateTracksAndCount(boxes);
+      drawOverlay(boxes);
+      return boxes;
+    }
+
+    function startClientLoop(){
+      if (clientLoopActive) return;
+      clientLoopActive = true;
+      (async function loop(){
+        if (!clientLoopActive) return;
+        // ждём, пока появится кадр
+        if (!hasFrameReady()){
+          fpsInfo.textContent = 'Ожидание кадра...';
+          // визуально отрисуем линию и текущий счёт
+          drawOverlay([]);
+          return setTimeout(loop, 150);
+        }
+        const tStart = performance.now();
+        try{
+          await clientInferOnce();
+        }catch(e){
+          fpsInfo.textContent = 'Инференс не запущен';
+        }
+        const took = performance.now() - tStart;
+        const target = 1000/CLIENT_FPS;
+        const delay = Math.max(0, target - took);
+        fpsInfo.textContent = `Client FPS~${(1000/Math.max(1, took)).toFixed(1)} | ${lastInferTime.toFixed(1)}ms | Count:${clientCount}`;
+        // перерисуем оверлей чтобы отражать счёт даже без боксов
+        drawOverlay([]);
+        setTimeout(loop, delay);
+      })();
+    }
+    function stopClientLoop(){
+      clientLoopActive = false;
+      if (overlayCanvas){
+        const ctx = overlayCanvas.getContext('2d');
+        ctx.clearRect(0,0,overlayCanvas.width, overlayCanvas.height);
+      }
+    }
+    function stopPollingCount(){
+      if (pollingTimer){ clearInterval(pollingTimer); pollingTimer = null; }
+    }
+    // Видимый статус при смене режима/источника
+    function setStatus(msg, color='#3a558c', ttl=3000){
+      if (!streamStatus) return;
+      streamStatus.textContent = msg;
+      streamStatus.style.color = color;
+      if (ttl > 0){
+        setTimeout(()=>{ streamStatus.textContent=''; streamStatus.style.color=''; }, ttl);
+      }
+    }
+
+    // --- Клиентские модели удалены: используем серверный счётчик ---
+
+    // --- Отрисовка рамок для обнаруженных коров ---
+    function drawBoxes(boxes) {
+      if (!showBoxesCheckbox.checked) {
+        videoCanvas.width = 0; videoCanvas.height = 0;
+        return;
+      }
+      
+      // Получаем размеры видео и устанавливаем размеры холста
+      const w = video.videoWidth || 640;
+      const h = video.videoHeight || 480;
+      videoCanvas.width = w;
+      videoCanvas.height = h;
+      const ctx = videoCanvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+
+      // ID класса cow в YOLO COCO: 18
+      const COW_CLASS_ID = 18;
+      
+      // Настройки визуализации
+      const highlightColor = '#ff6b6b';   // Красный для заливки
+      const borderColor = '#ff3b3b';      // Темно-красный для границы
+      const areaAlpha = 0.25;            // Прозрачность заливки
+      const minConfidence = 0.3;         // Минимальная уверенность для отображения
+      const labelBgColor = 'rgba(200, 50, 50, 0.9)'; // Красный фон для меток
+      
+      // Фильтрация боксов: оставляем только класс cow с достаточной уверенностью
+      const filtered = boxes.filter(box => {
+        // Проверяем уверенность (если есть)
+        if (box.score !== undefined && box.score < minConfidence) {
+          return false;
+        }
+        // Проверяем класс (число или строка)
+        return box.class === COW_CLASS_ID || 
+               (typeof box.class === 'string' && box.class.toLowerCase() === 'cow');
+      });
+
+      // Настройки отрисовки
+      ctx.lineWidth = 3;
+      ctx.textBaseline = 'top';
+      ctx.font = 'bold 16px Arial, sans-serif';
+
+      // Сортируем боксы по убыванию площади (более крупные объекты отрисовываем первыми)
+      filtered.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+
+      // Отрисовка каждого обнаруженного объекта
+      filtered.forEach((box, index) => {
+        // Корректируем координаты, чтобы не выходить за границы
+        const x = Math.max(0, box.x);
+        const y = Math.max(0, box.y);
+        const width = Math.max(0, Math.min(w - x, box.w));
+        const height = Math.max(0, Math.min(h - y, box.h));
+        
+        if (width <= 0 || height <= 0) return;
+
+        // Рассчитываем прозрачность на основе уверенности (если есть)
+        const confidence = box.score !== undefined ? box.score : 1.0;
+        const dynamicAlpha = areaAlpha * (0.5 + confidence * 0.5); // Прозрачность зависит от уверенности
+
+        // 1. Рисуем подсветку области с градиентом
+        const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+        gradient.addColorStop(0, 'rgba(255, 107, 107, 0.3)');  // Светло-красный
+        gradient.addColorStop(1, 'rgba(255, 59, 59, 0.3)');    // Темно-красный
+        
+        ctx.globalAlpha = dynamicAlpha;
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, y, width, height);
+
+        // 2. Рисуем границу с закругленными углами
+        const borderWidth = 3 + (confidence * 2); // Толщина границы зависит от уверенности
+        const borderRadius = 8;
+        
+        ctx.globalAlpha = 0.8;
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = borderWidth;
+        
+        // Рисуем закругленный прямоугольник
+        roundRect(ctx, x + borderWidth/2, y + borderWidth/2, 
+                 width - borderWidth, height - borderWidth, 
+                 borderRadius, false, true);
+
+        // 3. Рисуем метку с номером и процентом уверенности
+        const labelText = `Корова ${index + 1}`;
+        const scoreText = box.score !== undefined ? `${Math.round(box.score * 100)}%` : '';
+        
+        // Рассчитываем размеры текста
+        ctx.font = 'bold 16px Arial, sans-serif';
+        const labelWidth = ctx.measureText(labelText).width;
+        const scoreWidth = scoreText ? ctx.measureText(scoreText).width : 0;
+        
+        const padding = 8;
+        const labelHeight = 24;
+        const totalWidth = labelWidth + (scoreText ? (scoreWidth + padding * 3) : padding * 2);
+        
+        const labelX = Math.max(0, Math.min(x, w - totalWidth));
+        const labelY = Math.max(0, y - labelHeight - 2);
+        
+        // Рисуем фон метки с закругленными углами
+        ctx.globalAlpha = 0.9;
+        roundRect(ctx, labelX, labelY, totalWidth, labelHeight, 4, true, false);
+        
+        // Текст метки
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(labelText, labelX + padding, labelY + 5);
+        
+        // Процент уверенности (если есть)
+        if (scoreText) {
+          const scoreX = labelX + labelWidth + padding * 2;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+          ctx.fillText(scoreText, scoreX, labelY + 5);
+        }
+      });
+      
+      // Вспомогательная функция для рисования закругленных прямоугольников
+      function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+        if (fill) {
+          ctx.fillStyle = labelBgColor;
+          ctx.fill();
+        }
+        if (stroke) {
+          ctx.stroke();
+        }
+      }
+    }
+
+    // --- Опрос серверного счётчика ---
+    let pollingTimer = null;
+    async function pollServerCount() {
+      try {
+        const cam = selectedCameraId || (config.cameras[0] && config.cameras[0].id) || 'cam1';
+        const resp = await fetch(`/api/video_count?camera=${encodeURIComponent(cam)}`, { cache: 'no-store' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        const count = Number((data && (data.count ?? data[cam])) || 0);
+        manualCount.value = count;
+        const total = parseFloat(manualTotalWeight.value);
+        if (count > 0 && total > 0) {
+          manualAvgWeight.value = (total / count).toFixed(2);
+        }
+        const ts = new Date().toLocaleTimeString();
+        weightUpdateTime.textContent = `Последнее обновление: ${ts} (камера: ${cam})`;
+        debugDetections.innerHTML = '';
+        fpsInfo.textContent = '';
+      } catch (e) {
+        // выводим краткий статус но без алертов
+        setStatus('Ошибка опроса счётчика', '#a66', 1500);
+      }
+    }
+    function startPollingCount() {
+      if (pollingTimer) clearInterval(pollingTimer);
+      pollServerCount();
+      pollingTimer = setInterval(pollServerCount, 1000);
+    }
+
+    window.onload = () => {
+      startPollingCount();
+    };
+
+    // --- Кнопка "Посчитать": разовый опрос с сервера ---
+    countBtn.addEventListener('click', () => {
+      pollServerCount();
+    });
+
+    // --- Автопересчёт: количество/вес/средний ---
+    // Пересчитываем средний при изменении количества или общего веса
+    function recalcAvgWeight() {
+      const count = parseFloat(manualCount.value);
+      const total = parseFloat(manualTotalWeight.value);
+      if (isFinite(count) && isFinite(total) && count > 0 && total >= 0) {
+        manualAvgWeight.value = (total / count).toFixed(2);
+      } else {
+        manualAvgWeight.value = '';
+      }
+    }
+    // Пересчитываем общий вес при изменении среднего
+    function recalcTotalWeightFromAvg() {
+      const count = parseFloat(manualCount.value);
+      const avg = parseFloat(manualAvgWeight.value);
+      if (isFinite(count) && isFinite(avg) && count > 0 && avg >= 0) {
+        manualTotalWeight.value = (count * avg).toFixed(2);
+      }
+    }
+    manualCount.addEventListener('input', recalcAvgWeight);
+    manualTotalWeight.addEventListener('input', recalcAvgWeight);
+    manualAvgWeight.addEventListener('input', recalcTotalWeightFromAvg);
+
+    // Перемотка/таймлайн и +/-10с убраны для MJPEG live
+
+    // --- Сохранение ручного ввода ---
+    saveManualBtn.onclick = () => {
+      const count = parseInt(manualCount.value);
+      const totalWeight = parseFloat(manualTotalWeight.value);
+      let avgWeight = parseFloat(manualAvgWeight.value);
+
+      // Убираем алерты: тихо валидируем и подсвечиваем поля
+      const invalidCount = !count || isNaN(count) || count <= 0;
+      const invalidTotal = !totalWeight || isNaN(totalWeight) || totalWeight <= 0;
+
+      manualCount.style.borderColor = invalidCount ? '#e14a4a' : '#b6c6e6';
+      manualTotalWeight.style.borderColor = invalidTotal ? '#e14a4a' : '#b6c6e6';
+
+      if (invalidCount || invalidTotal) {
+        console.warn('Некорректные значения: заполните количество и общий вес.');
+        return;
+      }
+
+      if (!avgWeight || isNaN(avgWeight)) avgWeight = (totalWeight / count).toFixed(2);
+      // Сохраняем в историю
+      // Определяем имя выбранной камеры
+      let cameraName = '';
+      const camRadio = document.querySelector('input[name="cameraRadio"]:checked');
+      if (camRadio) {
+        const cam = config.cameras.find(c => c.id === camRadio.value);
+        if (cam) cameraName = cam.name;
+      }
+      const history = JSON.parse(localStorage.getItem('history') || '[]');
+      history.unshift({
+        date: new Date().toLocaleString(),
+        camera: cameraName,
+        count,
+        total_weight: totalWeight,
+        avg_weight: avgWeight
+      });
+      localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+      updateHistory();
+    };
+
+    // --- Автоматический пересчёт среднего веса ---
+    function recalcAvgWeight() {
+      const count = parseFloat(manualCount.value);
+      const total = parseFloat(manualTotalWeight.value);
+      if (count > 0 && total > 0) {
+        manualAvgWeight.value = (total / count).toFixed(2);
+      } else {
+        manualAvgWeight.value = '';
+      }
+    }
+    manualCount.addEventListener('input', recalcAvgWeight);
+    manualTotalWeight.addEventListener('input', recalcAvgWeight);
+
+    // Инициализируем статус по умолчанию
+    modelStatus.textContent = 'Режим: серверная обработка (YOLO SEG).';
+
+    // Удалены старые контролы выбора локального видеофайла и распознавания с него — используется только RTSP/MJPEG
+
+    // --- Кнопка Стоп/Старт для live (MJPEG) ---
+    const mjpegUrl = config.cameras[0].url;
+    videoPlayPauseBtn.addEventListener('click', () => {
+      if (isVideoPlaying) {
+        video.dataset.prev = video.src;
+        video.removeAttribute('src');
+        isVideoPlaying = false;
+        videoPlayPauseBtn.textContent = 'Старт';
+      } else {
+        video.src = video.dataset.prev || mjpegUrl;
+        isVideoPlaying = true;
+        videoPlayPauseBtn.textContent = 'Стоп';
+      }
+    });
+
+    // --- Файл: автопроигрывание уже реализовано выше через onchange input; старые кнопки удалены ---
+    // Удалён мёртвый код fileOpenBtn/filePlayBtn/filePauseBtn и все alert-ы
+    seekRange.addEventListener('input', () => {
+      const t = parseFloat(seekRange.value || '0') || 0;
+      curTime.textContent = t.toFixed(1);
+      if (!isVideoPlaying && fileSession.id) {
+        // 3-кадровое окно для более стабильного отображения
+        const candidates = [Math.max(0, t - 0.1), t, t + 0.1];
+        let switched = false;
+        const show = (tt) => {
+          if (switched) return;
+          switched = true;
+          video.src = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(tt)}&ts=${Date.now()}`;
+        };
+        // Попробуем последовательные варианты с малой задержкой
+        show(candidates[0]);
+        setTimeout(()=>show(candidates[1]), 120);
+        setTimeout(()=>show(candidates[2]), 240);
+      }
+    });
+
+    // Sync overlay canvas with image size on load/resize
+    function syncOverlaySize(){
+      const rect = video.getBoundingClientRect();
+      const w = video.clientWidth || rect.width || 640;
+      const h = video.clientHeight || rect.height || 480;
+      if (w <= 0 || h <= 0) return;
+      overlayCanvas.width = w;
+      overlayCanvas.height = h;
+      overlayCanvas.style.width = w + 'px';
+      overlayCanvas.style.height = h + 'px';
+    }
+    video.addEventListener('load', syncOverlaySize);
+    video.addEventListener('resize', syncOverlaySize);
+    window.addEventListener('resize', syncOverlaySize);
+
+    // --- История ---
+    function updateHistory() {
+      const history = JSON.parse(localStorage.getItem('history') || '[]');
+      historyTable.innerHTML = history.map(r => `<tr>
+        <td>${r.date}</td>
+        <td>${r.camera}</td>
+        <td>${r.count}</td>
+        <td>${r.total_weight}</td>
+        <td>${r.avg_weight}</td>
+      </tr>`).join('');
+    }
+    updateHistory();
+  </script>
+</body>
+</html>

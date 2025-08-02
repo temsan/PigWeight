@@ -1,2 +1,5 @@
 /models
 /__pycache__
+__pycache__
+*.mp4
+*.mkv
