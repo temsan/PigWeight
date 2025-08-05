@@ -31,7 +31,7 @@ def install_requirements():
             raise FileNotFoundError("requirements.txt not found")
             
         subprocess.check_call([
-            sys.executable,
+            sys.__executable__ if hasattr(sys, "__executable__") else sys.executable,
             "-m",
             "pip",
             "install",
@@ -47,9 +47,6 @@ def convert_to_onnx():
     if not os.path.exists(ONNX_PATH) or os.path.getmtime(MODEL_PATH) > os.path.getmtime(ONNX_PATH):
         print(f"Converting model to ONNX format...")
         ensure_dir(os.path.dirname(ONNX_PATH))
-        
-        # Install required packages if not already installed
-        install_requirements()
         
         # Import ultralytics and load model
         try:
@@ -78,7 +75,7 @@ def convert_to_onnx():
 def main():
     try:
         # Initialize models and requirements
-        # install_requirements()
+        install_requirements()
         download_model()
         convert_to_onnx()
         
@@ -86,13 +83,20 @@ def main():
         ensure_dir('models')
         ensure_dir('stream')
         
-        # Import app after all requirements are installed
-        from api.app import app
-        
-        # Start the Flask app
-        logger.info('Starting server at http://localhost:8000')
-        logger.info('API Health Check: http://localhost:8000/api/health')
-        app.run(host='0.0.0.0', port=8000, debug=True)
+        # Import ASGI app after all requirements are installed
+        # Перешли на FastAPI — запуск через uvicorn
+        host = os.getenv("HOST", "0.0.0.0")
+        port = int(os.getenv("PORT", "8000"))
+        logger.info(f'Starting server at http://{host}:{port}')
+        logger.info(f'API Health Check: http://{host}:{port}/api/health')
+        try:
+            import uvicorn
+            # Запускаем уже импортированный объект приложения для явной связки процесса
+            from api.app import app as fastapi_app
+            uvicorn.run(fastapi_app, host=host, port=port, reload=False, log_level="info")
+        except Exception as e:
+            logger.error(f'Error starting server via uvicorn: {str(e)}')
+            raise
     except Exception as e:
         logger.error(f'Error starting server: {str(e)}')
         sys.exit(1)

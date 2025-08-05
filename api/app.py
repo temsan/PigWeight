@@ -1,588 +1,675 @@
-from flask import Flask, request, jsonify, send_from_directory, Response
-from flask_cors import CORS
 import os
-import logging
-import sys
+import cv2
+import json
 import time
+import asyncio
+import logging
 from pathlib import Path
-from threading import Lock
+from typing import Dict, Optional, Generator
 
-# Add the root directory to the Python path
-BASE_DIR = Path(__file__).parent.parent
-sys.path.append(str(BASE_DIR))
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
+from fastapi.responses import StreamingResponse, HTMLResponse, Response, JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from core.config import MODEL_PATH, ONNX_PATH  # keep existing health check
-from services.rtsp_manager import RTSPManager   # keep existing HLS endpoints
-
-# Lazy import heavy deps
 try:
-    import cv2
+    from dotenv import load_dotenv
 except Exception:
-    cv2 = None
+    load_dotenv = None
 
-# Configure logging
+from norfair import Detection, Tracker, Video, draw_tracked_objects
+import numpy as np
+
+# --- Bootstrap ---
+BASE_DIR = Path(__file__).parent.parent
+if load_dotenv:
+    load_dotenv(BASE_DIR / ".env")
+
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("api")
 
-# Initialize Flask app
-app = Flask(__name__, static_folder=None)  # Disable default static folder
-CORS(app)
+app = FastAPI(title="PigWeight API (FastAPI)")
 
-# Define directories
-STATIC_DIR = BASE_DIR / 'static'
-MODELS_DIR = BASE_DIR / 'models'
-STREAM_DIR = BASE_DIR / 'stream'
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Ensure all directories exist
-for directory in [STATIC_DIR, MODELS_DIR, STREAM_DIR]:
-    directory.mkdir(exist_ok=True, parents=True)
+# Serve static and models if exist
+STATIC_DIR = BASE_DIR / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+MODELS_DIR = BASE_DIR / "models"
+if MODELS_DIR.exists():
+    app.mount("/models", StaticFiles(directory=str(MODELS_DIR)), name="models")
 
-# Configure static file serving
-app.add_url_rule('/static/<path:filename>', 'static', build_only=True)
-app.add_url_rule('/models/<path:filename>', 'model_file', build_only=True)
-app.add_url_rule('/stream/<path:filename>', 'stream_file', build_only=True)
+# --- Config ---
+CAM_DEFAULT = os.getenv("CAM_DEFAULT", "rtsp://admin:Qwerty.123@10.15.6.24/1/1")
+CAM_URL = os.getenv("CAM_URL", CAM_DEFAULT)
+JPEG_QUALITY = int(os.getenv("JPEG_QUALITY", "80"))
+TARGET_FPS = float(os.getenv("FPS", "12"))
+BOUNDARY = "frame"
 
-# Initialize RTSP manager
-# If you don't need HLS via ffmpeg anymore, you can disable it by commenting the next line.
-rtsp_manager = RTSPManager()
-
-# Global MJPEG config/state (multi-camera capable)
-# cameras: {camera_id: {rtsp_url, cy1, offset, frame_skip, conf_thres, seg_model_path}}
-_cfg = {
-    'cameras': {
-        'cam1': {
-            'rtsp_url': 'rtsp://admin:Qwerty.123@10.15.6.24/1/1',
-            'cy1': 487,
-            'offset': 6,
-            'frame_skip': 3,
-            'conf_thres': 0.25,
-            'seg_model_path': str((BASE_DIR / 'models' / 'yolo11n-seg.pt'))
-        }
-    }
-}
-_state_lock = Lock()
-# counts per camera
-_last_counts = {}  # {camera_id: int}
-# File video sessions for playback/seek
-_file_sessions = {}  # {file_id: {'cap': cv2.VideoCapture, 'path': str, 'fps': float, 'frame_count': int, 'duration': float, 'camera': str, 'model_path': str}}
-_file_lock = Lock()
-
-@app.route('/')
-def index():
-    return send_from_directory(STATIC_DIR, 'index.html')
-
-# Serve static files
-@app.route('/<path:filename>')
-def serve_static(filename):
-    return send_from_directory(STATIC_DIR, filename)
-
-# Serve model files with proper MIME type
-@app.route('/models/<path:filename>')
-def serve_model(filename):
-    return send_from_directory(MODELS_DIR, filename, mimetype='application/octet-stream')
-
-# Serve stream files with proper MIME type
-@app.route('/stream/<path:filename>')
-def serve_stream(filename):
-    if filename.endswith('.m3u8'):
-        return send_from_directory(STREAM_DIR, filename, mimetype='application/vnd.apple.mpegurl')
-    elif filename.endswith('.ts'):
-        return send_from_directory(STREAM_DIR, filename, mimetype='video/MP2T')
-    return send_from_directory(STREAM_DIR, filename)
-
-# NOTE: If HLS (ffmpeg) is not required, prefer using /api/video_config to set RTSP URL and consume /api/video_feed directly.
-@app.route('/api/stream/start', methods=['POST'])
-def start_stream():
-    """
-    Start or register a camera configuration.
-    body: { camera_id: "cam1", rtsp_url: "...", cy1?, offset?, frame_skip?, conf_thres?, seg_model_path? }
-    returns { processed_stream_url: f"/api/video_feed?camera=cam1" }
-    """
-    data = request.json or {}
-    cam_id = data.get('camera_id', 'cam1')
-    rtsp_url = data.get('rtsp_url', '')
-    with _state_lock:
-        cam = _cfg['cameras'].get(cam_id, {})
-        if rtsp_url:
-            cam['rtsp_url'] = rtsp_url
-        # Ensure defaults so further code doesn't KeyError
-        cam.setdefault('cy1', 487)
-        cam.setdefault('offset', 6)
-        cam.setdefault('frame_skip', 3)
-        cam.setdefault('conf_thres', 0.25)
-        cam.setdefault('seg_model_path', str((BASE_DIR / 'models' / 'yolo11n-seg.pt')))
-        _cfg['cameras'][cam_id] = cam
-    return jsonify({'processed_stream_url': f'/api/video_feed?camera={cam_id}'})
-
-# Stop doesn't need to control ffmpeg when relying on MJPEG; keep as no-op for compatibility.
-@app.route('/api/stream/stop/<camera_id>', methods=['POST'])
-def stop_stream(camera_id):
-    # No ffmpeg to stop; keep camera registered. Optionally could deregister here.
-    return jsonify({'status': 'noop'})
-
-@app.route('/api/health')
-def health_check():
-    with _state_lock:
-        cams = list(_cfg['cameras'].keys())
-        models_ok = {}
-        # Report seg model presence for first camera (and overall default path)
-        for cid, cfg in _cfg['cameras'].items():
-            models_ok[cid] = os.path.exists(cfg.get('seg_model_path', ''))
-    return jsonify({
-        'status': 'ok',
-        'cameras': cams,
-        'models': {
-            'yolo11n.pt': os.path.exists(MODEL_PATH),
-            'yolo11n.onnx': os.path.exists(ONNX_PATH),
-            'per_camera_seg': models_ok
-        }
-    })
-
-# Configure MJPEG processing settings
-@app.route('/api/video_config', methods=['GET','POST'])
-def video_config():
-    """
-    Update camera config.
-    Supports:
-      - POST body JSON
-      - GET query params for convenience: /api/video_config?camera_id=cam1&seg_model_path=models/yolo11n-seg.pt&rtsp_url=...
-    body/params: { camera_id: "cam1", rtsp_url?, cy1?, offset?, frame_skip?, conf_thres?, seg_model_path? }
-    """
-    if request.method == 'POST':
-        data = request.json or {}
-    else:
-        data = request.args.to_dict(flat=True)
-    cam_id = data.get('camera_id') or data.get('camera') or 'cam1'
-    with _state_lock:
-        cam = _cfg['cameras'].get(cam_id, {})
-        if 'rtsp_url' in data: cam['rtsp_url'] = data['rtsp_url']
-        if 'seg_model_path' in data: cam['seg_model_path'] = data['seg_model_path']
-        if 'cy1' in data: cam['cy1'] = int(data['cy1'])
-        if 'offset' in data: cam['offset'] = int(data['offset'])
-        if 'frame_skip' in data: cam['frame_skip'] = max(1, int(data['frame_skip']))
-        if 'conf_thres' in data: cam['conf_thres'] = float(data['conf_thres'])
-        if not cam:
-            return jsonify({'error': f'Unknown camera {cam_id}'}), 400
-        _cfg['cameras'][cam_id] = cam
-        out = {cid: {**cfg, 'seg_model_path': cfg.get('seg_model_path', '')} for cid, cfg in _cfg['cameras'].items()}
-    return jsonify({'status': 'ok', 'config': out})
-
-@app.route('/api/video_count', methods=['GET'])
-def video_count():
-    """
-    Query param:
-      camera: camera id, default 'cam1'
-    Returns JSON with count for the selected camera and optional per-camera summary.
-    """
-    cam_id = request.args.get('camera', 'cam1')
-    with _state_lock:
-        cnt = _last_counts.get(cam_id, 0)
-        summary = dict(_last_counts)
-    return jsonify({'camera': cam_id, 'count': cnt, 'all': summary})
-
-def _load_model(path):
-    from ultralytics import YOLO
-    return YOLO(path)
-
-def _draw(frame, line_y, count, dets):
-    # dets: list of (x1,y1,x2,y2,id,conf)
-    h, w = frame.shape[:2]
-    cv2.line(frame, (0, line_y), (w, line_y), (0, 255, 255), 2)
-    for (x1,y1,x2,y2,ident,conf) in dets:
-        x1=int(max(0,x1)); y1=int(max(0,y1)); x2=int(min(w-1,x2)); y2=int(min(h-1,y2))
-        cv2.rectangle(frame,(x1,y1),(x2,y2),(0,64,255),2)
-        cx, cy = (x1+x2)//2, (y1+y2)//2
-        cv2.circle(frame,(cx,cy),4,(0,0,255),-1)
-        txt = f"id {ident} {conf:.2f}"
-        cv2.putText(frame, txt, (x1, max(0,y1-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (10,10,10), 2, cv2.LINE_AA)
-        cv2.putText(frame, txt, (x1, max(0,y1-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1, cv2.LINE_AA)
-    # counter box
-    cv2.rectangle(frame,(10,10),(200,55),(0,0,0),-1)
-    cv2.putText(frame, f"Count: {count}", (20,45), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,255,0), 2, cv2.LINE_AA)
-    return frame
-
-def _update_tracker(state, boxes):
-    # state contains dict with 'next_id', 'tracks': {id:(cx,cy)}
-    # boxes: list of (x1,y1,x2,y2,conf)
-    import math
-    new_tracks = {}
-    assigned = set()
-    # compute centers
-    centers = []
-    for (x1,y1,x2,y2,conf) in boxes:
-        cx = (x1+x2)/2.0
-        cy = (y1+y2)/2.0
-        centers.append((cx,cy,conf,x1,y1,x2,y2))
-    # match by nearest
-    for tid,(pcx,pcy) in state['tracks'].items():
-        best_i, best_d = -1, 1e9
-        for i,(cx,cy,conf,x1,y1,x2,y2) in enumerate(centers):
-            if i in assigned: continue
-            d = math.hypot(pcx-cx,pcy-cy)
-            if d < best_d:
-                best_d, best_i = d, i
-        if best_i >= 0 and best_d < 80:
-            cx,cy,conf,x1,y1,x2,y2 = centers[best_i]
-            new_tracks[tid] = (cx,cy)
-            assigned.add(best_i)
-        # else track drops
-    # assign new ids to remaining
-    for i,(cx,cy,conf,x1,y1,x2,y2) in enumerate(centers):
-        if i in assigned: continue
-        tid = state['next_id']
-        state['next_id'] += 1
-        new_tracks[tid] = (cx,cy)
-        assigned.add(i)
-    state['tracks'] = new_tracks
-    # return list with ids
-    out = []
-    idx_map = {}
-    # map centers back to ids by nearest
-    for tid,(cx,cy) in state['tracks'].items():
-        idx_map[tid] = (cx,cy)
-    for (x1,y1,x2,y2,conf) in boxes:
-        # find matching id by nearest center
-        best_id, best_d = None, 1e9
-        for tid,(cx,cy) in idx_map.items():
-            d = (abs((x1+x2)/2 - cx) + abs((y1+y2)/2 - cy))
-            if d < best_d:
-                best_d, best_id = d, tid
-        out.append((x1,y1,x2,y2,best_id,conf))
-    return out
-
-def _gen_mjpeg(cam_id: str):
-    if cv2 is None:
-        yield b''
-        return
-    # lazy import ultralytics
-    try:
-        with _state_lock:
-            cam_cfg = _cfg['cameras'][cam_id]
-        model = _load_model(cam_cfg['seg_model_path'])
-    except Exception as e:
-        logger.error(f"Failed to load model for {cam_id}: {e}")
-        yield b''
-        return
-    # RTSP open
-    cap = None
-    try:
-        rtsp_url = cam_cfg.get('rtsp_url', '')
-        if not rtsp_url:
-            logger.error(f"RTSP URL is empty for camera {cam_id}")
-            yield b''
-            return
-        cap = cv2.VideoCapture(rtsp_url)
-        if not cap.isOpened():
-            logger.error(f"Cannot open RTSP for camera {cam_id}: {rtsp_url}")
-            yield b''
-            return
-        # state
-        track_state = {'next_id':1, 'tracks':{}}
-        counted_ids = set()
-        frame_idx = 0
-        while True:
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                time.sleep(0.05)
-                continue
-            frame_idx += 1
-            # frame skip
-            if frame_idx % max(1, cam_cfg['frame_skip']) != 0:
-                # still emit raw frame to keep MJPEG alive
-                ret, buf = cv2.imencode('.jpg', frame)
-                if not ret:
-                    continue
-                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
-                continue
-            # inference
-            try:
-                results = model.predict(frame, imgsz=640, conf=cam_cfg['conf_thres'], verbose=False)
-            except Exception as e:
-                logger.error(f"Inference error [{cam_id}]: {e}")
-                ret, buf = cv2.imencode('.jpg', frame)
-                if not ret:
-                    continue
-                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
-                continue
-            # parse cows only (COCO id 20 is 'cow' in some versions, YOLOv8 uses 20? classic coco has cow index 20 zero-based; older texts use 18)
-            # ultralytics results: r.boxes.xyxy, r.boxes.cls, r.boxes.conf
-            det_boxes = []
-            try:
-                r = results[0]
-                if hasattr(r, 'boxes') and r.boxes is not None:
-                    xyxy = r.boxes.xyxy.cpu().numpy()
-                    cls = r.boxes.cls.cpu().numpy() if r.boxes.cls is not None else []
-                    conf = r.boxes.conf.cpu().numpy() if r.boxes.conf is not None else []
-                    for i, b in enumerate(xyxy):
-                        x1,y1,x2,y2 = b
-                        c = int(cls[i]) if i < len(cls) else -1
-                        cf = float(conf[i]) if i < len(conf) else 0.0
-                        # pig custom model not provided; user asks to count pigs but we only have a generic seg model path name.
-                        # Until custom pig class available, filter for 'cow'-like (commonly class id 20 in COCO; sometimes 18 in older mappings).
-                        if c in (18, 19, 20, 21):  # sheep(19), cow(20) with 0-based; include nearby classes for robustness
-                            det_boxes.append((float(x1), float(y1), float(x2), float(y2), cf))
-            except Exception as e:
-                logger.warning(f"Parsing detections failed: {e}")
-            # tracking
-            dets_with_ids = _update_tracker(track_state, det_boxes)
-            # counting on line cross
-            cy1 = cam_cfg.get('cy1', 487); off = cam_cfg.get('offset', 6)
-            for (x1,y1,x2,y2,tid,cf) in dets_with_ids:
-                cy = (y1+y2)/2.0
-                if cy1 - off <= cy <= cy1 + off:
-                    if tid not in counted_ids:
-                        counted_ids.add(tid)
-            with _state_lock:
-                _last_counts[cam_id] = len(counted_ids)
-            # overlay
-            frame = _draw(frame, cy1, _last_counts.get(cam_id, 0), dets_with_ids)
-            # encode and yield
-            ret, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            if not ret:
-                continue
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
-    finally:
-        if cap is not None:
-            cap.release()
-
-# -------------------------
-# Models listing endpoint
-# -------------------------
-@app.route('/api/models', methods=['GET'])
-def get_models():
-    try:
-        files = []
-        for name in os.listdir(MODELS_DIR):
-            p = MODELS_DIR / name
-            if p.is_file() and name.lower().endswith('.pt'):
-                files.append(name)
-        return jsonify({'models': sorted(files)})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# -------------------------
-# Video file playback endpoints
-# -------------------------
-from werkzeug.utils import secure_filename
-
-UPLOAD_DIR = BASE_DIR / 'uploads'
+UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-ALLOWED_VIDEO_EXT = {'.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm'}
 
-def _open_cap_for_file(path: str):
-    cap = cv2.VideoCapture(path)
-    if not cap.isOpened():
-        return None, 'Cannot open video file'
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    duration = frame_count / fps if fps > 0 and frame_count > 0 else 0
-    return cap, {'fps': float(fps), 'frame_count': frame_count, 'duration': float(duration)}
+def encode_jpeg(frame) -> bytes:
+    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
+    if not ok:
+        return b""
+    return buf.tobytes()
 
-@app.route('/api/video_file/open', methods=['POST'])
-def open_video_file():
-    """
-    Multipart upload: camera, id, file (binary)
-    Returns: {id, camera, path, fps, frame_count, duration}
-    Notes:
-      - Server-side uploads to ./uploads without UI раздутия; один input в верхней панели.
-    """
-    if cv2 is None:
-        return jsonify({'error': 'cv2 not available'}), 500
-    cam_id = request.form.get('camera', 'cam_file1')
-    file_id = request.form.get('id', 'file1')
-    file = request.files.get('file')
-    if not file or file.filename == '':
-        return jsonify({'error': 'file required'}), 400
-    filename = secure_filename(file.filename)
-    ext = (Path(filename).suffix or '').lower()
-    if ext not in ALLOWED_VIDEO_EXT:
-        return jsonify({'error': f'unsupported extension {ext}'}), 400
-    dst = UPLOAD_DIR / filename
-    try:
-        file.save(dst)
-    except Exception as e:
-        return jsonify({'error': f'upload failed: {e}'}), 500
+def multipart_chunk(img_bytes: bytes) -> bytes:
+    header = (
+        f"--{BOUNDARY}\r\n"
+        "Content-Type: image/jpeg\r\n"
+        f"Content-Length: {len(img_bytes)}\r\n\r\n"
+    ).encode("utf-8")
+    return header + img_bytes + b"\r\n"
 
-    path = str(dst)
-    with _file_lock:
-        # close existing
-        sess = _file_sessions.get(file_id)
-        if sess and sess.get('cap'):
-            try: sess['cap'].release()
-            except: pass
-        # Prefer FFmpeg backend
-        try:
-            cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG)
-        except Exception:
-            cap = None
-        if cap is None or not cap.isOpened():
-            cap, meta = _open_cap_for_file(path)
-            if cap is None:
-                return jsonify({'error': meta}), 400
-            fps = meta['fps']; frame_count = meta['frame_count']; duration = meta['duration']
-        else:
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-            duration = frame_count / fps if fps > 0 and frame_count > 0 else 0
-        # ensure camera config exists
-        with _state_lock:
-            cam_cfg = _cfg['cameras'].get(cam_id, {
-                'rtsp_url': '',
-                'cy1': 487,
-                'offset': 6,
-                'frame_skip': 1,
-                'conf_thres': 0.25,
-                'seg_model_path': str((BASE_DIR / 'models' / 'yolo11n-seg.pt'))
-            })
-            _cfg['cameras'][cam_id] = cam_cfg
-        _file_sessions[file_id] = {
-            'cap': cap,
-            'path': path,
-            'camera': cam_id,
-            'fps': float(fps),
-            'frame_count': int(frame_count),
-            'duration': float(duration),
-            'pos_frame': 0
-        }
-    return jsonify({'id': file_id, 'camera': cam_id, 'path': path, 'fps': float(fps), 'frame_count': int(frame_count), 'duration': float(duration)})
+# --- Camera Manager (single capture per camera with backoff) ---
+class CameraStream:
+    def __init__(self, cam_id: str, rtsp_url: str):
+        self.cam_id = cam_id
+        self.rtsp_url = rtsp_url
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.running = False
+        self.last_jpeg: Optional[bytes] = None
+        self.last_ts = 0.0
+        self.lock = asyncio.Lock()
+        self.task: Optional[asyncio.Task] = None
+        self.fps_window = []
+        self.target_dt = 1.0 / max(1e-3, TARGET_FPS)
 
-@app.route('/api/video_file/close', methods=['GET'])
-def close_video_file():
-    file_id = request.args.get('id', 'file1')
-    with _file_lock:
-        sess = _file_sessions.pop(file_id, None)
-        if not sess:
-            return jsonify({'status': 'noop'})
-        try:
-            if sess.get('cap'):
-                sess['cap'].release()
-        finally:
-            return jsonify({'status': 'closed', 'id': file_id})
+        # --- Server-side inference config (cow counting) ---
+        self.model = None
+        self.model_loaded = False
+        self.frame_idx = 0
+        # Инференс с пропуском промежуточных кадров — только на "крайнем" кадре из окна:
+        # реализуем как запуск инференса раз в frame_skip кадров
+        self.frame_skip = 3
+        self.target_class_ids = {20, 17, 19}  # cow, sheep, horse
+        self.conf_thres = 0.30
+        self.avg_window = 20
+        self.count_window = []  # последние N детектов для усреднения
+        self.avg_count = 0.0
+        self.last_count = 0
 
-def _infer_and_draw_for_cam(cam_id: str, frame):
-    try:
-        with _state_lock:
-            cam_cfg = _cfg['cameras'][cam_id]
-        model = _load_model(cam_cfg['seg_model_path'])
-    except Exception as e:
-        logger.error(f"Failed to load model for {cam_id}: {e}")
-        return frame
-    # inference
-    try:
-        results = model.predict(frame, imgsz=640, conf=cam_cfg['conf_thres'], verbose=False)
-    except Exception as e:
-        logger.error(f"Inference error (file) [{cam_id}]: {e}")
-        return frame
-    # parse
-    det_boxes = []
-    try:
-        r = results[0]
-        if hasattr(r, 'boxes') and r.boxes is not None:
-            xyxy = r.boxes.xyxy.cpu().numpy()
-            cls = r.boxes.cls.cpu().numpy() if r.boxes.cls is not None else []
-            conf = r.boxes.conf.cpu().numpy() if r.boxes.conf is not None else []
-            for i, b in enumerate(xyxy):
-                x1,y1,x2,y2 = b
-                c = int(cls[i]) if i < len(cls) else -1
-                cf = float(conf[i]) if i < len(conf) else 0.0
-                if c in (18,19,20,21):
-                    det_boxes.append((float(x1), float(y1), float(x2), float(y2), cf))
-    except Exception as e:
-        logger.warning(f"Parsing detections failed (file): {e}")
-    # simple tracker per frame (no persistent id for file seek); still count line-cross in-session
-    track_state = {'next_id':1, 'tracks':{}}
-    dets_with_ids = _update_tracker(track_state, det_boxes)
-    cy1 = cam_cfg.get('cy1', 487); off = cam_cfg.get('offset', 6)
-    counted = 0
-    for (x1,y1,x2,y2,tid,cf) in dets_with_ids:
-        cy = (y1+y2)/2.0
-        if cy1 - off <= cy <= cy1 + off:
-            counted += 1
-    with _state_lock:
-        _last_counts[cam_id] = counted
-    frame = _draw(frame, cy1, counted, dets_with_ids)
-    return frame
+        # --- Server inference config ---
+        self.model = None
+        self.model_loaded = False
+        self.frame_idx = 0
+        self.frame_skip = 3  # as requested
+        self.conf_thres = 0.40
+        self.target_class_ids = {18}  # pig
+        self.avg_window = 10
+        self.count_window = []  # rolling counts
+        self.avg_count = 0.0
+        self.last_count = 0
 
-@app.route('/api/video_file/frame', methods=['GET'])
-def video_file_frame():
-    """
-    Single frame by time (seconds): /api/video_file/frame?id=file1&camera=camFile&t=12.34
-    """
-    if cv2 is None:
-        return Response(b'', mimetype='image/jpeg')
-    file_id = request.args.get('id', 'file1')
-    cam_id = request.args.get('camera', 'cam_file1')
-    t = float(request.args.get('t', '0'))
-    with _file_lock:
-        sess = _file_sessions.get(file_id)
-        if not sess:
-            return jsonify({'error': 'file session not opened'}), 400
-        cap = sess['cap']
-        # seek
-        cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t*1000.0))
-        ok, frame = cap.read()
-    if not ok or frame is None:
-        return Response(b'', mimetype='image/jpeg')
-    frame = _infer_and_draw_for_cam(cam_id, frame)
-    ret, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-    if not ret:
-        return Response(b'', mimetype='image/jpeg')
-    return Response(buf.tobytes(), mimetype='image/jpeg')
+        self.tracker = None
 
-def _gen_file_mjpeg(file_id: str, cam_id: str, rate: float):
-    if cv2 is None:
-        yield b''
-        return
-    with _file_lock:
-        sess = _file_sessions.get(file_id)
-        if not sess:
-            yield b''
-            return
-        cap = sess['cap']
-        fps = sess.get('fps', 25.0) or 25.0
-    delay = max(0.005, (1.0 / fps) / max(0.01, float(rate or 1.0)))
+    def _open(self) -> bool:
+        cap = cv2.VideoCapture(self.rtsp_url)
+        for prop, val in ((cv2.CAP_PROP_BUFFERSIZE, 1),):
+            try:
+                cap.set(prop, val)
+            except Exception:
+                pass
+        if not cap or not cap.isOpened():
+            try:
+                cap.release()
+            except Exception:
+                pass
+            return False
+        self.cap = cap
+        logger.info("[%s] RTSP opened", self.cam_id)
+        # lazy model load on first successful open
+        if not self.model_loaded:
+            try:
+                from ultralytics import YOLO
+                model_path = str((MODELS_DIR / "yolo11n-seg.pt"))
+                if os.path.exists(model_path):
+                    self.model = YOLO(model_path)
+                    self.model_loaded = True
+                    logger.info("[%s] YOLO model loaded: %s", self.cam_id, model_path)
+                else:
+                    logger.warning("[%s] Model file not found: %s", self.cam_id, model_path)
+            except Exception as e:
+                logger.exception("[%s] Failed to load YOLO model: %s", self.cam_id, e)
+                self.model = None
+                self.model_loaded = False
+        if not self.tracker:
+            self.tracker = Tracker(distance_function=norfair.detections.iou, distance_threshold=0.5)
+        return True
+
+    def _close(self):
+        if self.cap is not None:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+        self.cap = None
+
+    async def _loop(self):
+        self.running = True
+        backoff = 0.5
+        max_back = 5.0
+        while self.running:
+            if self.cap is None:
+                if not self._open():
+                    logger.warning("[%s] open failed, retry in %.2fs", self.cam_id, backoff)
+                    await asyncio.sleep(backoff)
+                    backoff = min(max_back, backoff * 2)
+                    continue
+                backoff = 0.5
+            ok, frame = self.cap.read() if self.cap is not None else (False, None)
+            now = time.time()
+            if not ok or frame is None:
+                self._close()
+                logger.warning("[%s] read failed, reconnecting...", self.cam_id)
+                await asyncio.sleep(backoff)
+                backoff = min(max_back, max(0.5, backoff * 2))
+                continue
+
+            # throttle
+            elapsed = now - self.last_ts
+            if elapsed < self.target_dt:
+                await asyncio.sleep(self.target_dt - elapsed)
+                now = time.time()
+
+            # --- Server-side inference with rolling average ---
+            do_infer = (self.model_loaded and (self.frame_idx % max(1, self.frame_skip) == 0))
+            cur_count = self.last_count
+            if do_infer:
+                try:
+                    # Inference
+                    results = self.model.predict(
+                        frame,
+                        imgsz=640,
+                        conf=self.conf_thres,
+                        verbose=False
+                    )
+                    det_count = 0
+                    detections = []
+                    det_classes = []
+                    det_ids = []
+                    det_bboxes = []
+                    det_masks = []
+                    try:
+                        r = results[0]
+                        if hasattr(r, "boxes") and r.boxes is not None:
+                            xyxy = r.boxes.xyxy
+                            cls = r.boxes.cls
+                            conf = r.boxes.conf
+                            if hasattr(xyxy, "cpu"): xyxy = xyxy.cpu().numpy()
+                            if hasattr(cls, "cpu"): cls = cls.cpu().numpy()
+                            if hasattr(conf, "cpu"): conf = conf.cpu().numpy()
+                            for i, b in enumerate(xyxy):
+                                c = int(cls[i]) if i < len(cls) else -1
+                                cf = float(conf[i]) if i < len(conf) else 0.0
+                                if c in self.target_class_ids and cf >= self.conf_thres:
+                                    x1, y1, x2, y2 = b
+                                    detections.append(Detection(points=np.array([[x1, y1], [x2, y2]])))
+                                    det_classes.append(c)
+                                    det_bboxes.append([float(x1), float(y1), float(x2), float(y2)])
+                        # --- Instance tracking ---
+                        tracked = self.tracker.update(detections=detections)
+                        det_count = len(tracked)
+                        det_ids = [t.id for t in tracked]
+                        # --- Overlay tracked objects ---
+                        for t in tracked:
+                            x1, y1 = t.estimate[0]
+                            x2, y2 = t.estimate[1]
+                            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 255), 2)
+                            cv2.putText(frame, f"ID:{t.id}", (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
+                        # --- Overlay masks (если есть) ---
+                        if hasattr(r, "masks") and r.masks is not None:
+                            masks = r.masks.data.cpu().numpy()
+                            for mask in masks:
+                                mask = (mask > 0.5).astype(np.uint8) * 255
+                                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                cv2.drawContours(frame, contours, -1, (0, 180, 255), 2)
+                    except Exception:
+                        det_count = 0
+                        det_ids = []
+                        det_classes = []
+                        det_bboxes = []
+                    # update rolling window
+                    self.count_window.append(det_count)
+                    if len(self.count_window) > self.avg_window:
+                        self.count_window.pop(0)
+                    self.avg_count = sum(self.count_window) / max(1, len(self.count_window))
+                    cur_count = int(round(self.avg_count))
+                    self.last_count = cur_count
+                    self.last_debug_classes = det_classes
+                    self.last_debug_ids = det_ids
+                    self.last_debug_bboxes = det_bboxes
+                except Exception:
+                    # keep previous count on failure
+                    pass
+
+            self.frame_idx += 1
+
+            # draw overlays: line + count box
+            try:
+                h, w = frame.shape[:2]
+                # line (optional visual indicator)
+                y_line = int(h * 0.5)
+                cv2.line(frame, (0, y_line), (w, y_line), (0, 180, 255), 2)
+                # count box
+                cv2.rectangle(frame, (10, 10), (200, 55), (0, 0, 0), -1)
+                cv2.putText(frame, f"Count: {cur_count}", (20, 45),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
+            except Exception:
+                pass
+
+            jpeg = encode_jpeg(frame)
+            if jpeg:
+                async with self.lock:
+                    self.last_jpeg = jpeg
+                    if self.last_ts > 0:
+                        inst = 1.0 / max(1e-6, now - self.last_ts)
+                        self.fps_window.append(inst)
+                        if len(self.fps_window) > 30:
+                            self.fps_window.pop(0)
+                    self.last_ts = now
+
+        self._close()
+
+    def start(self):
+        if self.task is None or self.task.done():
+            self.task = asyncio.create_task(self._loop())
+
+    async def stop(self):
+        self.running = False
+        if self.task:
+            try:
+                await asyncio.wait_for(self.task, timeout=1.0)
+            except Exception:
+                pass
+            self.task = None
+        self._close()
+
+    async def get_last_jpeg(self) -> Optional[bytes]:
+        async with self.lock:
+            return self.last_jpeg
+
+    def fps(self) -> float:
+        if not self.fps_window:
+            return 0.0
+        return sum(self.fps_window) / len(self.fps_window)
+
+class CameraManager:
+    def __init__(self):
+        self.cams: Dict[str, CameraStream] = {}
+
+    def get_or_create(self, cam_id: str, rtsp_url: str) -> CameraStream:
+        cs = self.cams.get(cam_id)
+        if cs is None:
+            cs = CameraStream(cam_id, rtsp_url)
+            self.cams[cam_id] = cs
+            cs.start()
+        return cs
+
+    def get(self, cam_id: str) -> Optional[CameraStream]:
+        return self.cams.get(cam_id)
+
+CAMERAS = CameraManager()
+DEFAULT_CAM_ID = "cam1"
+
+def mjpeg_multicast(cam: CameraStream) -> Generator[bytes, None, None]:
+    # sync generator, uses last_jpeg snapshot
     while True:
-        with _file_lock:
-            sess = _file_sessions.get(file_id)
-            if not sess:
-                break
-            cap = sess['cap']
-            ok, frame = cap.read()
-        if not ok or frame is None:
+        jpeg = cam.last_jpeg
+        if jpeg is None:
             time.sleep(0.05)
             continue
-        frame = _infer_and_draw_for_cam(cam_id, frame)
-        ret, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-        if not ret:
+        yield multipart_chunk(jpeg)
+        time.sleep(max(0.0, (1.0 / max(1.0, TARGET_FPS)) * 0.5))
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    return HTMLResponse("<!doctype html><title>PigWeight</title><h1>static/index.html not found</h1>", status_code=200)
+
+@app.get("/api/video_feed")
+def video_feed(mode: str = Query(default="server", pattern="^(server|client)$"),
+               camera: str = Query(default=DEFAULT_CAM_ID)):
+    cam = CAMERAS.get_or_create(camera, CAM_URL)
+    return StreamingResponse(mjpeg_multicast(cam), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
+
+@app.websocket("/ws/count")
+async def ws_count(ws: WebSocket, camera: str = DEFAULT_CAM_ID):
+    await ws.accept()
+    cam = CAMERAS.get_or_create(camera, CAM_URL)
+    try:
+        await ws.send_text(json.dumps({"type": "status", "text": "connected"}))
+        while True:
+            await asyncio.sleep(1.0)
+            await ws.send_text(json.dumps({
+                "type": "count_update",
+                "camera": camera,
+                "count": int(cam.last_count),
+                "fps": round(cam.fps(), 2),
+                "debug": {"avg": cam.avg_count, "classes": getattr(cam, 'last_debug_classes', []), "ids": getattr(cam, 'last_debug_ids', []), "bboxes": getattr(cam, 'last_debug_bboxes', [])}
+            }))
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
+    except Exception as e:
+        try:
+            await ws.send_text(json.dumps({"type": "error", "text": f"{e}"}))
+        except Exception:
+            pass
+
+# --- Video file endpoints (ported) ---
+def _open_file_cap(path: str):
+    """
+    Безопасное открытие файла (Windows-friendly):
+    - Не используем CAP_FFMPEG (провоцирует libavcodec/pthread_frame asserts).
+    - Форсируем однопоточность декодера и минимальную буферизацию, где поддерживается.
+    - Все операции с cap обёрнуты в try/except.
+    """
+    cap = None
+    try:
+        cap = cv2.VideoCapture(path)  # без CAP_FFMPEG
+        if not cap or not cap.isOpened():
+            try:
+                if cap:
+                    cap.release()
+            except Exception:
+                pass
+            return None, "Cannot open video file"
+        try:
+            cap.set(cv2.CAP_PROP_THREADS, 1)
+        except Exception:
+            pass
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
+        return cap, {"fps": float(fps), "frame_count": frame_count, "duration": float(duration)}
+    except Exception as e:
+        try:
+            if cap:
+                cap.release()
+        except Exception:
+            pass
+        return None, f"Exception: {e}"
+
+_file_sessions: Dict[str, dict] = {}
+
+@app.post("/api/video_file/open")
+async def api_video_file_open(camera: str = Form(default="cam_file1"),
+                              id: str = Form(default="file1"),
+                              file: UploadFile = File(...)):
+    try:
+        dst = UPLOAD_DIR / (file.filename or "upload.bin")
+        with open(dst, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+    except Exception as e:
+        return JSONResponse({"error": f"upload failed: {e}"}, status_code=500)
+
+    cap, meta = _open_file_cap(str(dst))
+    if cap is None:
+        return JSONResponse({"error": meta}, status_code=400)
+    _file_sessions[id] = {
+        "cap": cap,
+        "path": str(dst),
+        "camera": camera,
+        "fps": meta["fps"],
+        "frame_count": meta["frame_count"],
+        "duration": meta["duration"],
+    }
+    return {"id": id, "camera": camera, "path": str(dst), **meta}
+
+@app.get("/api/video_file/close")
+def api_video_file_close(id: str = Query(default="file1")):
+    sess = _file_sessions.pop(id, None)
+    if not sess:
+        return {"status": "noop"}
+    try:
+        if sess.get("cap"):
+            sess["cap"].release()
+    finally:
+        return {"status": "closed", "id": id}
+
+@app.get("/api/video_file/frame")
+def api_video_file_frame(id: str = Query(default="file1"),
+                         camera: str = Query(default="cam_file1"),
+                         t: float = Query(default=0.0)):
+    sess = _file_sessions.get(id)
+    if not sess:
+        return JSONResponse({"error": "file session not opened"}, status_code=400)
+    cap = sess["cap"]
+    cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(t) * 1000.0))
+    ok, frame = cap.read()
+    if not ok or frame is None:
+        return Response(b"", media_type="image/jpeg")
+    # --- Инференс и overlay ---
+    det_count = 0
+    try:
+        from ultralytics import YOLO
+        model_path = str((MODELS_DIR / "yolo11n-seg.pt"))
+        if not hasattr(api_video_file_frame, "model"):
+            api_video_file_frame.model = YOLO(model_path)
+        model = api_video_file_frame.model
+        target_class_ids = {20, 17, 19}  # cow, sheep, horse
+        conf_thres = 0.30
+        results = model.predict(frame, imgsz=640, conf=conf_thres, verbose=False)
+        r = results[0]
+        if hasattr(r, "boxes") and r.boxes is not None:
+            xyxy = r.boxes.xyxy.cpu().numpy()
+            cls = r.boxes.cls.cpu().numpy()
+            conf = r.boxes.conf.cpu().numpy()
+            for i, b in enumerate(xyxy):
+                c = int(cls[i])
+                cf = float(conf[i])
+                if c in target_class_ids and cf >= conf_thres:
+                    det_count += 1
+                    x1, y1, x2, y2 = map(int, b)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,255), 2)
+        if hasattr(r, "masks") and r.masks is not None:
+            masks = r.masks.data.cpu().numpy()
+            for mask in masks:
+                mask = (mask > 0.5).astype(np.uint8) * 255
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cv2.drawContours(frame, contours, -1, (0, 180, 255), 2)
+        # Overlay count
+        cv2.rectangle(frame, (10, 10), (200, 55), (0, 0, 0), -1)
+        cv2.putText(frame, f"Count: {det_count}", (20, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,255,0), 2)
+    except Exception as e:
+        pass
+    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
+    if not ok:
+        return Response(b"", media_type="image/jpeg")
+    return Response(buf.tobytes(), media_type="image/jpeg")
+
+def _gen_file_mjpeg(sess_id: str, rate: float):
+    """
+    Crash-safe генератор MJPEG для проигрывания файла:
+    - Без CAP_FFMPEG
+    - На каждой итерации пытаемся выставить безопасные параметры
+    - Любые исключения подавляются, чтобы процесс не падал
+    """
+    import time as _time
+    while True:
+        try:
+            sess = _file_sessions.get(sess_id)
+            if not sess:
+                break
+            cap = sess.get("cap")
+            if cap is None:
+                _time.sleep(0.05)
+                continue
+
+            try:
+                cap.set(cv2.CAP_PROP_THREADS, 1)
+            except Exception:
+                pass
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                _time.sleep(0.03)
+                continue
+
+            img = encode_jpeg(frame)
+            if not img:
+                _time.sleep(0.02)
+                continue
+
+            yield multipart_chunk(img)
+
+            fps = sess.get("fps", 25.0) or 25.0
+            delay = max(0.01, (1.0 / fps) / max(0.05, float(rate or 1.0)))
+            _time.sleep(delay)
+        except GeneratorExit:
+            break
+        except Exception:
+            _time.sleep(0.05)
             continue
-        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
-        time.sleep(delay)
 
-@app.route('/api/video_file/play', methods=['GET'])
-def video_file_play():
-    """
-    MJPEG streaming playback: /api/video_file/play?id=file1&camera=camFile&rate=1.0
-    """
-    file_id = request.args.get('id', 'file1')
-    cam_id = request.args.get('camera', 'cam_file1')
-    rate = float(request.args.get('rate', '1.0'))
-    return Response(_gen_file_mjpeg(file_id, cam_id, rate), mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.get("/api/video_file/play")
+def api_video_file_play(id: str = Query(default="file1"),
+                        camera: str = Query(default="cam_file1"),
+                        rate: float = Query(default=1.0)):
+    if id not in _file_sessions:
+        return JSONResponse({"error": "file session not opened"}, status_code=400)
+    return StreamingResponse(_gen_file_mjpeg(id, rate), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
 
-@app.route('/api/video_feed')
-def video_feed():
-    cam_id = request.args.get('camera', 'cam1')
-    with _state_lock:
-        if cam_id not in _cfg['cameras']:
-            return jsonify({'error': f'Unknown camera {cam_id}'}), 400
-        # Ensure all default keys exist to avoid KeyError later
-        cam = _cfg['cameras'][cam_id]
-        cam.setdefault('rtsp_url', '')
-        cam.setdefault('cy1', 487)
-        cam.setdefault('offset', 6)
-        cam.setdefault('frame_skip', 3)
-        cam.setdefault('conf_thres', 0.25)
-        cam.setdefault('seg_model_path', str((BASE_DIR / 'models' / 'yolo11n-seg.pt')))
-        rtsp = cam.get('rtsp_url', '')
-    if not rtsp:
-        return jsonify({'error': f'RTSP URL is not configured for {cam_id}'}), 400
-    return Response(_gen_mjpeg(cam_id), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# -----------------------------
+# Video file endpoints (compat)
+# -----------------------------
+_file_sessions = {}  # id -> dict(cap, fps, frame_count, duration, camera)
+
+def _open_file_cap(path: str):
+    """
+    Открытие видеофайла с приоритетом CAP_FFMPEG и безопасными настройками декодера,
+    чтобы минимизировать риск assert в libavcodec/pthread_frame на Windows.
+    """
+    cap = None
+    try:
+        cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG)
+    except Exception:
+        cap = None
+    if cap is None or not cap.isOpened():
+        cap = cv2.VideoCapture(path)
+    if not cap or not cap.isOpened():
+        return None, "Cannot open video file"
+
+    # Безопасные настройки (игнорируются, если backend не поддерживает)
+    try:
+        cap.set(cv2.CAP_PROP_THREADS, 1)
+    except Exception:
+        pass
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except Exception:
+        pass
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
+    return cap, {"fps": float(fps), "frame_count": frame_count, "duration": float(duration)}
+
+@app.post("/api/video_file/open")
+async def api_video_file_open(
+    camera: str = Form(default="cam_file1"),
+    id: str = Form(default="file1"),
+    file: UploadFile = File(...)
+):
+    try:
+        dst = UPLOAD_DIR / file.filename
+        with open(dst, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+    except Exception as e:
+        return JSONResponse({"error": f"upload failed: {e}"}, status_code=500)
+
+    cap, meta = _open_file_cap(str(dst))
+    if cap is None:
+        return JSONResponse({"error": meta}, status_code=400)
+    _file_sessions[id] = {
+        "cap": cap,
+        "path": str(dst),
+        "camera": camera,
+        "fps": meta["fps"],
+        "frame_count": meta["frame_count"],
+        "duration": meta["duration"],
+    }
+    return {
+        "id": id,
+        "camera": camera,
+        "path": str(dst),
+        "fps": meta["fps"],
+        "frame_count": meta["frame_count"],
+        "duration": meta["duration"],
+    }
+
+@app.get("/api/video_file/frame")
+def api_video_file_frame(id: str = Query(default="file1"),
+                         camera: str = Query(default="cam_file1"),
+                         t: float = Query(default=0.0)):
+    sess = _file_sessions.get(id)
+    if not sess:
+        return JSONResponse({"error": "file session not opened"}, status_code=400)
+    cap = sess["cap"]
+    try:
+        cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(t) * 1000.0))
+        ok, frame = cap.read()
+    except Exception:
+        ok, frame = False, None
+    if not ok or frame is None:
+        return Response(b"", media_type="image/jpeg")
+    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
+    if not ok:
+        return Response(b"", media_type="image/jpeg")
+    return Response(buf.tobytes(), media_type="image/jpeg")
+
+def _gen_file_mjpeg(sess_id: str, rate: float):
+    import time as _time
+    while True:
+        sess = _file_sessions.get(sess_id)
+        if not sess:
+            break
+        cap = sess["cap"]
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            _time.sleep(0.03)
+            continue
+        img = encode_jpeg(frame)
+        if not img:
+            continue
+        yield multipart_chunk(img)
+        fps = sess.get("fps", 25.0) or 25.0
+        delay = max(0.005, (1.0 / fps) / max(0.01, float(rate or 1.0)))
+        _time.sleep(delay)
+
+@app.get("/api/video_file/play")
+def api_video_file_play(id: str = Query(default="file1"),
+                        camera: str = Query(default="cam_file1"),
+                        rate: float = Query(default=1.0)):
+    if id not in _file_sessions:
+        return JSONResponse({"error": "file session not opened"}, status_code=400)
+    return StreamingResponse(_gen_file_mjpeg(id, rate), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")

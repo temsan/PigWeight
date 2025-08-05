@@ -1,0 +1,533 @@
+:root{
+  /* Lighter, airier palette */
+  --bg-start:#eef6ff;
+  --bg-mid:#e7eef9;
+  --bg-end:#d9e6fb;
+  --text:#1f2a37;
+  --muted:#5b6b7b;
+  --accent:#10addd;
+  --accent-2:#6fa8ff;
+  --asphalt-900:#1f2630;
+  --asphalt-800:#222c38;
+  --asphalt-700:#2b3646;
+  --asphalt-600:#324051;
+
+  /* Effects: softer glass and shadows */
+  --glass:rgba(255,255,255,0.56);
+  --glass-strong:rgba(255,255,255,0.70);
+  --glow:#7cc7ff;
+  --shadow:0 10px 26px rgba(0,0,0,.12);
+  --shadow-soft:0 6px 18px rgba(0,0,0,.10);
+
+  /* Radii */
+  --radius-xl:22px;
+  --radius-lg:16px;
+  --radius-md:12px;
+  --radius-sm:10px;
+
+  /* Gradients tokens: more white, less dark */
+  --grad-page:
+      radial-gradient(1200px 600px at 80% -10%, rgba(255,255,255,0.45), rgba(255,255,255,0) 60%),
+      radial-gradient(900px 500px at 10% 10%, rgba(139,182,230,0.25), rgba(139,182,230,0) 60%),
+      linear-gradient(135deg, var(--bg-start) 0%, var(--bg-mid) 48%, var(--bg-end) 100%);
+  --grad-toolbar:
+      radial-gradient(100% 120% at 0% 0%, rgba(124,199,255,0.18), rgba(124,199,255,0) 55%),
+      linear-gradient(180deg, var(--glass) 0%, rgba(255,255,255,0.68) 100%);
+  --grad-panel:
+      radial-gradient(140% 120% at 10% -10%, rgba(124,199,255,0.16), rgba(124,199,255,0) 55%),
+      linear-gradient(180deg, var(--glass-strong) 0%, rgba(255,255,255,0.82) 100%);
+  --grad-video:
+      radial-gradient(140% 100% at 80% -20%, rgba(124,199,255,0.16), rgba(124,199,255,0) 60%),
+      linear-gradient(180deg, var(--glass) 0%, rgba(255,255,255,0.65) 100%);
+  --grad-btn:
+      radial-gradient(120% 120% at 10% 10%, rgba(124,199,255,0.20), rgba(124,199,255,0) 60%),
+      linear-gradient(180deg, #ffffff 0%, #f3f7ff 100%);
+  --grad-btn-hover:
+      radial-gradient(130% 130% at 20% 10%, rgba(124,199,255,0.26), rgba(124,199,255,0.04) 70%),
+      linear-gradient(180deg, #ffffff 0%, #eaf2ff 100%);
+  --grad-primary:
+      radial-gradient(120% 120% at 10% 10%, rgba(124,199,255,0.30), rgba(124,199,255,0.08) 70%),
+      linear-gradient(180deg, #3a89ff 0%, #2a74ea 100%);
+  --grad-primary-hover:
+      linear-gradient(180deg, rgba(45,126,247,0.25) 0%, rgba(45,126,247,0.10) 100%),
+      linear-gradient(180deg, #4b95ff 0%, #3a89ff 100%);
+}
+
+/* Global layout */
+html, body{ height:100%; overflow-x:hidden; }
+body{
+  margin:0;
+  background: var(--grad-page);
+  color:var(--text);
+  font-family:"Segoe UI","Roboto",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  overflow-x:hidden; /* защищаемся от горизонтальной прокрутки */
+}
+
+/* Restore original dark text on light surfaces where needed */
+#main-container, .top-toolbar.minimal, .card, #results, .video-wrapper {
+  color: inherit;
+}
+
+/* Utilities: spacing */
+.m-0{ margin:0 !important; }
+.mx-auto{ margin-left:auto !important; margin-right:auto !important; }
+.p-0{ padding:0 !important; }
+.px-12{ padding-left:12px !important; padding-right:12px !important; }
+.py-10{ padding-top:10px !important; padding-bottom:10px !important; }
+.container{ width:100%; max-width:1280px; margin:0 auto; padding:0 12px; box-sizing:border-box; }
+
+/* Utilities: layout */
+.flex{ display:flex !important; }
+.flex-col{ flex-direction:column !important; }
+.flex-row{ flex-direction:row !important; }
+.items-center{ align-items:center !important; }
+.items-stretch{ align-items:stretch !important; }
+.justify-center{ justify-content:center !important; }
+.space-between{ justify-content:space-between !important; }
+.gap-8{ gap:8px !important; }
+.gap-10{ gap:10px !important; }
+.gap-12{ gap:12px !important; }
+.gap-24{ gap:24px !important; }
+.w-100{ width:100% !important; }
+.maxw-1280{ max-width:1280px !important; }
+.maxw-full{ max-width:100vw !important; }
+.sticky-top{ position:sticky !important; top:0 !important; z-index:10 !important; }
+.no-wrap{ white-space:nowrap !important; }
+.nowrap{ white-space:nowrap !important; }
+/* prevent any horizontal scrollbar globally */
+html, body { overflow-x: hidden !important; }
+#main-container { overflow-x: hidden !important; }
+/* and specifically the toolbar row */
+.top-toolbar .container,
+.toolbar-row-horizontal {
+  overflow-x: hidden !important;
+}
+
+/* Utilities: surfaces */
+.card{
+  background: var(--grad-panel);
+  border:1px solid rgba(30,64,175,0.10);
+  color:#1f2a37;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border-radius: var(--radius-xl);
+}
+.card-md{ border-radius: var(--radius-md); }
+.glass{
+  background: var(--grad-toolbar);
+  border:1px solid rgba(30,64,175,0.10);
+  box-shadow: 0 10px 28px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,0.35);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-radius: var(--radius-xl);
+}
+
+/* Utilities: buttons */
+.btn{
+  border-radius: var(--radius-sm);
+  border:1px solid rgba(30,64,175,0.20);
+  color:#0b1d3a;
+  background: var(--grad-btn);
+  box-shadow: 0 6px 18px rgba(31,60,116,.12), 0 0 0 1px rgba(255,255,255,0.35) inset;
+  transition: transform .06s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease, filter .18s ease;
+}
+.btn:hover{
+  border-color: rgba(42,116,234,.55);
+  background: var(--grad-btn-hover);
+  box-shadow: 0 10px 24px rgba(31,60,116,.16), 0 0 0 1px rgba(124,199,255,0.35) inset;
+  transform: translateY(-1px);
+  filter: saturate(110%);
+}
+.btn:active{ transform: translateY(0); box-shadow: 0 3px 10px rgba(31,60,116,.14); }
+.btn-primary{
+  background: var(--grad-primary);
+  border-color: rgba(65,164,255,0.65);
+  color:#f7fbff;
+  box-shadow: 0 10px 24px rgba(31,60,116,.16), 0 0 20px rgba(65,164,255,.22);
+}
+.btn-primary:hover{ background: var(--grad-primary-hover); }
+.btn-danger{
+  background: radial-gradient(120% 120% at 10% 10%, rgba(255,130,130,0.22), rgba(255,130,130,0.06) 70%),
+              linear-gradient(180deg, #ff7b7b 0%, #f06565 100%);
+  border-color: rgba(255,120,120,0.55);
+  color:#4b1111;
+  box-shadow: 0 10px 24px rgba(116,31,31,.14), 0 0 20px rgba(255,120,120,.18);
+}
+
+/* Utilities: toggles */
+.toggle{ @apply .btn; } /* no-op hint for readability */
+.toggle{ border-radius: var(--radius-sm); border:1.5px solid #cfe0ff; }
+.toggle.selected{
+  background: linear-gradient(90deg, #d6e6fa 0%, #ffffff 100%);
+  color:#0b4f94;
+  border-color:#99c2ff;
+  box-shadow:0 2px 8px #99c2ff44;
+}
+
+/* Text utilities */
+.text-muted{ color:#a9b9cc !important; }
+.text-accent{ color: var(--accent) !important; }
+
+/* Heights */
+.h-36{ height:36px !important; line-height:34px !important; }
+
+/* Sizing helpers */
+.rounded-xl{ border-radius: var(--radius-xl) !important; }
+.rounded-md{ border-radius: var(--radius-md) !important; }
+.rounded-sm{ border-radius: var(--radius-sm) !important; }
+
+/* App container */
+#main-container{
+  background: radial-gradient(1200px 700px at 50% -20%, rgba(255,255,255,0.10), rgba(255,255,255,0) 70%),
+              linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+  border:0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  color: var(--text);
+}
+
+/* Заголовок */
+h2{
+  color:#1f2a37;
+  text-shadow: 0 1px 1px rgba(255,255,255,.6);
+  letter-spacing: .3px;
+  margin: 16px 0 10px 0;
+}
+
+/* Header toolbar */
+.top-toolbar.minimal{
+  position:sticky; top:0;
+  background: var(--grad-toolbar);
+  border:1px solid rgba(30,64,175,0.10);
+  box-shadow: 0 10px 28px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,0.45);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-radius: 0;
+}
+.top-toolbar .toolbar-label{ color:#33507a; font-weight:600; margin-right:6px; }
+.top-toolbar.minimal .container{ min-width:0; display:flex; align-items:center; gap:12px; }
+.top-toolbar.minimal .toolbar-group{ display:flex; align-items:center; gap:8px; }
+.top-toolbar.minimal .toggle-group{ display:flex; align-items:center; gap:8px; }
+
+/* Single horizontal row: everything in one line, large enough, fits by smart shrinking */
+.toolbar-row-horizontal{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:nowrap; /* строго горизонтально */
+  min-width:0;      /* позволяем сжиматься детям */
+}
+.toolbar-row-horizontal > *{
+  min-width:0; /* дочерние элементы могут сжиматься */
+}
+
+/* Title can shrink but keeps priority low */
+.toolbar-row-horizontal h2{
+  font-size:20px;
+  white-space:nowrap;
+  margin:10px 0;
+  flex:0 1 auto;
+}
+
+/* Toggle groups: nowrap, компактные отступы */
+.toolbar-group .toggle-group .toggle-btn{
+  padding:0 10px;
+  height:34px;
+  line-height:32px;
+  font-weight:600;
+  font-size:14px;
+  white-space:nowrap;
+}
+
+/* File button: лаконично, потом текст заменяется именем из JS */
+.file-btn{
+  padding:0 12px !important;
+  height:34px !important;
+  line-height:32px !important;
+  font-weight:600 !important;
+  font-size:14px !important;
+  white-space:nowrap !important;
+  max-width:220px;     /* ограничиваем ширину при длинном имени */
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* Stop buttons (live/file) одинаковой высоты */
+.only-file, .only-live, #countBtn{
+  height:34px !important;
+  line-height:32px !important;
+  padding:0 12px !important;
+  font-weight:700 !important;
+}
+
+/* Seek — главный растягиваемый элемент ряда */
+.toolbar-row-horizontal .seek-wrap{
+  flex:1 1 auto;  /* растягивается заполняя всё между кнопками */
+  min-width:160px;
+}
+.seek-wrap .seek-times{
+  white-space:nowrap;
+  font-size:13px;
+  color:#51627a;
+}
+
+/* Статус — фикс. мин-ширина, не раздувается */
+.stream-status{
+  min-width:160px;
+  max-width:220px;
+  text-align:right;
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* Скрывать дубли стоп-кнопок по источнику */
+body[data-source="live"] .only-file{ display:none !important; }
+body[data-source="file"] .only-live{ display:none !important; }
+
+/* Общие размеры кнопок в шапке (крупнее) */
+.top-toolbar .pill,
+.top-toolbar #countBtn,
+.top-toolbar .toggle-btn,
+.top-toolbar .file-input-btn{
+  height:34px;
+  line-height:32px;
+  padding:0 12px;
+  font-size:14px;
+  box-sizing: border-box;     /* фикс ширины/высоты */
+}
+
+/* Убираем трансформации при hover/active, чтобы элементы не "прыгали" */
+.pill, #countBtn, .toggle-btn, .file-input-btn, #saveManualBtn{
+  transition: box-shadow .18s ease, background .18s ease, border-color .18s ease, filter .18s ease !important;
+  transform: none !important;
+}
+.pill:hover, #countBtn:hover, .toggle-btn:hover, .file-input-btn:hover, #saveManualBtn:hover{
+  transform: none !important;
+}
+.pill:active, #countBtn:active, .toggle-btn:active, .file-input-btn:active, #saveManualBtn:active{
+  transform: none !important;
+}
+
+/* Фикс размеров toggle в обоих состояниях, чтобы не менялась высота/внутренние поля */
+.toggle-btn,
+.toggle-btn.selected{
+  height:34px;
+  line-height:32px;
+  padding:0 12px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  box-sizing:border-box;
+}
+
+/* Предотвращаем сдвиги при смене текста кнопки (например, “Стоп” -> “Старт”) */
+#videoPlayPauseBtn, #fileStopBtn, #countBtn, #fileInputLabel{
+  min-width: 90px;      /* зарезервировать ширину */
+  text-align: center;
+}
+
+/* Точечный запас для статуса, чтобы изменение текста не сдвигало ряд */
+.stream-status{
+  min-width:160px;
+  max-width:240px;
+}
+
+/* Внутри toolbar отключаем изменение letter/word spacing при hover (иногда темы шрифтов дают сдвиг) */
+.top-toolbar .pill,
+.top-toolbar #countBtn,
+.top-toolbar .toggle-btn,
+.top-toolbar .file-input-btn{
+  letter-spacing: 0;
+  word-spacing: 0;
+}
+
+/* Слайдер внутри seek-wrap должен сжиматься корректно */
+.seek-wrap input[type="range"]{ flex:1 1 auto; min-width:0; }
+
+/* Дополнительно: чуть уменьшим общий размер gap внутри шапки на узких экранах */
+@media (max-width: 1200px){
+  .toolbar-row-horizontal{ gap:10px; }
+  .toolbar-group .toggle-group .toggle-btn{ padding:0 8px; }
+  .file-btn{ max-width:180px; }
+}
+@media (max-width: 960px){
+  .toolbar-row-horizontal{ gap:8px; }
+  .stream-status{ min-width:140px; max-width:180px; }
+  .file-btn{ max-width:160px; }
+}
+
+/* Video */
+.video-wrapper{
+  position:relative;
+  box-shadow: var(--shadow);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: var(--grad-video);
+  border:1px solid rgba(30,64,175,0.10);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+#videoStream{ background:#000; border-radius: var(--radius-xl); box-shadow: var(--shadow-soft); filter:saturate(108%) contrast(101%); display:block; width:100%; height:auto; }
+#overlayCanvas{ border-radius: var(--radius-xl); position:absolute; inset:0; }
+
+/* Right panel — compact, fixed width, big digits */
+.right-col{
+  flex: 0 0 auto;
+}
+#results{
+  background: var(--grad-panel);
+  border:1px solid rgba(30,64,175,0.12);
+  color:#1f2a37;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-sizing:border-box;
+  width: 300px;               /* фиксируем визуально ширину панели */
+  max-width: 300px;
+  min-width: 260px;
+  padding: 14px 16px !important;
+  border-radius: var(--radius-md);
+  overflow-x: hidden;         /* без горизонтального скролла */
+}
+#results .stat-row{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px;
+  padding:8px 10px;
+  border:1px solid rgba(30,64,175,0.10);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.65) 100%);
+}
+#results .stat-title{
+  color:#4a6285; font-weight:600; font-size:14px; white-space:nowrap;
+}
+#results .stat-value{
+  color:#2a74ea; font-weight:800; font-size:28px; line-height:1; letter-spacing:.3px;
+  min-width: 56px; text-align:right;
+}
+#results .group-title{
+  margin: 2px 0 6px 2px;
+  color:#35527d; font-weight:700; font-size:13px; opacity:.9;
+}
+#results label{ color:#51627a !important; font-weight:600; }
+#results input{
+  background:#ffffff; color:#0b1d3a; border:1px solid #cfe0ff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+  height: 34px; line-height:32px; border-radius: 10px; padding: 0 10px;
+  font-size: 15px;
+}
+#results input:focus{ border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(139,182,230,.25); }
+#results #saveManualBtn{
+  height: 36px; line-height:34px; font-weight:700; width: 100%;
+}
+.unit-label{ color:#6a7f9b !important; }
+
+/* History table */
+#history{ background: rgba(255,255,255,0.75); color:#1f2a37; border:1px solid rgba(30,64,175,0.10); }
+#history th{ background: rgba(234,242,255,0.95) !important; color:#1f2a37 !important; }
+#history tr:nth-child(even){ background: rgba(255,255,255,0.55) !important; }
+#history tr:nth-child(odd){ background: rgba(255,255,255,0.75) !important; }
+
+/* Unified buttons/toggles */
+/* Removed non-standard 'composes' to avoid CSS parse errors */
+/* .pill, #countBtn, .toggle-btn, .file-input-btn, #saveManualBtn{ composes: btn; } */
+.pill, #countBtn, .toggle-btn, .file-input-btn, #saveManualBtn{
+  border-radius: var(--radius-sm) !important;
+  border:1px solid rgba(30,64,175,0.20) !important;
+  color:#0b1d3a !important;
+  background: var(--grad-btn) !important;
+  box-shadow: 0 6px 18px rgba(31,60,116,.12), 0 0 0 1px rgba(255,255,255,0.35) inset !important;
+  transition: transform .06s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease, filter .18s ease;
+  white-space: nowrap; /* prevent wrapping that breaks layout */
+}
+.pill:hover, #countBtn:hover, .toggle-btn:hover, .file-input-btn:hover, #saveManualBtn:hover{
+  border-color: rgba(42,116,234,.55) !important;
+  background: var(--grad-btn-hover) !important;
+  box-shadow: 0 10px 24px rgba(31,60,116,.16), 0 0 0 1px rgba(124,199,255,0.35) inset !important;
+  transform: translateY(-1px);
+  filter: saturate(110%);
+}
+.pill:active, #countBtn:active, .toggle-btn:active, .file-input-btn:active, #saveManualBtn:active{
+  transform: translateY(0);
+  box-shadow: 0 3px 10px rgba(31,60,116,.14) !important;
+}
+
+/* Variants */
+.pill.primary, #countBtn{
+  background: var(--grad-primary) !important;
+  border-color: rgba(65,164,255,0.65) !important;
+  color:#f7fbff !important;
+  box-shadow: 0 10px 24px rgba(31,60,116,.16), 0 0 20px rgba(65,164,255,.22) !important;
+}
+.pill.primary:hover, #countBtn:hover{ background: var(--grad-primary-hover) !important; }
+.pill.danger{
+  background: radial-gradient(120% 120% at 10% 10%, rgba(255,130,130,0.22), rgba(255,130,130,0.06) 70%),
+              linear-gradient(180deg, #ff7b7b 0%, #f06565 100%) !important;
+  border-color: rgba(255,120,120,0.55) !important;
+  color:#4b1111 !important;
+  box-shadow: 0 10px 24px rgba(116,31,31,.14), 0 0 20px rgba(255,120,120,.18) !important;
+}
+
+/* Toggle selected */
+.toggle-btn.selected{
+  background: radial-gradient(120% 120% at 12% 12%, rgba(124,199,255,0.34), rgba(124,199,255,0.10) 70%),
+              linear-gradient(180deg, #3c87e6 0%, #2b6cb3 100%) !important;
+  border-color: rgba(139,182,230,0.95) !important;
+  color:#f2f8ff !important;
+  box-shadow: 0 10px 26px rgba(0,0,0,.36), 0 0 18px rgba(124,199,255,.24) !important;
+}
+
+/* Status colors */
+#streamStatus, #modelStatus, #fpsInfo, #weightUpdateTime, #debugDetections{ color:#33507a !important; }
+#fpsInfo{ color:#2a74ea !important; }
+#weightUpdateTime{ color:#6a7f9b !important; }
+
+/* Seek: растягиваем по доступной ширине и не даём уехать */
+.seek-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;   /* ключ: разрешаем сжиматься/расти */
+  min-width: 160px;  /* не схлопывается до нуля */
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.seek-wrap input[type="range"] {
+  flex: 1 1 auto;    /* занимать всю оставшуюся ширину */
+  min-width: 0;      /* разрешаем ужиматься внутри flex-контейнера */
+}
+
+/* Важно: разрешаем флекс-детям сжиматься, иначе элементы выталкивают слайдер за экран */
+.top-toolbar .container {
+  min-width: 0;
+}
+
+.top-toolbar .controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.top-toolbar .stream-status {
+  flex: 0 0 auto;
+  min-width: 120px;
+  text-align: right;
+}
+
+.top-toolbar .group,
+.top-toolbar .nowrap {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Ensure results panel radius */
+#results{ border-radius: var(--radius-md); }
