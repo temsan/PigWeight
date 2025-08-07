@@ -10,9 +10,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Config from environment ---
-MODEL_URL = os.getenv("MODEL_URL", "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt")
-MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
+DETECTION_MODE = os.getenv("DETECTION_MODE", "balanced")
+PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.pt")
+BALANCED_MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
 ONNX_PATH = os.getenv("ONNX_PATH", "models/yolo11n.onnx")
+
+# Set model path based on detection mode
+if DETECTION_MODE == "pig-only":
+    MODEL_PATH = PIG_MODEL_PATH
+else:
+    MODEL_PATH = BALANCED_MODEL_PATH
 
 # Server config
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -84,30 +91,24 @@ def convert_to_onnx():
 
 def main():
     try:
-        # Initialize models and requirements
-        # install_requirements()
-        download_model()
-        convert_to_onnx()
-        
         # Ensure required directories exist
         ensure_dir('models')
         ensure_dir('stream')
         ensure_dir('uploads')
-        
-        # Import ASGI app after all requirements are installed
+
+        # Import ASGI app and start server
         logger.info(f'Starting server at http://{HOST}:{PORT}')
         logger.info(f'API Health Check: http://{HOST}:{PORT}/api/health')
         logger.info(f'Debug mode: {DEBUG}')
-        
+
         try:
             import uvicorn
-            # Запускаем уже импортированный объект приложения для явной связки процесса
             from api.app import app as fastapi_app
             uvicorn.run(
-                fastapi_app, 
-                host=HOST, 
-                port=PORT, 
-                reload=DEBUG, 
+                fastapi_app,
+                host=HOST,
+                port=PORT,
+                reload=DEBUG,
                 log_level="debug" if DEBUG else "info"
             )
         except Exception as e:

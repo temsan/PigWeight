@@ -7,5 +7,7 @@ python-dotenv
 
 # Video/Imaging
 opencv-python-headless==4.9.0.80
+# Стабильный декодер и seek для файлов (замена проблемного OpenCV-ffmpeg пути)
+av==12.2.0
 
 # Убраны лишние зависимости клиентского инференса (norfair, rich, pygments)

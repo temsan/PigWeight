@@ -103,6 +103,7 @@ html, body { overflow-x: hidden !important; }
 .top-toolbar .container,
 .toolbar-row-horizontal {
   overflow-x: hidden !important;
+  overflow-y: hidden !important; /* дополнительно убираем вертикальный скролл у ряда */
 }
 
 /* Utilities: surfaces */
@@ -208,11 +209,21 @@ h2{
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   border-radius: 0;
+  overflow: hidden;           /* убираем любой внутренний скролл у шапки */
 }
 .top-toolbar .toolbar-label{ color:#33507a; font-weight:600; margin-right:6px; }
-.top-toolbar.minimal .container{ min-width:0; display:flex; align-items:center; gap:12px; }
-.top-toolbar.minimal .toolbar-group{ display:flex; align-items:center; gap:8px; }
-.top-toolbar.minimal .toggle-group{ display:flex; align-items:center; gap:8px; }
+.top-toolbar.minimal .container{
+  min-width:0; display:flex; align-items:center; gap:12px;
+  overflow: hidden;           /* не даём контейнеру прокручиваться */
+}
+.top-toolbar.minimal .toolbar-group{
+  display:flex; align-items:center; gap:8px;
+  overflow: hidden;           /* в группах тоже обрезаем переполнение */
+}
+.top-toolbar.minimal .toggle-group{
+  display:flex; align-items:center; gap:8px;
+  overflow: hidden;
+}
 
 /* Single horizontal row: everything in one line, large enough, fits by smart shrinking */
 .toolbar-row-horizontal{
@@ -221,9 +232,11 @@ h2{
   gap:12px;
   flex-wrap:nowrap; /* строго горизонтально */
   min-width:0;      /* позволяем сжиматься детям */
+  overflow: hidden; /* убираем горизонтальную/вертикальную прокрутку */
 }
 .toolbar-row-horizontal > *{
-  min-width:0; /* дочерние элементы могут сжиматься */
+  min-width:0;      /* дочерние элементы могут сжиматься */
+  overflow: hidden; /* и не создают собственный скролл */
 }
 
 /* Title can shrink but keeps priority low */

@@ -5,7 +5,7 @@ import time
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Generator
+from typing import Dict, Optional, Generator, Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, HTMLResponse, Response, JSONResponse, FileResponse
@@ -19,6 +19,15 @@ except Exception:
 
 import numpy as np
 from fastapi import Body
+import contextlib
+import base64 as _b64
+import math
+
+# Изолированный воркер для OpenCV
+from api.opencv_worker import OpenCVIsolate
+
+# PyAV больше не используется в MVP: декодирование вынесено в отдельный процесс OpenCVIsolate
+_PYAV_AVAILABLE = False
 
 # --- Bootstrap ---
 BASE_DIR = Path(__file__).parent.parent
@@ -29,6 +38,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("api")
 
 app = FastAPI(title="PigWeight API (FastAPI)")
+# Прогреваем воркер на старте (уменьшает таймаут на первом вызове)
+@app.on_event("startup")
+async def _warmup_worker():
+    try:
+        get_ocv().ping()
+        logger.info("OpenCV worker warm-up done")
+    except Exception as e:
+        logger.warning("OpenCV worker warm-up failed: %s", e)
+
 
 # CORS
 app.add_middleware(
@@ -55,8 +73,16 @@ TARGET_FPS = float(os.getenv("FPS", "12"))
 BOUNDARY = "frame"
 
 # Model config (строго .pt из каталога ./models)
-MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
-TARGET_CLASS_IDS = set(map(int, os.getenv("TARGET_CLASS_IDS", "20,17,19").split(",")))
+DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only").lower()
+PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.pt")
+PIG_CLASS_ID = int(os.getenv("PIG_CLASS_ID", "0"))
+
+# Выбор эффективной модели и классов
+if DETECTION_MODE == "pig-only":
+    MODEL_PATH = PIG_MODEL_PATH
+    TARGET_CLASS_IDS = {PIG_CLASS_ID}
+else:
+    TARGET_CLASS_IDS = set(map(int, os.getenv("TARGET_CLASS_IDS", "20,17,19").split(",")))
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))
 AVG_WINDOW = int(os.getenv("AVG_WINDOW", "20"))
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
@@ -79,6 +105,14 @@ BALANCE_ALPHA = float(os.getenv("BALANCE_ALPHA", "0.85"))
 BALANCE_BIAS = float(os.getenv("BALANCE_BIAS", "0.0"))
 BALANCE_CAP = float(os.getenv("BALANCE_CAP", "150"))
 
+# Auto-calibration (без эталона): держим окно и подгоняем alpha/bias для стабилизации в целевом коридоре
+AUTO_CALIBRATE = os.getenv("AUTO_CALIBRATE", "true").lower() == "true"
+CALIB_TARGET_MIN = float(os.getenv("CALIB_TARGET_MIN", "70"))
+CALIB_TARGET_MAX = float(os.getenv("CALIB_TARGET_MAX", "80"))
+CALIB_WINDOW = int(os.getenv("CALIB_WINDOW", "90"))  # ~7-8 сек при 12 FPS и скипе
+CALIB_LR_ALPHA = float(os.getenv("CALIB_LR_ALPHA", "0.002"))
+CALIB_LR_BIAS = float(os.getenv("CALIB_LR_BIAS", "0.05"))
+
 # Server config
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
@@ -86,6 +120,91 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Ленивая инициализация изолятора OpenCV (важно для Windows spawn)
+OCV: Optional[OpenCVIsolate] = None
+def get_ocv() -> OpenCVIsolate:
+    global OCV
+    if OCV is None:
+        OCV = OpenCVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+    return OCV
+
+# Безопасный вызов методов воркера с авто-респауном
+def _ocv_safe_call(method_name: str, *args, **kwargs):
+    try:
+        ocv = get_ocv()
+        method = getattr(ocv, method_name, None)
+        if not method:
+            raise AttributeError(f"OpenCVIsolate lacks {method_name}")
+        return method(*args, **kwargs)
+    except Exception:
+        # Попытка респаунить воркер и повторить один раз
+        try:
+            global OCV
+            OCV = OpenCVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+            method = getattr(OCV, method_name, None)
+            if not method:
+                raise AttributeError(f"OpenCVIsolate lacks {method_name}")
+            return method(*args, **kwargs)
+        except Exception as e2:
+            raise e2
+
+# Адаптер для совместимости с разными реализациями воркера
+def ocv_open_rtsp(stream_id: str, url: str) -> Dict[str, Any]:
+    try:
+        return _ocv_safe_call('open_rtsp', stream_id, url, timeout=15.0)
+    except AttributeError:
+        return _ocv_safe_call('open', stream_id, url)
+
+def ocv_open_file(stream_id: str, path: str) -> Dict[str, Any]:
+    try:
+        try:
+            return _ocv_safe_call('open_file', stream_id, path, timeout=15.0)
+        except AttributeError:
+            return _ocv_safe_call('open', stream_id, path)
+    except Exception as e:
+        try:
+            return ocv_open_rtsp(stream_id, path)
+        except Exception:
+            raise e
+
+def ocv_close(stream_id: str) -> None:
+    try:
+        _ocv_safe_call('close', stream_id)
+    except Exception:
+        pass
+
+def ocv_read_jpeg(stream_id: str, timeout: float = 1.0) -> Optional[bytes]:
+    try:
+        return _ocv_safe_call('read_jpeg', stream_id, timeout=timeout)
+    except AttributeError:
+        # b64 fallback
+        try:
+            resp = _ocv_safe_call('read_jpeg_b64', stream_id)
+            if isinstance(resp, dict) and resp.get('ok') and 'jpeg_b64' in resp:
+                import base64 as _b64mod
+                return _b64mod.b64decode(resp['jpeg_b64'])
+        except Exception:
+            return None
+    except Exception:
+        return None
+    return None
+
+def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Optional[bytes]:
+    try:
+        return _ocv_safe_call('seek_read_jpeg', stream_id, t, timeout=timeout)
+    except AttributeError:
+        try:
+            _ocv_safe_call('pos_msec', stream_id, float(max(0.0, t) * 1000.0))
+            resp = _ocv_safe_call('read_jpeg_b64', stream_id)
+            if isinstance(resp, dict) and resp.get('ok') and 'jpeg_b64' in resp:
+                import base64 as _b64mod
+                return _b64mod.b64decode(resp['jpeg_b64'])
+        except Exception:
+            return None
+    except Exception:
+        return None
+    return None
 
 def encode_jpeg(frame) -> bytes:
     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
@@ -101,12 +220,58 @@ def multipart_chunk(img_bytes: bytes) -> bytes:
     ).encode("utf-8")
     return header + img_bytes + b"\r\n"
 
+# --- Local OpenCV fallback (для файлов) ---
+def _open_file_cap_local(path: str):
+    """Простое и стабильное открытие файла локально с выбором бэкенда"""
+    backends = [
+        getattr(cv2, 'CAP_MSMF', 1400),
+        getattr(cv2, 'CAP_DSHOW', 700),
+        getattr(cv2, 'CAP_ANY', 0),
+    ]
+    last_err = None
+    for backend in backends:
+        try:
+            cap = cv2.VideoCapture(str(path), backend)
+            if not cap or not cap.isOpened():
+                try: cap.release()
+                except Exception: pass
+                last_err = f"cannot open with backend={backend}"
+                continue
+            # Отключаем многопоточность и уменьшаем буфер
+            _cap_safe_set(cap, getattr(cv2, 'CAP_PROP_THREADS', 42), 1)
+            _cap_safe_set(cap, getattr(cv2, 'CAP_PROP_BUFFERSIZE', 43), 1)
+
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
+            return cap, {"fps": fps, "frame_count": frame_count, "duration": duration, "type": "local", "backend": int(backend)}
+        except Exception as e:
+            last_err = str(e)
+            try: cap.release()
+            except Exception: pass
+            continue
+    return None, {"error": last_err or "all backends failed"}
+
+def _read_frame_local(cap, t_sec: float = 0.0) -> Optional[np.ndarray]:
+    """Чтение кадра с seek по времени"""
+    try:
+        if t_sec > 0:
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            frame_idx = int(t_sec * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        
+        ok, frame = cap.read()
+        return frame if ok else None
+    except Exception:
+        return None
+
 # --- Camera Manager (single capture per camera with backoff) ---
 class CameraStream:
     def __init__(self, cam_id: str, rtsp_url: str):
         self.cam_id = cam_id
         self.rtsp_url = rtsp_url
         self.cap: Optional[cv2.VideoCapture] = None
+        self.opened = False
         self.running = False
         self.last_jpeg: Optional[bytes] = None
         self.last_ts = 0.0
@@ -127,24 +292,39 @@ class CameraStream:
         self.avg_count = 0.0
         self.last_count = 0
 
+        # статистические агрегаторы для устойчивого отображения
+        self.count_window_full = []  # полное окно сырых детекций
+        self.stat_count = 0.0        # устойчивое значение (медиана/усреднение)
+        self.ema_count = None        # экспоненциальное сглаживание
+        self.ema_alpha = float(os.getenv("COUNT_EMA_ALPHA", "0.2"))
+
         # balanced counting state
         self.balanced = BALANCED_DEFAULT
 
+        # auto-calibration state
+        self.calib_window = []
+        self.balance_alpha = BALANCE_ALPHA
+        self.balance_bias = BALANCE_BIAS
+
+        # простой трекер без внешних зависимостей
+        self.tracker = SimpleTracker(iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
+                                     max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
+
+        # Serialize any access to underlying VideoCapture to avoid FFmpeg race
+        # and disable threaded decoding where possible.
+        self.cap_lock = asyncio.Lock()
+        # Soft flag to skip model inference if decoding misbehaves
+        self.decode_unstable = False
+
     def _open(self) -> bool:
-        cap = cv2.VideoCapture(self.rtsp_url)
-        for prop, val in ((cv2.CAP_PROP_BUFFERSIZE, 1),):
-            try:
-                cap.set(prop, val)
-            except Exception:
-                pass
-        if not cap or not cap.isOpened():
-            try:
-                cap.release()
-            except Exception:
-                pass
+        # Открываем RTSP в изолированном процессе
+        try:
+            ocv_open_rtsp(self.cam_id, self.rtsp_url)
+            logger.info("[%s] RTSP opened (worker)", self.cam_id)
+        except Exception as e:
+            logger.warning("[%s] RTSP open failed: %s", self.cam_id, e)
             return False
-        self.cap = cap
-        logger.info("[%s] RTSP opened", self.cam_id)
+        self.opened = True
         # lazy model load on first successful open
         if not self.model_loaded:
             try:
@@ -163,31 +343,41 @@ class CameraStream:
                 logger.exception("[%s] Failed to load YOLO model: %s", self.cam_id, e)
                 self.model = None
                 self.model_loaded = False
+        # сброс трекера при переоткрытии
+        self.tracker = self.tracker or SimpleTracker(iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
+                                                    max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
         return True
 
     def _close(self):
-        if self.cap is not None:
-            try:
-                self.cap.release()
-            except Exception:
-                pass
-        self.cap = None
+        try:
+            ocv_close(self.cam_id)
+        except Exception:
+            pass
+        self.opened = False
 
     async def _loop(self):
         self.running = True
         backoff = 0.5
         max_back = 5.0
         while self.running:
-            if self.cap is None:
+            if not self.opened:
                 if not self._open():
                     logger.warning("[%s] open failed, retry in %.2fs", self.cam_id, backoff)
                     await asyncio.sleep(backoff)
                     backoff = min(max_back, backoff * 2)
                     continue
                 backoff = 0.5
-            ok, frame = self.cap.read() if self.cap is not None else (False, None)
+            # Читаем JPEG из воркера и декодируем
+            jpeg = ocv_read_jpeg(self.cam_id, timeout=1.0)
+            ok, frame = False, None
+            if jpeg:
+                arr = np.frombuffer(jpeg, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                ok = frame is not None
             now = time.time()
             if not ok or frame is None:
+                # mark unstable, and force close-reopen
+                self.decode_unstable = True
                 self._close()
                 logger.warning("[%s] read failed, reconnecting...", self.cam_id)
                 await asyncio.sleep(backoff)
@@ -201,7 +391,8 @@ class CameraStream:
                 now = time.time()
 
             # --- Server-side inference with rolling average (no norfair tracking) ---
-            do_infer = (self.model_loaded and (self.frame_idx % max(1, self.frame_skip) == 0))
+            # suppress inference for a couple frames after unstable decode to reduce pressure
+            do_infer = (self.model_loaded and not self.decode_unstable and (self.frame_idx % max(1, self.frame_skip) == 0))
             cur_count = self.last_count
             if do_infer:
                 try:
@@ -209,13 +400,14 @@ class CameraStream:
                         frame,
                         imgsz=640,
                         conf=self.conf_thres,
-                        verbose=False
+                        verbose=False,
+                        retina_masks=True
                     )
-                    det_count = 0.0
-                    det_classes = []
+                    r = results[0] if results else None
                     det_bboxes = []
-                    r = results[0]
-                    if hasattr(r, "boxes") and r.boxes is not None:
+                    det_classes = []
+                    det_idx_map = []
+                    if r is not None and hasattr(r, "boxes") and r.boxes is not None:
                         xyxy = r.boxes.xyxy
                         cls = r.boxes.cls
                         conf = r.boxes.conf
@@ -226,50 +418,150 @@ class CameraStream:
                             c = int(cls[i]) if i < len(cls) else -1
                             cf = float(conf[i]) if i < len(conf) else 0.0
                             if c in self.target_class_ids and cf >= self.conf_thres:
-                                w = CLASS_WEIGHTS.get(c, 1.0) if self.balanced else 1.0
-                                det_count += float(w)
-                                x1, y1, x2, y2 = map(int, b)
-                                det_bboxes.append([float(x1), float(y1), float(x2), float(y2)])
-                                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                    # optional masks overlay
+                                x1, y1, x2, y2 = map(float, b)
+                                det_bboxes.append([x1, y1, x2, y2])
+                                det_classes.append(c)
+                                det_idx_map.append(i)
+                    # Обновляем трекер и кэш последнего результата для промежуточных кадров
+                    detections_for_tracker = [det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]
+                    tracks = self.tracker.update(detections_for_tracker)
+                    self._last_tracks = tracks
+                    self._last_masks = getattr(r, 'masks', None)
+                    det_count = len(tracks)
+                    # Отрисовка bbox/ID/масок
+                    mask_data = None
                     if hasattr(r, "masks") and r.masks is not None:
-                        masks = r.masks.data
-                        if hasattr(masks, "cpu"):
-                            masks = masks.cpu().numpy()
-                        for mask in masks:
-                            mask = (mask > 0.5).astype(np.uint8) * 255
-                            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                            cv2.drawContours(frame, contours, -1, (0, 180, 255), 2)
-
-                    # apply balancing correction
+                        mask_data = r.masks.data
+                        if hasattr(mask_data, "cpu"):
+                            mask_data = mask_data.cpu().numpy()
+                        # ensure mask spatial dims match frame
+                        h, w = frame.shape[:2]
+                    for tr in tracks:
+                        tid = tr['id']
+                        if mask_data is not None:
+                            mi = tr.get('det_index', -1)
+                            if 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (h, w):
+                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))  # BGR
+                                overlay = frame.copy()
+                                overlay[mask > 0] = color
+                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                                # Подпись ID на маске: найдём центр масс маски грубо
+                                ys, xs = np.where(mask > 0)
+                                if len(xs) > 0:
+                                    cx, cy = int(xs.mean()), int(ys.mean())
+                                    cv2.putText(frame, f"ID:{tid}", (max(0, cx-20), max(15, cy-10)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (40, 40, 40), 3)
+                                    cv2.putText(frame, f"ID:{tid}", (max(0, cx-20), max(15, cy-10)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 1)
+                    
+                    # balancing и усреднение 
                     if self.balanced:
-                        det_count = min(BALANCE_CAP, det_count * BALANCE_ALPHA + BALANCE_BIAS)
+                        det_count = min(BALANCE_CAP, det_count * self.balance_alpha + self.balance_bias)
+                    # накапливаем полное окно для статистики (например, 60 значений ~ 1-2 сек)
+                    self.count_window_full.append(float(det_count))
+                    max_full = max(self.avg_window * 3, 60)  # минимум 60 кадров
+                    if len(self.count_window_full) > max_full:
+                        self.count_window_full.pop(0)
 
-                    self.count_window.append(det_count)
+                    # робастная оценка: усечённая медиана + EMA
+                    try:
+                        arr = sorted(self.count_window_full)
+                        n = len(arr)
+                        if n >= 5:
+                            k = max(1, int(n * 0.1))  # усечём по 10% хвостов
+                            trimmed = arr[k:-k] if (2*k) < n else arr
+                            # медиана усечённого массива
+                            m = trimmed[n//2 - k] if ((n - 2*k) % 2 == 1) else (0.5 * (trimmed[(n - 2*k)//2 - 1] + trimmed[(n - 2*k)//2]))
+                        else:
+                            m = arr[n//2] if n else 0.0
+                        # EMA поверх медианы
+                        if self.ema_count is None:
+                            self.ema_count = float(m)
+                        else:
+                            self.ema_count = float(self.ema_alpha * m + (1.0 - self.ema_alpha) * self.ema_count)
+                        self.stat_count = float(self.ema_count)
+                    except Exception:
+                        self.stat_count = float(det_count)
+
+                    # rolling avg (быстрый индикатор)
+                    self.count_window.append(float(det_count))
                     if len(self.count_window) > self.avg_window:
                         self.count_window.pop(0)
                     self.avg_count = sum(self.count_window) / max(1, len(self.count_window))
                     cur_count = int(round(self.avg_count))
                     self.last_count = cur_count
                     self.last_debug_classes = det_classes
-                    self.last_debug_ids = []  # no tracking IDs
-                    self.last_debug_bboxes = det_bboxes
+                    self.last_debug_ids = [tr['id'] for tr in tracks]
+                    self.last_debug_bboxes = [tr['bbox'] for tr in tracks]
+
+                    # auto-calibration to stabilize in [CALIB_TARGET_MIN, CALIB_TARGET_MAX]
+                    try:
+                        if self.balanced and AUTO_CALIBRATE:
+                            self.calib_window.append(cur_count)
+                            if len(self.calib_window) > CALIB_WINDOW:
+                                self.calib_window.pop(0)
+                            if len(self.calib_window) >= max(10, CALIB_WINDOW // 3):
+                                avg = sum(self.calib_window) / len(self.calib_window)
+                                # если выбросы — ограничим
+                                avg = max(0.0, min(BALANCE_CAP, avg))
+                                # простая "градиентная" подстройка: тянем среднее в центр коридора
+                                target_mid = (CALIB_TARGET_MIN + CALIB_TARGET_MAX) * 0.5
+                                err = target_mid - avg
+                                # bias сдвигает уровень, alpha влияет на масштаб
+                                self.balance_bias += CALIB_LR_BIAS * err
+                                # ограничим bias, чтобы не уплывал
+                                self.balance_bias = float(max(-50.0, min(50.0, self.balance_bias)))
+                                # для alpha делаем маленькую подстройку, тянем к 1.0 +/- поправка
+                                self.balance_alpha += CALIB_LR_ALPHA * (1.0 if err > 0 else -1.0)
+                                self.balance_alpha = float(max(0.5, min(1.5, self.balance_alpha)))
+                    except Exception:
+                        pass
                 except Exception:
                     # keep previous count on failure
                     pass
 
             self.frame_idx += 1
+            # clear unstable flag occasionally when we pass decode/read stage
+            if self.decode_unstable and (self.frame_idx % 15 == 0):
+                self.decode_unstable = False
 
-            # draw overlays: line + count box
+            # draw overlays: используем последний результат на промежуточных кадрах
             try:
                 h, w = frame.shape[:2]
                 # line (optional visual indicator)
                 y_line = int(h * 0.5)
                 cv2.line(frame, (0, y_line), (w, y_line), (0, 180, 255), 2)
-                # count box
-                cv2.rectangle(frame, (10, 10), (200, 55), (0, 0, 0), -1)
-                cv2.putText(frame, f"Count: {cur_count}", (20, 45),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
+                # Рисуем маски, если не было инференса на этом кадре
+                mask_data = None
+                if hasattr(self, '_last_masks') and self._last_masks is not None:
+                    mask_data = self._last_masks.data if hasattr(self._last_masks, 'data') else self._last_masks
+                    if hasattr(mask_data, 'cpu'):
+                        mask_data = mask_data.cpu().numpy()
+                if hasattr(self, '_last_tracks') and self._last_tracks and mask_data is not None:
+                    if mask_data is not None:
+                        if hasattr(mask_data, 'cpu'):
+                            mask_data = mask_data.cpu().numpy()
+                        mh, mw = frame.shape[:2]
+                        for tr in self._last_tracks:
+                            tid = tr['id']
+                            mi = tr.get('det_index', -1)
+                            if 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (mh, mw):
+                                    mask = cv2.resize(mask, (mw, mh), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))
+                                overlay = frame.copy()
+                                overlay[mask > 0] = color
+                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                # count HUD: текущее и устойчивое
+                cv2.rectangle(frame, (10, 10), (300, 80), (0, 0, 0), -1)
+                cv2.putText(frame, f"Count(cur): {int(cur_count)}", (18, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.putText(frame, f"Count(stat): {int(round(getattr(self, 'stat_count', cur_count)))}", (18, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
             except Exception:
                 pass
 
@@ -383,93 +675,102 @@ async def ws_count(ws: WebSocket, camera: str = DEFAULT_CAM_ID):
         except Exception:
             pass
 
-# --- Video file endpoints ---
-def _open_file_cap(path: str):
-    """
-    Безопасное открытие файла (Windows-friendly):
-    - Не используем CAP_FFMPEG (провоцирует libavcodec/pthread_frame asserts).
-    - Форсируем однопоточность декодера и минимальную буферизацию, где поддерживается.
-    - Все операции с cap обёрнуты в try/except.
-    """
-    cap = None
-    try:
-        # Явно отключаем автопараллелизм FFmpeg/OpenCV и буферизацию
-        cap = cv2.VideoCapture(path)  # без CAP_FFMPEG
-        if not cap or not cap.isOpened():
-            try:
-                if cap:
-                    cap.release()
-            except Exception:
-                pass
-            return None, "Cannot open video file"
-
-        # Безопасные идентификаторы свойств (могут отсутствовать в сборке OpenCV)
-        _CAP_PROP_THREADS = getattr(cv2, "CAP_PROP_THREADS", None)
-        _CAP_PROP_BUFFERSIZE = getattr(cv2, "CAP_PROP_BUFFERSIZE", None)
-
-        for prop, val in (
-            (_CAP_PROP_THREADS, 1),
-            (_CAP_PROP_BUFFERSIZE, 1),
-        ):
-            try:
-                if prop is not None:
-                    cap.set(prop, val)
-            except Exception:
-                pass
-
-        fps = cap.get(getattr(cv2, "CAP_PROP_FPS", 5)) or 25.0
-        frame_count = int(cap.get(getattr(cv2, "CAP_PROP_FRAME_COUNT", 7)) or 0)
-        duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
-        return cap, {"fps": float(fps), "frame_count": frame_count, "duration": float(duration)}
-    except Exception as e:
-        try:
-            if cap:
-                cap.release()
-        except Exception:
-            pass
-        return None, f"Exception: {e}"
+# --- Video file endpoints (через изолированный OpenCV воркер) ---
 
 _file_sessions: Dict[str, dict] = {}
 # Глобальная блокировка доступа к сессиям файлов и их cap,
 # чтобы исключить конкурентное чтение/seek/close из разных потоков ASGI.
 _file_sessions_lock = asyncio.Lock()
 
+# Кэш серверной модели для кадров из файлов
+FILE_MODEL = None
+FILE_MODEL_PATH = ""
+
 @app.post("/api/video_file/open")
 async def api_video_file_open(camera: str = Form(default="cam_file1"),
                               id: str = Form(default="file1"),
                               file: UploadFile = File(...)):
+    # Закрыть предыдущую сессию с тем же id (если была), чтобы освободить cap и файловые блокировки
+    async with _file_sessions_lock:
+        old = _file_sessions.pop(id, None)
+        if old:
+            try:
+                cap_old = old.get("cap")
+                if cap_old is not None:
+                    cap_old.release()
+            except Exception:
+                pass
+            try:
+                if old.get("type") == "opencv":
+                    get_ocv().close(id)
+            except Exception:
+                pass
     try:
-        dst = UPLOAD_DIR / (file.filename or "upload.bin")
+        # Нормализуем имя и путь, делаем уникальным, чтобы не перетирать файл в использовании
+        raw_name = file.filename or "upload.bin"
+        p = Path(raw_name)
+        stem, suffix = p.stem or "upload", p.suffix or ".bin"
+        import uuid as _uuid
+        safe_name = f"{stem}_{_uuid.uuid4().hex[:8]}{suffix}"
+        dst = UPLOAD_DIR / safe_name
+
+        # Пишем файл порциями и закрываем дескриптор UploadFile
         with open(dst, "wb") as out:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
                 out.write(chunk)
+        try:
+            await file.close()
+        except Exception:
+            pass
+        try:
+            sz = os.path.getsize(dst)
+        except Exception:
+            sz = -1
+        logger.info("[file_open] saved to %s, size=%s bytes", dst, sz)
+    except PermissionError as e:
+        return JSONResponse({"error": f"upload failed: {e}"}, status_code=500)
     except Exception as e:
+        # Всегда JSON-ответ об ошибке загрузки
         return JSONResponse({"error": f"upload failed: {e}"}, status_code=500)
 
-    cap, meta = _open_file_cap(str(dst))
-    if cap is None:
-        return JSONResponse({"error": meta}, status_code=400)
-    async with _file_sessions_lock:
-        # Если существовала старая сессия с тем же id — корректно закрываем
-        old = _file_sessions.pop(id, None)
-        if old and old.get("cap"):
-            try:
-                old["cap"].release()
-            except Exception:
-                pass
-        _file_sessions[id] = {
-            "cap": cap,
-            "path": str(dst),
+    # Открываем файл локально (просто и стабильно)
+    try:
+        logger.info("[file_open] local opening id=%s path=%s", id, dst)
+        cap, meta_local = _open_file_cap_local(str(dst))
+        if cap is None:
+            return JSONResponse({"error": f"local open failed: {meta_local.get('error', 'unknown')}"}, status_code=500)
+        logger.info("[file_open] local opened id=%s meta=%s", id, meta_local)
+        
+        # Регистрируем локальную сессию
+        async with _file_sessions_lock:
+            _file_sessions[id] = {
+                "type": "local",
+                "cap": cap,
+                "path": str(dst),
+                "camera": camera,
+                "fps": float(meta_local.get("fps", 25.0)),
+                "frame_count": int(meta_local.get("frame_count", 0)),
+                "duration": float(meta_local.get("duration", 0.0)),
+                "balanced": BALANCED_DEFAULT,
+                "tracker": SimpleTracker(iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
+                                          max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
+            }
+        
+        return JSONResponse({
+            "id": id,
             "camera": camera,
-            "fps": meta["fps"],
-            "frame_count": meta["frame_count"],
-            "duration": meta["duration"],
+            "path": str(dst),
+            "fps": _file_sessions[id]["fps"],
+            "frame_count": _file_sessions[id]["frame_count"],
+            "duration": _file_sessions[id]["duration"],
             "balanced": BALANCED_DEFAULT,
-        }
-    return {"id": id, "camera": camera, "path": str(dst), **meta, "balanced": BALANCED_DEFAULT}
+            "backend": "local"
+        }, status_code=200)
+    except Exception as e:
+        return JSONResponse({"error": f"file open failed: {e}"}, status_code=500)
 
 @app.get("/api/video_file/close")
 async def api_video_file_close(id: str = Query(default="file1")):
@@ -478,10 +779,38 @@ async def api_video_file_close(id: str = Query(default="file1")):
         if not sess:
             return {"status": "noop"}
         try:
-            if sess.get("cap"):
-                sess["cap"].release()
+            cap = sess.get("cap")
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            if sess.get("type") == "opencv":
+                with contextlib.suppress(Exception):
+                    get_ocv().close(id)
         finally:
             return {"status": "closed", "id": id}
+
+@app.post("/api/video_file/balance_mode")
+async def api_video_file_balance_mode(id: str = Query(default="file1"),
+                                      balanced: bool = Query(default=True),
+                                      reset_calibration: bool = Query(default=False)):
+    async with _file_sessions_lock:
+        sess = _file_sessions.get(id)
+        if not sess:
+            return JSONResponse({"error": "file session not opened"}, status_code=400)
+        sess["balanced"] = bool(balanced)
+        # зарезервировано: если в будущем добавим калибровку для файлов
+        if reset_calibration:
+            sess["calib_window"] = []
+            sess["balance_alpha"] = BALANCE_ALPHA
+            sess["balance_bias"] = BALANCE_BIAS
+        return {
+            "id": id,
+            "balanced": sess["balanced"],
+            "alpha": float(sess.get("balance_alpha", BALANCE_ALPHA)),
+            "bias": float(sess.get("balance_bias", BALANCE_BIAS)),
+        }
 
 @app.get("/api/models")
 def api_models():
@@ -506,11 +835,21 @@ def api_get_balance_mode(camera: str = Query(default=DEFAULT_CAM_ID)):
 
 @app.post("/api/balance_mode")
 async def api_set_balance_mode(camera: str = Query(default=DEFAULT_CAM_ID),
-                               balanced: bool = Query(default=True)):
+                               balanced: bool = Query(default=True),
+                               reset_calibration: bool = Query(default=False)):
     try:
         cs = CAMERAS.get_or_create(camera, CAM_URL)
         cs.balanced = bool(balanced)
-        return {"camera": camera, "balanced": cs.balanced}
+        if reset_calibration:
+            cs.calib_window.clear()
+            cs.balance_alpha = BALANCE_ALPHA
+            cs.balance_bias = BALANCE_BIAS
+        return {
+            "camera": camera,
+            "balanced": cs.balanced,
+            "alpha": getattr(cs, "balance_alpha", BALANCE_ALPHA),
+            "bias": getattr(cs, "balance_bias", BALANCE_BIAS),
+        }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -537,138 +876,303 @@ def api_video_config(camera: str = Query(default=DEFAULT_CAM_ID),
 
 @app.get("/api/video_file/frame")
 async def api_video_file_frame(id: str = Query(default="file1"),
-                               camera: str = Query(default="cam_file1"),
-                               t: float = Query(default=0.0)):
-    async with _file_sessions_lock:
-        sess = _file_sessions.get(id)
-        if not sess:
-            return JSONResponse({"error": "file session not opened"}, status_code=400)
-        cap = sess["cap"]
-        duration = sess.get("duration", 0.0)
-
-        # Валидация времени
-        if t < 0 or (duration > 0 and t > duration):
-            return JSONResponse({"error": f"Invalid time: {t}s (duration: {duration}s)"}, status_code=400)
-
-        # Установка позиции с обработкой ошибок
-        try:
-            pos_msec = max(0.0, float(t) * 1000.0)
-            cap.set(cv2.CAP_PROP_POS_MSEC, pos_msec)
-            # Проверяем, что позиция установилась корректно
-            actual_pos = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-            if abs(actual_pos - t) > 1.0:  # Допуск 1 секунда
-                logger.warning(f"Position set to {t}s, but actual is {actual_pos}s")
-        except Exception as e:
-            logger.error(f"Error setting video position: {e}")
-            return JSONResponse({"error": f"Failed to set position: {e}"}, status_code=500)
-
-        # Чтение кадра
-        try:
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                return JSONResponse({"error": "Failed to read frame"}, status_code=500)
-        except Exception as e:
-            logger.error(f"Error reading frame: {e}")
-            return JSONResponse({"error": f"Failed to read frame: {e}"}, status_code=500)
-    
-    # --- Инференс и overlay для видеофайлов ---
-    det_count = 0
+                         camera: str = Query(default="cam_file1"),
+                         t: float = Query(default=0.0)):
+    """
+    Безопасное извлечение одиночного кадра из загруженного видеофайла с защитой от гонок,
+    валидацией параметров и подробными логами. Исключения не роняют процесс — всегда JSON/JPEG.
+    """
     try:
-        from ultralytics import YOLO
-        # читаем актуальную модель из глобального MODEL_PATH
-        model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
-        # если модель ещё не инициализирована или путь изменился — перезагрузить
-        cached = getattr(api_video_file_frame, "model", None)
-        cached_path = getattr(api_video_file_frame, "model_path", None)
-        if (cached is None) or (cached_path != model_path):
-            if os.path.exists(model_path):
-                api_video_file_frame.model = YOLO(model_path)
-                api_video_file_frame.model_path = model_path
-                logger.info(f"[file_frame] YOLO model loaded: {model_path}")
-            else:
-                logger.warning(f"Model not found: {model_path}")
-                api_video_file_frame.model = None
-                api_video_file_frame.model_path = None
-        
-        if api_video_file_frame.model:
-            model = api_video_file_frame.model
-            results = model.predict(frame, imgsz=640, conf=CONF_THRESHOLD, verbose=False)
-            r = results[0]
-            if hasattr(r, "boxes") and r.boxes is not None:
-                xyxy = r.boxes.xyxy.cpu().numpy()
-                cls = r.boxes.cls.cpu().numpy()
-                conf = r.boxes.conf.cpu().numpy()
-                for i, b in enumerate(xyxy):
-                    c = int(cls[i])
-                    cf = float(conf[i])
-                    if c in TARGET_CLASS_IDS and cf >= CONF_THRESHOLD:
-                        det_count += 1
-                        x1, y1, x2, y2 = map(int, b)
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,255), 2)
-            if hasattr(r, "masks") and r.masks is not None:
-                masks = r.masks.data.cpu().numpy()
-                for mask in masks:
-                    mask = (mask > 0.5).astype(np.uint8) * 255
-                    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    cv2.drawContours(frame, contours, -1, (0, 180, 255), 2)
-        
-        # Overlay count
-        cv2.rectangle(frame, (10, 10), (200, 55), (0, 0, 0), -1)
-        cv2.putText(frame, f"Count: {det_count}", (20, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,255,0), 2)
-        
-        # Overlay time
-        cv2.putText(frame, f"Time: {t:.1f}s", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-        
+        # 1) Чтение и базовая валидация под глобальной блокировкой сессий
+        async with _file_sessions_lock:
+            sess = _file_sessions.get(id)
+            if not sess:
+                logger.warning("[file_frame] no session id=%s", id)
+                return JSONResponse({"error": "file session not opened"}, status_code=400)
+
+            duration = float(sess.get("duration", 0.0) or 0.0)
+            fps = float(sess.get("fps", 0.0) or 0.0)
+            backend_type = sess.get("type", "opencv")
+
+            # Ограничим t в допустимый диапазон, чтобы не уходить за края
+            if t < 0:
+                t = 0.0
+            if duration > 0 and t > duration:
+                t = max(0.0, duration - (1.0 / max(fps, 25.0)))
+
+            logger.info("[file_frame] id=%s camera=%s t=%.3f dur=%.3f fps=%.3f backend=%s",
+                        id, camera, t, duration, fps, backend_type)
+
+            frame = None
+
+            # 2) Извлечение кадра через локальный OpenCV (просто и стабильно)
+            sess = _file_sessions.get(id)
+            if not sess or sess.get("type") != "local" or sess.get("cap") is None:
+                return JSONResponse({"error": "file session not opened or invalid"}, status_code=400)
+            
+            cap = sess.get("cap")
+            frame = _read_frame_local(cap, t)
+            if frame is None:
+                return JSONResponse({"error": "Failed to read frame (local)"}, status_code=500)
+
+            # 3) Инференс с оверлеями (маски, ID, Count) для каждого кадра
+            if frame is not None:
+                # Кэш модели для файлов
+                global FILE_MODEL, FILE_MODEL_PATH, MODEL_PATH
+                from ultralytics import YOLO
+                try:
+                    target_model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
+                except Exception:
+                    target_model_path = os.getenv("MODEL_PATH", "models/yolo11n-seg.pt")
+                if (FILE_MODEL is None) or (FILE_MODEL_PATH != target_model_path):
+                    logger.info("[file_frame] Loading YOLO model: %s", target_model_path)
+                    FILE_MODEL = YOLO(target_model_path)
+                    FILE_MODEL_PATH = target_model_path
+
+                results = FILE_MODEL.predict(
+                    frame,
+                    imgsz=640,
+                    conf=CONF_THRESHOLD,
+                    verbose=False,
+                    retina_masks=True
+                )
+
+                if results and len(results) > 0:
+                    r = results[0]
+                    det_bboxes = []
+                    det_idx_map = []
+                    det_classes = []
+                    if hasattr(r, "boxes") and r.boxes is not None:
+                        xyxy = r.boxes.xyxy
+                        cls = r.boxes.cls
+                        conf = r.boxes.conf
+                        if hasattr(xyxy, "cpu"): xyxy = xyxy.cpu().numpy()
+                        if hasattr(cls, "cpu"): cls = cls.cpu().numpy()
+                        if hasattr(conf, "cpu"): conf = conf.cpu().numpy()
+                        for i, b in enumerate(xyxy):
+                            c = int(cls[i]) if i < len(cls) else -1
+                            cf = float(conf[i]) if i < len(conf) else 0.0
+                            if (c in TARGET_CLASS_IDS) and (cf >= CONF_THRESHOLD):
+                                x1, y1, x2, y2 = map(float, b)
+                                det_bboxes.append([x1, y1, x2, y2])
+                                det_idx_map.append(i)
+                                det_classes.append(c)
+
+                    tracker = sess.get("tracker")
+                    tracks = tracker.update([det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]) if tracker else []
+                    det_count = len(tracks)
+
+                    # Отрисовка bbox/ID/масок
+                    mask_data = None
+                    if hasattr(r, "masks") and r.masks is not None:
+                        mask_data = r.masks.data
+                        if hasattr(mask_data, "cpu"):
+                            mask_data = mask_data.cpu().numpy()
+                        h, w = frame.shape[:2]
+                    for tr in tracks:
+                        tid = tr['id']
+                        if mask_data is not None:
+                            mi = tr.get('det_index', -1)
+                            if 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (h, w):
+                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))  # BGR
+                                overlay = frame.copy()
+                                overlay[mask > 0] = color
+                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                                ys, xs = np.where(mask > 0)
+                                if len(xs) > 0:
+                                    cx, cy = int(xs.mean()), int(ys.mean())
+                                    cv2.putText(frame, f"ID:{tid}", (max(0, cx-20), max(15, cy-10)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (40, 40, 40), 3)
+                                    cv2.putText(frame, f"ID:{tid}", (max(0, cx-20), max(15, cy-10)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 1)
+
+                    # HUD
+                    cv2.rectangle(frame, (10, 10), (220, 60), (0, 0, 0), -1)
+                    cv2.putText(frame, f"Count: {det_count}", (18, 45),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+
+                    # Обновим статистику в сессии для клиента
+                    sess["last_count"] = int(det_count)
+                    cw = sess.setdefault("count_window", [])
+                    cw.append(float(det_count))
+                    if len(cw) > AVG_WINDOW:
+                        cw.pop(0)
+                    sess["avg_count"] = (sum(cw) / len(cw)) if cw else 0.0
+                else:
+                    cv2.rectangle(frame, (10, 10), (220, 60), (0, 0, 0), -1)
+                    cv2.putText(frame, "Count: 0", (18, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,255,0), 2)
+                    sess["last_count"] = 0
+                    cw = sess.setdefault("count_window", [])
+                    cw.append(0.0)
+                    if len(cw) > AVG_WINDOW:
+                        cw.pop(0)
+                    sess["avg_count"] = (sum(cw) / len(cw)) if cw else 0.0
+
     except Exception as e:
-        logger.error(f"Error in inference: {e}")
-        # Продолжаем без инференса
-    
-    # Кодирование JPEG
+        logger.exception("[file_frame] unexpected pre-infer error: %s", e)
+        return JSONResponse({"error": f"internal error: {e}"}, status_code=500)
+
+    # 4) Быстрая валидация кадра
+    try:
+        if frame is None:
+            return JSONResponse({"error": "Empty frame"}, status_code=500)
+        if not hasattr(frame, "shape") or len(frame.shape) < 2:
+            return JSONResponse({"error": "Invalid frame shape"}, status_code=500)
+        h, w = frame.shape[:2]
+        if h == 0 or w == 0:
+            return JSONResponse({"error": "Zero-size frame"}, status_code=500)
+        if frame.dtype != np.uint8:
+            try:
+                frame = frame.astype(np.uint8)
+            except Exception:
+                return JSONResponse({"error": "Unsupported frame dtype"}, status_code=500)
+    except Exception as e:
+        logger.exception("[file_frame] frame validation error: %s", e)
+        return JSONResponse({"error": f"frame validation error: {e}"}, status_code=500)
+
+    # 5) JPEG кодирование
     try:
         ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
         if not ok:
+            logger.error("[file_frame] jpeg encode failed")
             return JSONResponse({"error": "Failed to encode frame"}, status_code=500)
         return Response(buf.tobytes(), media_type="image/jpeg")
     except Exception as e:
-        logger.error(f"Error encoding frame: {e}")
+        logger.exception("[file_frame] encoding error: %s", e)
         return JSONResponse({"error": f"Failed to encode frame: {e}"}, status_code=500)
 
 def _gen_file_mjpeg(sess_id: str, rate: float):
     """
-    Crash-safe генератор MJPEG для проигрывания файла:
-    - Исключаем конкурентный доступ к cap: каждый read под общей асинхронной блокировкой
-    - Без CAP_FFMPEG; минимальная буферизация; декодер в 1 поток
-    - Любые исключения подавляются, чтобы процесс не падал
+    Простой генератор MJPEG для проигрывания файла через локальный OpenCV
+    с непрерывным серверным инференсом, оверлеями и усреднением счёта.
     """
     import time as _time
+    global FILE_MODEL, FILE_MODEL_PATH, MODEL_PATH
+    frame_idx_local = 0
     while True:
         try:
-            # Под общей блокировкой получаем cap и мета
-            # Используем try/except для совместимости потоков WSGI
-            cap = None
-            fps = 25.0
-            from contextlib import suppress
-            # Нельзя await внутри sync генератора, поэтому доступ к структурам
-            # должен быть кратковременным и консистентным: читаем snapshot
             sess = _file_sessions.get(sess_id)
-            if not sess:
+            if not sess or sess.get("type") != "local":
                 break
+            
             cap = sess.get("cap")
-            fps = (sess.get("fps", 25.0) or 25.0)
             if cap is None:
                 _time.sleep(0.05)
                 continue
 
-            with suppress(Exception):
-                cap.set(cv2.CAP_PROP_THREADS, 1)
-            with suppress(Exception):
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-            # Критическая секция чтения кадра — сериализуем через попытку блокировки
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                _time.sleep(0.03)
+            fps = (sess.get("fps", 25.0) or 25.0)
+            frame = _read_frame_local(cap)
+            if frame is None:
+                _time.sleep(max(0.02, 1.0 / (fps or 25.0)))
                 continue
+
+            do_infer = (frame_idx_local % max(1, FRAME_SKIP) == 0)
+            det_count = int(sess.get("last_count", 0) or 0)
+            if do_infer:
+                # ensure model
+                from ultralytics import YOLO
+                try:
+                    target_model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
+                except Exception:
+                    target_model_path = os.getenv("MODEL_PATH", "models/yolo11n-seg.pt")
+                if (FILE_MODEL is None) or (FILE_MODEL_PATH != target_model_path):
+                    logger.info("[file_play] Loading YOLO model: %s", target_model_path)
+                    FILE_MODEL = YOLO(target_model_path)
+                    FILE_MODEL_PATH = target_model_path
+                # predict
+                results = FILE_MODEL.predict(
+                    frame,
+                    imgsz=640,
+                    conf=CONF_THRESHOLD,
+                    verbose=False,
+                    retina_masks=True
+                )
+                if results and len(results) > 0:
+                    r = results[0]
+                    det_bboxes = []
+                    det_idx_map = []
+                    if hasattr(r, "boxes") and r.boxes is not None:
+                        xyxy = r.boxes.xyxy
+                        cls = r.boxes.cls
+                        conf = r.boxes.conf
+                        if hasattr(xyxy, "cpu"): xyxy = xyxy.cpu().numpy()
+                        if hasattr(cls, "cpu"): cls = cls.cpu().numpy()
+                        if hasattr(conf, "cpu"): conf = conf.cpu().numpy()
+                        for i, b in enumerate(xyxy):
+                            c = int(cls[i]) if i < len(cls) else -1
+                            cf = float(conf[i]) if i < len(conf) else 0.0
+                            if (c in TARGET_CLASS_IDS) and (cf >= CONF_THRESHOLD):
+                                x1, y1, x2, y2 = map(float, b)
+                                det_bboxes.append([x1, y1, x2, y2])
+                                det_idx_map.append(i)
+                    tracker = sess.get("tracker")
+                    tracks = tracker.update([det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]) if tracker else []
+                    det_count = len(tracks)
+                    # draw masks
+                    mask_data = None
+                    if hasattr(r, "masks") and r.masks is not None:
+                        mask_data = r.masks.data
+                        if hasattr(mask_data, "cpu"):
+                            mask_data = mask_data.cpu().numpy()
+                        h, w = frame.shape[:2]
+                        for tr in tracks:
+                            tid = tr['id']
+                            mi = tr.get('det_index', -1)
+                            if mask_data is not None and 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (h, w):
+                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))
+                                overlay = frame.copy()
+                                overlay[mask > 0] = color
+                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                                ys, xs = np.where(mask > 0)
+                                if len(xs) > 0:
+                                    cx, cy = int(xs.mean()), int(ys.mean())
+                                    cv2.putText(frame, f"ID:{tid}", (max(0, cx-20), max(15, cy-10)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (40, 40, 40), 3)
+                                    cv2.putText(frame, f"ID:{tid}", (max(0, cx-20), max(15, cy-10)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 1)
+                # Кэш для промежуточных кадров
+                sess["_last_tracks"] = tracks
+                sess["_last_masks"] = getattr(r, 'masks', None)
+                # update rolling avg
+                sess["last_count"] = int(det_count)
+                cw = sess.setdefault("count_window", [])
+                cw.append(float(det_count))
+                if len(cw) > AVG_WINDOW:
+                    cw.pop(0)
+                sess["avg_count"] = (sum(cw) / len(cw)) if cw else 0.0
+            else:
+                # Наложить прошлые маски на текущий кадр (для отзывчивости)
+                mask_data = sess.get("_last_masks")
+                if mask_data is not None:
+                    mask_data = mask_data.data if hasattr(mask_data, 'data') else mask_data
+                    if hasattr(mask_data, 'cpu'):
+                        mask_data = mask_data.cpu().numpy()
+                    tracks = sess.get("_last_tracks") or []
+                    h, w = frame.shape[:2]
+                    for tr in tracks:
+                        tid = tr['id']
+                        mi = tr.get('det_index', -1)
+                        if mask_data is not None and 0 <= mi < len(mask_data):
+                            mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                            if mask.shape[:2] != (h, w):
+                                mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                            color = _pastel_color_for_id(int(tid))
+                            overlay = frame.copy()
+                            overlay[mask > 0] = color
+                            frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+
+            # HUD: текущий и сглаженный
+            cv2.rectangle(frame, (10, 10), (320, 80), (0, 0, 0), -1)
+            cv2.putText(frame, f"Count(cur): {int(sess.get('last_count', 0) or 0)}", (18, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(frame, f"Count(avg): {int(round(sess.get('avg_count', 0.0) or 0.0))}", (18, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
             img = encode_jpeg(frame)
             if not img:
@@ -676,8 +1180,8 @@ def _gen_file_mjpeg(sess_id: str, rate: float):
                 continue
 
             yield multipart_chunk(img)
-
-            delay = max(0.01, (1.0 / fps) / max(0.05, float(rate or 1.0)))
+            frame_idx_local += 1
+            delay = max(0.015, (1.0 / (fps or 25.0)) / max(0.1, float(rate or 1.0)))
             _time.sleep(delay)
         except GeneratorExit:
             break
@@ -687,13 +1191,25 @@ def _gen_file_mjpeg(sess_id: str, rate: float):
 
 @app.get("/api/video_file/play")
 async def api_video_file_play(id: str = Query(default="file1"),
-                              camera: str = Query(default="cam_file1"),
-                              rate: float = Query(default=1.0)):
+                        camera: str = Query(default="cam_file1"),
+                        rate: float = Query(default=1.0)):
     # Только проверка существования под блокировкой, генератор остаётся синхронным
     async with _file_sessions_lock:
         if id not in _file_sessions:
             return JSONResponse({"error": "file session not opened"}, status_code=400)
-    return StreamingResponse(_gen_file_mjpeg(id, rate), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
+        return StreamingResponse(_gen_file_mjpeg(id, rate), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
+
+@app.get("/api/video_file/last_count")
+async def api_video_file_last_count(id: str = Query(default="file1")):
+    async with _file_sessions_lock:
+        sess = _file_sessions.get(id)
+        if not sess:
+            return JSONResponse({"error": "file session not opened"}, status_code=400)
+        return {
+            "id": id,
+            "count": int(sess.get("last_count", 0) or 0),
+            "avg": float(sess.get("avg_count", 0.0) or 0.0)
+        }
 
 # --- Shutdown hook ---
 @app.on_event("shutdown")
@@ -703,6 +1219,105 @@ async def shutdown_event():
     for cam in CAMERAS.cams.values():
         await cam.stop()
     for sess in _file_sessions.values():
-        if sess.get("cap"):
-            sess["cap"].release()
+        try:
+            if sess.get("type") == "opencv" and sess.get("cap"):
+                sess["cap"].release()
+            elif sess.get("type") == "pyav" and sess.get("container"):
+                sess["container"].close()
+        except Exception:
+            pass
     logger.info("All resources cleaned up.")
+
+# --- Tracking utils ---
+def _iou(boxA, boxB):
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
+    inter = max(0.0, xB - xA) * max(0.0, yB - yA)
+    if inter <= 0:
+        return 0.0
+    areaA = max(0.0, boxA[2] - boxA[0]) * max(0.0, boxA[3] - boxA[1])
+    areaB = max(0.0, boxB[2] - boxB[0]) * max(0.0, boxB[3] - boxB[1])
+    union = areaA + areaB - inter
+    return float(inter / max(1e-6, union))
+
+class SimpleTracker:
+    def __init__(self, iou_threshold: float = 0.3, max_age: int = 30):
+        self.iou_threshold = float(iou_threshold)
+        self.max_age = int(max_age)
+        self.tracks = {}  # id -> {bbox: [x1,y1,x2,y2], age: int}
+        self.next_id = 1
+    
+    def update(self, detections: list[list[float]]):
+        """
+        detections: list of [x1,y1,x2,y2, det_index]
+        Returns: list of dict {id, bbox, det_index}
+        """
+        assigned = set()
+        # Compute IoU matrix track_id -> det_index
+        matches = []
+        for tid, st in self.tracks.items():
+            best_iou = 0.0
+            best_j = -1
+            for j, det in enumerate(detections):
+                if j in assigned:
+                    continue
+                iou = _iou(st['bbox'], det[:4])
+                if iou > best_iou:
+                    best_iou = iou
+                    best_j = j
+            if best_j >= 0 and best_iou >= self.iou_threshold:
+                # assign
+                assigned.add(best_j)
+                self.tracks[tid]['bbox'] = detections[best_j][:4]
+                self.tracks[tid]['age'] = 0
+                matches.append({'id': tid, 'bbox': detections[best_j][:4], 'det_index': int(detections[best_j][4])})
+            else:
+                # age up
+                self.tracks[tid]['age'] += 1
+        # remove old
+        to_del = [tid for tid, st in self.tracks.items() if st['age'] > self.max_age]
+        for tid in to_del:
+            self.tracks.pop(tid, None)
+        # create for unassigned detections
+        for j, det in enumerate(detections):
+            if j in assigned:
+                continue
+            tid = self.next_id
+            self.next_id += 1
+            self.tracks[tid] = {'bbox': det[:4], 'age': 0}
+            matches.append({'id': tid, 'bbox': det[:4], 'det_index': int(det[4])})
+        return matches
+
+# --- Color utils for overlays ---
+def _pastel_color_for_id(track_id: int) -> tuple[int, int, int]:
+    palette = [
+        (180, 180, 255),  # light red (BGR-ish pastel)
+        (180, 255, 180),  # light green
+        (255, 180, 180),  # light blue
+        (200, 200, 255),  # lavender
+        (255, 200, 200),  # pink-ish
+        (200, 255, 255),  # light yellow
+        (210, 220, 255),  # baby purple
+        (220, 255, 210),  # mint
+    ]
+    if track_id is None:
+        return (200, 200, 200)
+    return palette[(track_id - 1) % len(palette)]
+
+# Глобально ограничим потоки OpenCV для стабильности
+try:
+    import cv2 as _cv2_for_threads
+    if hasattr(_cv2_for_threads, 'setNumThreads'):
+        _cv2_for_threads.setNumThreads(1)
+except Exception:
+    pass
+
+# Безопасная установка свойств VideoCapture
+def _cap_safe_set(cap, prop, value):
+    try:
+        cap.set(prop, value)
+    except Exception:
+        return False
+    return True
