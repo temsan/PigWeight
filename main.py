@@ -3,11 +3,21 @@ import sys
 import urllib.request
 import subprocess
 import logging
-from core.config import MODEL_URL, MODEL_PATH, ONNX_PATH
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- Config from environment ---
+MODEL_URL = os.getenv("MODEL_URL", "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt")
+MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
+ONNX_PATH = os.getenv("ONNX_PATH", "models/yolo11n.onnx")
+
+# Server config
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8000"))
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 def ensure_dir(path):
     if not os.path.exists(path):
@@ -75,25 +85,31 @@ def convert_to_onnx():
 def main():
     try:
         # Initialize models and requirements
-        install_requirements()
+        # install_requirements()
         download_model()
         convert_to_onnx()
         
         # Ensure required directories exist
         ensure_dir('models')
         ensure_dir('stream')
+        ensure_dir('uploads')
         
         # Import ASGI app after all requirements are installed
-        # Перешли на FastAPI — запуск через uvicorn
-        host = os.getenv("HOST", "0.0.0.0")
-        port = int(os.getenv("PORT", "8000"))
-        logger.info(f'Starting server at http://{host}:{port}')
-        logger.info(f'API Health Check: http://{host}:{port}/api/health')
+        logger.info(f'Starting server at http://{HOST}:{PORT}')
+        logger.info(f'API Health Check: http://{HOST}:{PORT}/api/health')
+        logger.info(f'Debug mode: {DEBUG}')
+        
         try:
             import uvicorn
             # Запускаем уже импортированный объект приложения для явной связки процесса
             from api.app import app as fastapi_app
-            uvicorn.run(fastapi_app, host=host, port=port, reload=False, log_level="info")
+            uvicorn.run(
+                fastapi_app, 
+                host=HOST, 
+                port=PORT, 
+                reload=DEBUG, 
+                log_level="debug" if DEBUG else "info"
+            )
         except Exception as e:
             logger.error(f'Error starting server via uvicorn: {str(e)}')
             raise

@@ -17,7 +17,8 @@
           <div id="cameraRadios" class="toggle-group compact"></div>
         </div>
 
-        <div class="toolbar-group" id="modelGroup" style="flex:0 1 auto; min-width:160px; white-space:nowrap;">
+        <!-- Убраны кнопки выбора моделей -->
+        <div class="toolbar-group" id="modelGroup" style="display:none;">
           <div id="modelRadios" class="toggle-group compact"></div>
         </div>
 
@@ -29,15 +30,15 @@
         </label>
 
         <!-- Компактные кнопки управления, без налезаний -->
-        <button id="fileStopBtn" class="pill danger nowrap only-file" style="visibility:hidden; flex:0 0 auto; padding:6px 10px; min-width:auto;">Стоп</button>
-        <button id="videoPlayPauseBtn" class="pill nowrap only-live" style="visibility:visible; flex:0 0 auto; padding:6px 10px; min-width:auto;">Стоп</button>
+        <!-- Одна универсальная кнопка: в live — управляет MJPEG, в файловом — /play ↔ /frame. Размер кнопки не меняется. -->
+        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:6px 10px; min-width:auto; height:32px; line-height:20px;">Стоп</button>
 
         <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 220px; min-width:220px; max-width:380px;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
 
-        <button id="countBtn" class="pill primary nowrap" title="Опрос сервера" style="flex:0 0 auto; padding:6px 12px; min-width:auto;">Посчитать</button>
+        <button id="balanceBtn" class="pill primary nowrap" title="Включить/выключить сбалансированные веса" style="flex:0 0 auto; padding:6px 12px; min-width:auto;">Сбалансировать веса</button>
         <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto;"></span>
       </div>
     </div>
@@ -81,7 +82,7 @@
     </div>
   </div>
 </div>
-    <div id="modelStatus" class="container" style="margin-top:8px; max-width:1360px;"></div>
+    <div id="modelStatus" class="container" style="margin-top:8px; max-width:1360px; display:none;"></div>
     <div id="debugModels" style="margin:1em 0; color:#555;"></div>
     <table id="history">
       <thead>
@@ -101,8 +102,8 @@
     function updateModelStatus(){
       const ms = document.getElementById('modelStatus');
       if (!ms) return;
-      const modelLabel = lastAppliedModel || '—';
-      ms.textContent = `Режим: серверная обработка · Модель: ${modelLabel}`;
+      // Убираем лишнюю подпись статуса режима/модели
+      ms.textContent = '';
     }
 
     // --- UI ---
@@ -134,7 +135,7 @@
     const overlayCanvas = document.getElementById('overlayCanvas');
     const streamStatus = document.getElementById('streamStatus');
     const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
-    const countBtn = document.getElementById('countBtn');
+    const balanceBtn = document.getElementById('balanceBtn');
     const manualCount = document.getElementById('manualCount');
     const manualTotalWeight = document.getElementById('manualTotalWeight');
     const manualAvgWeight = document.getElementById('manualAvgWeight');
@@ -142,7 +143,8 @@
     const cameraRadios = document.getElementById('cameraRadios');
     const modelRadios = document.getElementById('modelRadios');
     const fileInput = document.getElementById('videoFileInput');
-    const fileStopBtn = document.getElementById('fileStopBtn') || document.getElementById('filePauseBtn') || document.getElementById('filePlayPauseBtn');
+    // Удалена отдельная кнопка файлового режима: используется единая videoPlayPauseBtn
+    const fileStopBtn = null;
     const seekRange = document.getElementById('seekRange');
     const curTime = document.getElementById('curTime');
     const durTime = document.getElementById('durTime');
@@ -177,10 +179,16 @@
 
         // Общие UI переключения
         selectedCameraId = cam;
+        // В файловом режиме используем ту же кнопку videoPlayPauseBtn как триггер: Стоп/Старт
         const liveBtn = document.getElementById('videoPlayPauseBtn');
-        const fileBtn = document.getElementById('fileStopBtn');
-        if (liveBtn) liveBtn.style.visibility = 'hidden';
-        if (fileBtn) fileBtn.style.visibility = 'visible';
+        if (liveBtn) {
+          liveBtn.style.visibility = 'visible';
+          liveBtn.textContent = 'Стоп';
+          // фиксируем размер кнопки, чтобы при смене текста не прыгал layout
+          liveBtn.style.height = liveBtn.style.height || '32px';
+          liveBtn.style.lineHeight = liveBtn.style.lineHeight || '20px';
+          liveBtn.style.minWidth = liveBtn.style.minWidth || '64px';
+        }
         isVideoPlaying = true;
 
         try {
@@ -240,7 +248,7 @@
             setTimeout(switchToPlay, 500);
           }
 
-          // Серверная обработка метрик
+          // Серверная обработка метрик (безопасная инициализация WS)
           startPollingCount();
         } catch (e) {
           console.warn('Open/play file failed:', e);
@@ -253,18 +261,7 @@
         }
       }); // end fileInput change handler
     } // end if (fileInput)
-    if (fileStopBtn) {
-      fileStopBtn.addEventListener('click', () => {
-        const { id, camera } = fileSession;
-        if (!id) return;
-        const t = parseFloat(seekRange.value || '0') || 0;
-        // При нажатии "Стоп" в файловом режиме всегда фиксируем статичный кадр справа
-        const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
-        video.src = frameUrl;
-        isVideoPlaying = false;
-        curTime.textContent = t.toFixed(1);
-      });
-    }
+    // Убрана отдельная кнопка файлового режима: используется единая videoPlayPauseBtn
 
     // --- Радиокнопки для камер ---
     cameraRadios.innerHTML = '';
@@ -283,9 +280,11 @@
           // UI переключение
           // Не меняем layout: используем visibility вместо display
           const liveBtn = document.getElementById('videoPlayPauseBtn');
-          const fileBtn = document.getElementById('fileStopBtn');
-          if (liveBtn) liveBtn.style.visibility = 'visible';
-          if (fileBtn) fileBtn.style.visibility = 'hidden';
+          if (liveBtn) {
+            liveBtn.style.visibility = 'visible';
+            liveBtn.textContent = 'Стоп';
+          }
+          // fileStopBtn больше не используется
           video.src = cam.url + `&ts=${Date.now()}`;
           isVideoPlaying = true;
           videoPlayPauseBtn.textContent = 'Стоп';
@@ -305,66 +304,23 @@
     selectedCameraId = (config.cameras[0] && config.cameras[0].id) || 'cam1';
     const baseLive = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`);
     setTimeout(()=>{ video.src = baseLive + `&ts=${Date.now()}`; }, 0);
+    // Инициируем WS безопасно относительно порядка загрузки
     startPollingCount();
 
-    // --- Модели: серверный режим читает только /api/models (только *.pt). Клиентских *.onnx нет в UI. ---
+    // --- Модели: выключены кнопки выбора. Если модель одна — используем дефолт с бэка. ---
     async function loadModels() {
-      modelRadios.innerHTML = '';
-
-      // Получаем список доступных .pt с бэкенда
-      let modelsPt = [];
+      // Ничего не делаем: модель фиксирована на сервере.
       try {
-        const resp = await fetch('/api/models', { cache: 'no-store' });
-        const data = await resp.json();
-        if (resp.ok && data && Array.isArray(data.models)) {
-          modelsPt = data.models;
+        // Попробуем однократно подтолкнуть сервер к актуальной модели, если она есть.
+        const resp = await fetch('/api/models', { cache: 'no-store' }).catch(() => null);
+        if (resp && resp.ok) {
+          const data = await resp.json();
+          if (data && Array.isArray(data.models) && data.models.length > 0) {
+            const fname = data.models[0];
+            await applyModel(fname);
+          }
         }
-      } catch (e) {
-        console.warn('Failed to fetch /api/models', e);
-      }
-
-      // Если пусто — покажем заглушку и не блокируем UI полностью
-      if (!modelsPt.length) {
-        const fallback = ['yolo11n.pt', 'yolo11n-seg.pt'];
-        modelsPt = fallback;
-        const ms = document.getElementById('modelStatus');
-        if (ms) {
-          ms.textContent = 'Серверные модели не найдены в ./models. Используются имена-замены (если файлов нет — применение вернёт 404).';
-          ms.style.color = '#a66';
-        }
-      }
-
-      // Радиокнопки по конкретным .pt
-      modelsPt.forEach((fname, idx) => {
-        const id = 'model_pt_' + idx;
-        const inp = document.createElement('input');
-        inp.type = 'radio';
-        inp.name = 'modelPt';
-        inp.value = fname;
-        inp.id = id;
-        inp.style.display = 'none';
-        if (idx === 0) inp.checked = true;
-
-        const lbl = document.createElement('label');
-        lbl.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
-        lbl.htmlFor = id;
-        lbl.textContent = fname.replace(/\.pt$/i, '');
-
-        inp.addEventListener('change', async () => {
-          if (!inp.checked) return;
-          await applyModel(fname);
-          Array.from(modelRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
-          lbl.classList.add('selected');
-        });
-
-        modelRadios.appendChild(inp);
-        modelRadios.appendChild(lbl);
-      });
-
-      // Автоприменение первого элемента
-      if (modelsPt.length) {
-        await applyModel(modelsPt[0]);
-      }
+      } catch(_) {}
     }
 
     async function applyModel(modelFilePt) {
@@ -401,12 +357,7 @@
         startPollingCount();
 
         // статус
-        const statusEl = document.getElementById('streamStatus');
-        if (statusEl) {
-          statusEl.textContent = `Модель: ${modelFilePt}`;
-          statusEl.style.color = '#3a558c';
-          setTimeout(() => { statusEl.textContent=''; }, 2500);
-        }
+        // Не показываем всплывающий статус модели по требованию
         lastAppliedModel = modelFilePt;
         updateModelStatus();
       } catch(e) {
@@ -427,10 +378,7 @@
     }
 
     // Управление серверным опросом
-    function stopPollingCount(){
-      if (pollingTimer){ clearInterval(pollingTimer); pollingTimer = null; }
-      logDiag('stopPollingCount');
-    }
+    // Удалено: дублирующаяся версия stopPollingCount на таймере опроса
 
     // Удалён вспомогательный клиентский код transform/tensor/NMS — он не используется в серверном режиме.
 
@@ -627,8 +575,9 @@
       }
     }
 
-    // --- WebSocket: единый источник без дублей (/ws/stream) ---
-    let ws = null;
+    // --- WebSocket: единый источник без дублей (/ws/count) ---
+    // Объявляем через var, чтобы исключить TDZ и обращения до инициализации.
+    var ws = null;
     function applyServerMetrics(cnt){
       manualCount.value = String(cnt);
       const total = parseFloat(manualTotalWeight.value);
@@ -636,15 +585,14 @@
     }
     function connectWS(){
       try{
+        if (ws) return;
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-        // Используем /ws/stream только для метаданных (count/fps). Кадры рендерятся через MJPEG.
         const url = `${proto}://${location.host}/ws/count`;
         ws = new WebSocket(url);
         ws.onopen = () => setStatus('WS connected', '#2c5', 1200);
         ws.onclose = () => { setStatus('WS disconnected', '#a66', 1500); ws = null; };
         ws.onerror = () => { setStatus('WS error', '#a66', 1500); };
         ws.onmessage = (ev) => {
-          // двоичные кадры и текстовые метаданные
           if (typeof ev.data === 'string') {
             try{
               const msg = JSON.parse(ev.data);
@@ -659,8 +607,6 @@
                 if (weightUpdateTime) weightUpdateTime.textContent = `Последнее обновление: ${ts} (камера: ${camera||'-'})`;
               }
             }catch(_){}
-          } else {
-            // Игнорируем двоичные кадры — в серверном режиме картинка берётся из MJPEG.
           }
         };
       }catch(e){
@@ -668,36 +614,76 @@
       }
     }
     function startPollingCount(){
-      if (!ws) connectWS();
+      // Безопасный вызов до полной загрузки: ставим соединение по готовности DOM
+      if (ws) return;
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => connectWS(), { once: true });
+      } else {
+        connectWS();
+      }
     }
     async function requestWsFrame(){
-      // В версии /ws/stream кадры идут постоянно — отдельный запрос кадра не требуется
+      // В версии /ws/count кадры не передаются — только метаданные
     }
     function stopPollingCount(){
+      // Единственная корректная остановка: закрываем WS и очищаем ссылку
       if (ws){ try{ ws.close(); }catch(_){ } ws = null; }
     }
 
     // Удалён автозапуск опроса на window.onload — управление только через setInferMode()
 
-    // --- Кнопка "Посчитать": разовый запрос актуального значения из последнего WS-события ---
-    countBtn.addEventListener('click', () => {
-      // ничего не дергаем у сервера: берём текущее в UI
-      const cnt = parseFloat(manualCount.value);
-      if (isFinite(cnt) && cnt >= 0) {
-        // триггерим обновление правых метрик из текущих ручных значений
-        const liveCountEl = document.getElementById('liveCountValue');
-        const liveTotalEl = document.getElementById('liveTotalWeightValue');
-        const liveAvgEl = document.getElementById('liveAvgWeightValue');
-        const total = parseFloat(manualTotalWeight.value);
-        if (liveCountEl) liveCountEl.textContent = String(cnt);
-        if (liveTotalEl) liveTotalEl.textContent = (isFinite(total) && total > 0) ? Number(total.toFixed(2)).toString() : '—';
-        if (liveAvgEl) {
-          if (isFinite(cnt) && cnt > 0 && isFinite(total) && total > 0) liveAvgEl.textContent = (total / cnt).toFixed(2);
-          else liveAvgEl.textContent = '—';
+    async function toggleBalanced(frontDesired=null){
+      try{
+        // если в файловом режиме — меняем для file session, иначе для live камеры
+        const src = String(video.src || '');
+        const isFileMode = src.includes('/api/video_file/');
+        if (isFileMode && fileSession.id){
+          // узнать текущее
+          const getResp = await fetch(`/api/video_file/balance_mode?id=${encodeURIComponent(fileSession.id)}&ts=${Date.now()}`, { cache: 'no-store' });
+          let cur = false;
+          if (getResp.ok){
+            const d = await getResp.json();
+            cur = !!d.balanced;
+          }
+          const next = (frontDesired==null) ? !cur : !!frontDesired;
+          const setResp = await fetch(`/api/video_file/balance_mode?id=${encodeURIComponent(fileSession.id)}&balanced=${String(next)}&ts=${Date.now()}`, { method: 'POST' });
+          if (setResp.ok){
+            setStatus(next ? 'Баланс включён' : 'Баланс выключен', next ? '#2c5' : '#3a558c', 1200);
+            // перезапросить источник чтобы сразу увидеть эффект
+            if (isVideoPlaying){
+              video.src = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
+            }else{
+              const t = parseFloat(seekRange.value||'0')||0;
+              video.src = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+            }
+          }else{
+            setStatus('Не удалось изменить режим баланса (файл)', '#a66', 1800);
+          }
+        }else{
+          const cam = selectedCameraId || 'cam1';
+          const getResp = await fetch(`/api/balance_mode?camera=${encodeURIComponent(cam)}&ts=${Date.now()}`, { cache: 'no-store' });
+          let cur = false;
+          if (getResp.ok){
+            const d = await getResp.json();
+            cur = !!d.balanced;
+          }
+          const next = (frontDesired==null) ? !cur : !!frontDesired;
+          const setResp = await fetch(`/api/balance_mode?camera=${encodeURIComponent(cam)}&balanced=${String(next)}&ts=${Date.now()}`, { method: 'POST' });
+          if (setResp.ok){
+            setStatus(next ? 'Баланс включён' : 'Баланс выключен', next ? '#2c5' : '#3a558c', 1200);
+            // перезагрузим live поток
+            const liveUrl = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`) + `&ts=${Date.now()}`;
+            video.src = liveUrl;
+          }else{
+            setStatus('Не удалось изменить режим баланса (live)', '#a66', 1800);
+          }
         }
-        setStatus('Обновлено', '#2c5', 900);
+      }catch(e){
+        setStatus('Ошибка режима баланса', '#a66', 1800);
       }
-    });
+    }
+    
+    balanceBtn.addEventListener('click', () => { toggleBalanced(); });
 
     /**
      * Единая строгая логика пересчёта:
@@ -706,58 +692,88 @@
      * - Если меняется Средний (avg): обновляем Общий вес = Count * Avg (если Count задан), иначе чистим.
      * Всюду защищаемся от NaN и неположительных значений.
      */
-    function toNum(v){ const n = parseFloat(v); return Number.isFinite(n) ? n : NaN; }
-    function fmt2(n){ return Number.isFinite(n) ? n.toFixed(2) : ''; }
-    
+    function toNum(v){ const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : NaN; }
+    function fmt2(n){ return Number.isFinite(n) ? (Math.round(n * 100) / 100).toFixed(2) : ''; }
+
+    function clampNonNegative(n){ return Number.isFinite(n) ? Math.max(0, n) : NaN; }
+
+    function setLiveTop(count, total, avg){
+      const liveTotalEl = document.getElementById('liveTotalWeightValue');
+      const liveAvgEl = document.getElementById('liveAvgWeightValue');
+      const liveCountEl = document.getElementById('liveCountValue');
+      if (liveCountEl) {
+        if (Number.isFinite(count) && count >= 0) {
+          liveCountEl.textContent = String(Math.trunc(count));
+        } else if (liveCountEl.textContent === '' || liveCountEl.textContent === '—') {
+          liveCountEl.textContent = '—';
+        }
+      }
+      if (liveTotalEl) {
+        liveTotalEl.textContent = (Number.isFinite(total) && total >= 0) ? fmt2(total) : '—';
+      }
+      if (liveAvgEl) {
+        liveAvgEl.textContent = (Number.isFinite(avg) && avg >= 0) ? fmt2(avg) : '—';
+      }
+    }
+
     function recalcFromCountOrTotal(){
-      const count = toNum(manualCount.value);
-      const total = toNum(manualTotalWeight.value);
-      if (Number.isFinite(count) && count > 0 && Number.isFinite(total) && total >= 0){
-        manualAvgWeight.value = fmt2(total / count);
+      const count = clampNonNegative(toNum(manualCount.value));
+      const total = clampNonNegative(toNum(manualTotalWeight.value));
+      const hasCount = Number.isFinite(count) && count > 0;
+      const hasTotal = Number.isFinite(total) && total >= 0;
+
+      if (hasCount && hasTotal){
+        const rawAvg = total / count;
+        const avg = Number.isFinite(rawAvg) && rawAvg >= 0 ? rawAvg : NaN;
+        manualAvgWeight.value = Number.isFinite(avg) ? fmt2(avg) : '';
+        setLiveTop(count, total, avg);
+      } else if (hasCount && !hasTotal) {
+        // total пустой — чистим средний, но оставляем count в топе
+        manualAvgWeight.value = '';
+        setLiveTop(count, NaN, NaN);
+      } else if (!hasCount && hasTotal) {
+        // count отсутствует/0 — средний не определён
+        manualAvgWeight.value = '';
+        setLiveTop(NaN, total, NaN);
       } else {
         manualAvgWeight.value = '';
-      }
-      // Синхронно обновим верхний блок (если есть)
-      const liveTotalEl = document.getElementById('liveTotalWeightValue');
-      const liveAvgEl = document.getElementById('liveAvgWeightValue');
-      const liveCountEl = document.getElementById('liveCountValue');
-      if (liveCountEl && Number.isFinite(count) && count >= 0) liveCountEl.textContent = String(count);
-      if (liveTotalEl) liveTotalEl.textContent = (Number.isFinite(total) && total >= 0) ? total.toFixed(2) : '—';
-      if (liveAvgEl){
-        const avg = (Number.isFinite(count) && count > 0 && Number.isFinite(total) && total >= 0) ? (total / count) : NaN;
-        liveAvgEl.textContent = Number.isFinite(avg) ? avg.toFixed(2) : '—';
+        setLiveTop(NaN, NaN, NaN);
       }
     }
-    
+
     function recalcFromAvg(){
-      const count = toNum(manualCount.value);
-      const avg = toNum(manualAvgWeight.value);
-      if (Number.isFinite(count) && count > 0 && Number.isFinite(avg) && avg >= 0){
-        manualTotalWeight.value = fmt2(count * avg);
+      const count = clampNonNegative(toNum(manualCount.value));
+      const avg = clampNonNegative(toNum(manualAvgWeight.value));
+      const hasCount = Number.isFinite(count) && count > 0;
+      const hasAvg = Number.isFinite(avg) && avg >= 0;
+
+      if (hasCount && hasAvg){
+        const total = count * avg;
+        manualTotalWeight.value = fmt2(total);
+        setLiveTop(count, total, avg);
       } else {
         manualTotalWeight.value = '';
+        setLiveTop(count, NaN, hasAvg ? avg : NaN);
       }
-      // обновим верхний блок
-      const liveTotalEl = document.getElementById('liveTotalWeightValue');
-      const liveAvgEl = document.getElementById('liveAvgWeightValue');
-      const liveCountEl = document.getElementById('liveCountValue');
-      if (liveCountEl && Number.isFinite(count) && count >= 0) liveCountEl.textContent = String(count);
-      if (liveTotalEl){
-        const total = (Number.isFinite(count) && count > 0 && Number.isFinite(avg) && avg >= 0) ? (count * avg) : NaN;
-        liveTotalEl.textContent = Number.isFinite(total) ? total.toFixed(2) : '—';
-      }
-      if (liveAvgEl) liveAvgEl.textContent = (Number.isFinite(avg) && avg >= 0) ? avg.toFixed(2) : '—';
     }
-    
-    // Снимем потенциальные старые inline-обработчики
-    manualCount.oninput = null;
-    manualTotalWeight.oninput = null;
-    manualAvgWeight.oninput = null;
-    
-    // Привязки
-    manualCount.addEventListener('input', recalcFromCountOrTotal);
-    manualTotalWeight.addEventListener('input', recalcFromCountOrTotal);
-    manualAvgWeight.addEventListener('input', recalcFromAvg);
+
+    // Снимем потенциальные старые inline-обработчики и нормализуем input событие для wheel/step кнопок
+    ['oninput','onchange','onkeyup'].forEach(p => {
+      manualCount[p] = null;
+      manualTotalWeight[p] = null;
+      manualAvgWeight[p] = null;
+    });
+
+    // Привязки: реагируем и на input, и на change (для num step/стрелок), и на keyup (запятая)
+    ['input','change','keyup'].forEach(ev => {
+      manualCount.addEventListener(ev, recalcFromCountOrTotal);
+      manualTotalWeight.addEventListener(ev, recalcFromCountOrTotal);
+      manualAvgWeight.addEventListener(ev, recalcFromAvg);
+    });
+    // Инициализирующий пересчёт после загрузки DOM — чтобы поля сразу синхронизировались
+    setTimeout(() => {
+      try { recalcFromCountOrTotal(); } catch(_) {}
+    }, 0);
 
     // Перемотка/таймлайн и +/-10с убраны для MJPEG live
 
@@ -803,7 +819,7 @@
     // --- Автоматический пересчёт среднего веса (удалена дубляция) ---
     // Функции и подписки перенесены ниже в единую секцию
 
-    // Инициализация статуса убрана — статус теперь всегда устанавливается при переключении режимов/моделей
+    // Статус модели скрыт (требование: не отображать строку "Режим/Модель")
     modelStatus.textContent = '';
 
     // Удалены старые контролы выбора локального видеофайла и распознавания с него — используется только RTSP/MJPEG
@@ -812,8 +828,33 @@
     // Кнопка "Кадр" удалена по требованию — запрос кадров управляется автоматически через WS
 
     const mjpegUrl = (config.cameras[0] && config.cameras[0].url) || '/api/video_feed?mode=server';
-    videoPlayPauseBtn.addEventListener('click', () => {
+    videoPlayPauseBtn.addEventListener('click', async () => {
       const img = document.getElementById('videoStream');
+      const src = String(video.src || '');
+      const isFileMode = src.includes('/api/video_file/');
+      if (isFileMode) {
+        // Универсальная кнопка в файловом режиме: /play ↔ /frame
+        const { id, camera, duration } = fileSession || {};
+        if (!id) return;
+        // при старте повторного воспроизведения берём текущее значение ползунка как t
+        const t = Math.max(0, Math.min(duration || 0, parseFloat(seekRange.value || '0') || 0));
+        if (isVideoPlaying) {
+          // Пауза: статический кадр на текущем времени
+          const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+          video.src = frameUrl;
+          isVideoPlaying = false;
+          curTime.textContent = t.toFixed(1);
+          videoPlayPauseBtn.textContent = 'Старт';
+        } else {
+          // Плей (всегда перезапускаем поток с параметром ts для обхода кэша)
+          const playUrl = `/api/video_file/play?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&rate=1.0&ts=${Date.now()}`;
+          video.src = playUrl;
+          isVideoPlaying = true;
+          videoPlayPauseBtn.textContent = 'Стоп';
+        }
+        return;
+      }
+      // Live MJPEG
       if (isVideoPlaying) {
         if (img) { img.dataset.prev = img.src; img.removeAttribute('src'); }
         isVideoPlaying = false;
@@ -827,31 +868,50 @@
       }
     });
 
-    // --- Файл: автопроигрывание уже реализовано выше через onchange input; старые кнопки удалены ---
-    // Удалён мёртвый код fileOpenBtn/filePlayBtn/filePauseBtn и все alert-ы
-    // Перемотка/таймлайн — поддержка и для клиентского инференса:
-    // - В паузе: показываем ближайший кадр (server: /frame, client: /frame как источник для img)
-    // - В воспроизведении: переключаемся на play-поток
+    /**
+     * Перемотка файла на клиенте:
+     * - В паузе: показываем статический кадр (через Blob URL из /api/video_file/frame), чтобы не рвать текущий поток src лишний раз.
+     * - В воспроизведении: показываем статический кадр во время движения бегунка и через debounce возвращаемся к /play.
+     * Blob-подход уменьшает фликер и гонки загрузки IMG.
+     */
     let seekDebounceTimer = null;
-    seekRange.addEventListener('input', () => {
+    let lastObjectUrl = null;
+    
+    async function fetchFrameBlobUrl(id, camera, tSec){
+      try{
+        const url = `/api/video_file/frame?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&t=${encodeURIComponent(tSec)}&ts=${Date.now()}`;
+        const resp = await fetch(url, { cache: 'no-store' });
+        if (!resp.ok) return null;
+        const blob = await resp.blob();
+        if (lastObjectUrl) { URL.revokeObjectURL(lastObjectUrl); lastObjectUrl = null; }
+        lastObjectUrl = URL.createObjectURL(blob);
+        return lastObjectUrl;
+      }catch(e){
+        return null;
+      }
+    }
+    
+    seekRange.addEventListener('input', async () => {
       const t = parseFloat(seekRange.value || '0') || 0;
       curTime.textContent = t.toFixed(1);
-    
-      // Всегда при движении ползунка показываем статический кадр из файла
-      const isFileSrc = (video.src || '').includes('/api/video_file/');
-      if (!fileSession.id || !isFileSrc) return;
-    
-      const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
-      video.src = frameUrl;
-    
-      // Если в момент перемотки воспроизведение активно — по окончании ввода возвращаемся к потоку /play
-      if (isVideoPlaying) {
-        if (seekDebounceTimer) clearTimeout(seekDebounceTimer);
-        seekDebounceTimer = setTimeout(() => {
-          const playUrl = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
-          video.src = playUrl;
-        }, 250);
+      if (!fileSession.id) return;
+
+      // Мы на файловом источнике независимо от текущего IMG src
+      const frameUrl = await fetchFrameBlobUrl(fileSession.id, fileSession.camera, t);
+      if (frameUrl) {
+        video.src = frameUrl;
       }
+
+      // При движении бегунка всегда возобновляем play с debounce, даже если до этого была пауза "Старт".
+      // Требование: перемотка должна запускать воспроизведение.
+      if (seekDebounceTimer) clearTimeout(seekDebounceTimer);
+      seekDebounceTimer = setTimeout(() => {
+        const playUrl = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
+        video.src = playUrl;
+        isVideoPlaying = true;
+        const btn = document.getElementById('videoPlayPauseBtn');
+        if (btn) btn.textContent = 'Стоп';
+      }, 260);
     });
 
     // Sync overlay canvas with image size on load/resize

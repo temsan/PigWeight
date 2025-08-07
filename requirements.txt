@@ -2,9 +2,10 @@
 fastapi==0.112.0
 uvicorn[standard]==0.30.0
 python-multipart==0.0.9
-python-dotenv==1.0.1
+# Разрешаем актуальную установленную версию python-dotenv (снятый пин)
+python-dotenv
 
 # Video/Imaging
 opencv-python-headless==4.9.0.80
 
-norfair
+# Убраны лишние зависимости клиентского инференса (norfair, rich, pygments)
