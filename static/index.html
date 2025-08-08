@@ -58,7 +58,7 @@
 
         <!-- Компактные кнопки управления, без налезаний -->
         <!-- Одна универсальная кнопка: в live — управляет MJPEG, в файловом — /play ↔ /frame. Размер кнопки не меняется. -->
-        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:6px 10px; min-width:auto; height:32px; line-height:20px;">Стоп</button>
+        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Стоп</button>
 
         <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 220px; min-width:220px; max-width:380px;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
@@ -69,7 +69,7 @@
       </div>
     </div>
 
-    <!-- ДВУХКОЛОНОЧНЫЙ МАКЕТ: слева крупные числа, справа видео. Кадр должен быть справа -->
+    <!-- ДВУХКОЛОНОЧНЫЙ МАКЕТ: слева видео, справа показатели -->
 <div class="main-flex" style="display:flex; justify-content:center;">
   <div class="container" style="display:flex; gap:16px; width:100%; max-width:1360px; align-items:flex-start;">
     <!-- Левая колонка — ВИДЕО (кадр слева) -->
@@ -79,31 +79,33 @@
         <video id="videoElement" style="display:none; width:100%; height:auto; object-fit:contain;" playsinline muted></video>
         <canvas id="overlayCanvas"></canvas>
       </div>
-      <div id="fpsInfo" style="text-align:right; color:#2f5078;"></div>
-      <div id="debugDetections" style="text-align:right; color:#2f5078;"></div>
     </div>
 
     <!-- Правая колонка — показатели -->
     <div class="left-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
-      <div class="panel-header" style="padding:14px 16px; font-weight:600; color:#2f5078;">Показатели</div>
-      <div class="panel-body" style="padding:12px 16px; display:flex; flex-direction:column; gap:12px;">
+      <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
         <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
           <label for="manualCount" class="stat-title" style="min-width:150px; color:#2f5078;">Количество</label>
-          <input type="number" id="manualCount" min="0" style="flex:1 1 auto; min-width:0; font-size:22px; padding:10px 12px;">
+          <input type="number" id="manualCount" min="0" style="flex:1 1 auto; min-width:0; font-size:32px; padding:12px 14px; font-weight:600;">
           <span class="unit-label" style="color:#2f5078;">шт.</span>
         </div>
         <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
           <label for="manualTotalWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Общий вес</label>
-          <input type="number" id="manualTotalWeight" min="0" step="0.1" style="flex:1 1 auto; min-width:0; font-size:22px; padding:10px 12px;">
+          <input type="number" id="manualTotalWeight" min="0" step="0.1" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
           <span class="unit-label" style="color:#2f5078;">кг</span>
         </div>
         <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
           <label for="manualAvgWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Средний вес</label>
-          <input type="number" id="manualAvgWeight" min="0" step="0.01" style="flex:1 1 auto; min-width:0; font-size:22px; padding:10px 12px;">
+          <input type="number" id="manualAvgWeight" min="0" step="0.01" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
           <span class="unit-label" style="color:#2f5078;">кг</span>
         </div>
+        <div id="stageTimes" style="margin-top:2px; display:flex; gap:14px; flex-wrap:wrap; color:#2f5078; font-size:16px;">
+          <span>Seek: <b id="seekTime">—</b> ms</span>
+          <span>Infer: <b id="inferTime">—</b> ms</span>
+          <span>Encode: <b id="encodeTime">—</b> ms</span>
+        </div>
         <div id="weightUpdateTime" style="font-size:14px; font-weight:500; color:#556;"></div>
-        <button id="saveManualBtn" class="pill primary" style="height:44px; font-size:18px;">Сохранить</button>
+        <button id="saveManualBtn" class="pill primary" style="height:48px; font-size:18px;">Сохранить</button>
       </div>
     </div>
   </div>
@@ -177,9 +179,9 @@
     let selectedCameraId = null;
     let isVideoPlaying = true;
     let fileSession = { id: 'file1', camera: 'cam_file1', duration: 0 };
-    const debugDetections = document.getElementById('debugDetections');
-    const fpsInfo = document.getElementById('fpsInfo');
-    const weightUpdateTime = document.getElementById('weightUpdateTime');
+    const seekTimeEl = document.getElementById('seekTime');
+    const inferTimeEl = document.getElementById('inferTime');
+    const encodeTimeEl = document.getElementById('encodeTime');
 
     // Клиентский инференс полностью отключён
 
@@ -263,6 +265,8 @@
             imgEl3.src = firstFrameUrl;
             // Переключаемся на поток после загрузки первого кадра
             imgEl3.addEventListener('load', () => {
+              // сразу подтянем среднее/последнее количество для поля
+              refreshFileCounts();
               setTimeout(() => {
                 imgEl3.src = playUrl;
                 isVideoPlaying = true;
@@ -552,7 +556,7 @@
 
         // ждём, пока появится кадр
         if (!hasFrameReady()){
-          fpsInfo.textContent = 'Ожидание кадра...';
+          // ожидание первого кадра
           drawOverlay([]);
           updateRightMetrics();
           // пробуем синхронизацию размеров, чтобы избежать "ноль" размеров при первом кадре
@@ -561,16 +565,11 @@
         }
 
         const tStart = performance.now();
-        try{
-          await clientInferOnce();
-        }catch(e){
-          fpsInfo.textContent = 'Инференс не запущен';
-        }
+        try{ await clientInferOnce(); }catch(e){}
         const took = performance.now() - tStart;
         const target = 1000/CLIENT_FPS;
         const delay = Math.max(0, target - took);
-        fpsInfo.textContent = `Client FPS~${(1000/Math.max(1, took)).toFixed(1)} | ${lastInferTime.toFixed(1)}ms | Count:${clientCount}`;
-
+        
         // перерисовываем оверлей последним рассчитанным набором боксов
         // drawOverlay([]) убираем, чтобы не затирать визуализацию
         if (typeof updateRightMetrics === 'function') updateRightMetrics();
@@ -620,10 +619,10 @@
               if (msg.type === 'error'){
                 setStatus(String(msg.text||'WS error'), '#a66', 1500);
               } else if (msg.type === 'count_update'){
-                const { camera, count, fps } = msg;
-                applyServerMetrics(Number(count||0));
-                if (fpsInfo) fpsInfo.textContent = `Server FPS~${Number(fps||0).toFixed(1)}`;
-                if (debugDetections) debugDetections.textContent = '';
+                const { camera, count, fps, debug } = msg;
+                const avg = debug && typeof debug.avg === 'number' ? debug.avg : null;
+                const val = Number.isFinite(avg) ? Math.round(avg) : Number(count||0);
+                applyServerMetrics(val);
                 const ts = new Date().toLocaleTimeString();
                 if (weightUpdateTime) weightUpdateTime.textContent = `Последнее обновление: ${ts} (камера: ${camera||'-'})`;
               }
@@ -891,12 +890,9 @@
           isVideoPlaying = true;
           videoPlayPauseBtn.textContent = 'Стоп';
         }
-        // Включаем опрос avg count во время плейбека
-        if (window.__filePollTimer) clearInterval(window.__filePollTimer);
-        window.__filePollTimer = setInterval(() => { refreshFileCounts(); }, 800);
+        // WS уже обновляет "Количество"; polling не нужен
       }
-      // На паузе выключаем опрос
-      if (!isVideoPlaying && window.__filePollTimer) { clearInterval(window.__filePollTimer); window.__filePollTimer = null; }
+      // polling не используется
       return;
     });
 
@@ -923,35 +919,182 @@
       }
     }
     
-    // После загрузки кадра из файлового режима запросим last_count и обновим поля
-    async function refreshFileCounts(){
-      try{
-        const { id } = fileSession || {};
-        if (!id) return;
-        const resp = await fetch(`/api/video_file/last_count?id=${encodeURIComponent(id)}&ts=${Date.now()}`, { cache: 'no-store' });
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const c = Number(data.count||0);
-        const a = Number(data.avg||0);
-        manualCount.value = String(Math.round(a || c));
-        const total = parseFloat(manualTotalWeight.value);
-        manualAvgWeight.value = (isFinite(c) && c > 0 && isFinite(total) && total > 0) ? (total / c).toFixed(2) : '';
-      }catch(_){ }
-    }
+    // refreshFileCounts удалён: обновление идёт через WS файла
 
-    // В обработчике перемотки добавим триггер обновления
+    // Управление запросами при перемотке (AbortController)
+    let seekController = null;
     seekRange.addEventListener('input', async () => {
       const t = parseFloat(seekRange.value || '0') || 0;
       curTime.textContent = t.toFixed(1);
       if (!fileSession.id) return;
-      const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${t}&ts=${Date.now()}`;
+      if (seekController) { try { seekController.abort(); } catch(_){} }
+      seekController = new AbortController();
+      const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${t}&req=${Date.now()}&ts=${Date.now()}`;
       const imgEl = document.getElementById('videoStream');
       if (imgEl) {
+        const onLoad = () => { /* count обновится через WS */ };
+        imgEl.removeEventListener('load', onLoad);
+        imgEl.addEventListener('load', onLoad, { once: true });
         imgEl.src = frameUrl;
-        imgEl.addEventListener('load', () => refreshFileCounts(), { once: true });
         isVideoPlaying = false;
         const btn = document.getElementById('videoPlayPauseBtn');
         if (btn) btn.textContent = 'Старт';
+      }
+    });
+
+    // Поддержка WS для file sessions
+    let fileWs = null;
+    function connectFileWS(id){
+      try{
+        if (!id) return;
+        if (fileWs) { try{ fileWs.close(); }catch(_){} fileWs = null; }
+        // Закрыть глобальный WS камеры, чтобы не перетирать поле количеством из камеры
+        stopPollingCount();
+        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+        const url = `${proto}://${location.host}/ws/count?id=${encodeURIComponent(id)}`;
+        fileWs = new WebSocket(url);
+        fileWs.onmessage = (ev)=>{
+          try{
+            const m = JSON.parse(ev.data||'{}');
+            if (m && m.type === 'count_update' && String(m.file_id||'') === String(id)){
+              const c = Number(m.count||0);
+              const a = Number(m.avg||0);
+              const val = Number.isFinite(a) && a > 0 ? Math.round(a) : Math.round(c||0);
+              manualCount.value = String(val);
+              // пересчёт среднего веса от total
+              const total = parseFloat(manualTotalWeight.value);
+              manualAvgWeight.value = (isFinite(val) && val > 0 && isFinite(total) && total > 0) ? (total / val).toFixed(2) : '';
+              const avgEl = document.getElementById('avgCount'); if (avgEl) avgEl.textContent = String(Math.round(a||0));
+            }
+          }catch(_){}
+        };
+        fileWs.onclose = ()=>{ fileWs = null; };
+        fileWs.onerror = ()=>{};
+      }catch(_){ }
+    }
+
+    // Обработчик выбора файла: после первого кадра переключаемся на WS-видео
+    fileInput.addEventListener('change', async (e) => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f){ return; }
+      const fid = 'file1';
+      const cam = 'cam_file1';
+
+      const form = new FormData();
+      form.append('camera', cam);
+      form.append('id', fid);
+      form.append('file', f, f.name);
+
+      const resp = await fetch('/api/video_file/open', { method: 'POST', body: form });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'open failed');
+
+      fileSession = { id: fid, camera: cam, duration: data.duration || 0 };
+      const duration = data.duration || 0;
+      seekRange.max = String(Math.max(0.1, duration));
+      seekRange.value = '0';
+      curTime.textContent = '0.0';
+      durTime.textContent = (duration || 0).toFixed(1);
+
+      const firstFrameUrl = `/api/video_file/frame?id=${encodeURIComponent(fid)}&camera=${encodeURIComponent(cam)}&t=0&ts=${Date.now()}`;
+      const imgEl3 = document.getElementById('videoStream');
+      if (imgEl3) {
+        imgEl3.onload = () => {
+          isVideoPlaying = true;
+          const btn = document.getElementById('videoPlayPauseBtn'); if (btn) btn.textContent = 'Стоп';
+          connectFileWS(fid);
+          stopFilePolling();
+          startFileVideoWS(fid);
+        };
+        // на входе закрыть глобальный WS камеры
+        stopPollingCount();
+        imgEl3.src = firstFrameUrl;
+      }
+    });
+
+    // Отключить polling при наличии WS
+    function stopFilePolling(){ if (window.__filePollTimer) { clearInterval(window.__filePollTimer); window.__filePollTimer = null; } }
+
+    // --- WS видео для файла (latest-only) ---
+    let fileVideoWS = null;
+    function startFileVideoWS(id){
+      try{
+        if (!id) return;
+        if (fileVideoWS) { try{ fileVideoWS.close(); }catch(_){} fileVideoWS = null; }
+        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+        const url = `${proto}://${location.host}/ws/video_file?id=${encodeURIComponent(id)}`;
+        const imgEl = document.getElementById('videoStream');
+        if (!imgEl) return;
+        fileVideoWS = new WebSocket(url);
+        fileVideoWS.binaryType = 'arraybuffer';
+        fileVideoWS.onmessage = (ev)=>{
+          try{
+            const buf = ev.data;
+            if (!(buf instanceof ArrayBuffer)) return;
+            const blob = new Blob([new Uint8Array(buf)], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            imgEl.onload = () => { URL.revokeObjectURL(url); };
+            imgEl.src = url;
+          }catch(_){ }
+        };
+        fileVideoWS.onclose = ()=>{ fileVideoWS = null; };
+        fileVideoWS.onerror = ()=>{};
+      }catch(_){ }
+    }
+
+    function stopFileVideoWS(){ if (fileVideoWS){ try{ fileVideoWS.close(); }catch(_){} fileVideoWS = null; } }
+
+    // Перемотка: останавливаем WS-видео, показываем статический кадр
+    seekRange.addEventListener('input', async () => {
+      const t = parseFloat(seekRange.value || '0') || 0;
+      curTime.textContent = t.toFixed(1);
+      if (!fileSession.id) return;
+      stopFileVideoWS();
+      if (seekController) { try { seekController.abort(); } catch(_){} }
+      seekController = new AbortController();
+      const reqTs = Date.now();
+      const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${t}&req=${reqTs}&ts=${Date.now()}`;
+      const imgEl = document.getElementById('videoStream');
+      if (imgEl) {
+        const t0 = performance.now();
+        const onLoad = () => {
+          // Сервер рисует Seek/Infer, а мы оценим Encode (время загрузки изображения)
+          const dt = performance.now() - t0;
+          if (encodeTimeEl) encodeTimeEl.textContent = dt.toFixed(0);
+          refreshFileCounts();
+        };
+        imgEl.removeEventListener('load', onLoad);
+        imgEl.addEventListener('load', onLoad, { once: true });
+        imgEl.src = frameUrl;
+        isVideoPlaying = false;
+        const btn = document.getElementById('videoPlayPauseBtn');
+        if (btn) btn.textContent = 'Старт';
+      }
+    });
+
+    // Старт/Стоп: управляем WS-видео
+    videoPlayPauseBtn.addEventListener('click', async () => {
+      if (!fileSession.id) return;
+      const { id, camera } = fileSession;
+      const video = document.getElementById('videoStream');
+      if (!video) return;
+      const duration = fileSession.duration || 0;
+
+      const t = Math.max(0, Math.min(duration || 0, parseFloat(seekRange.value || '0') || 0));
+      if (isVideoPlaying) {
+        const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+        stopFileVideoWS();
+        video.src = frameUrl;
+        isVideoPlaying = false;
+        curTime.textContent = t.toFixed(1);
+        videoPlayPauseBtn.textContent = 'Старт';
+      } else {
+        // Старт: возобновляем WS-видео latest-only
+        startFileVideoWS(id);
+        isVideoPlaying = true;
+        videoPlayPauseBtn.textContent = 'Стоп';
+        connectFileWS(id);
+        stopFilePolling();
       }
     });
 

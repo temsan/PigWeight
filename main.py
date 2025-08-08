@@ -5,6 +5,13 @@ import subprocess
 import logging
 from pathlib import Path
 
+# Load .env early so DEBUG and other vars are available here
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -103,14 +110,24 @@ def main():
 
         try:
             import uvicorn
-            from api.app import app as fastapi_app
-            uvicorn.run(
-                fastapi_app,
-                host=HOST,
-                port=PORT,
-                reload=DEBUG,
-                log_level="debug" if DEBUG else "info"
-            )
+            if DEBUG:
+                # Для reload uvicorn требует import string
+                uvicorn.run(
+                    "api.app:app",
+                    host=HOST,
+                    port=PORT,
+                    reload=True,
+                    log_level="debug"
+                )
+            else:
+                from api.app import app as fastapi_app
+                uvicorn.run(
+                    fastapi_app,
+                    host=HOST,
+                    port=PORT,
+                    reload=False,
+                    log_level="info"
+                )
         except Exception as e:
             logger.error(f'Error starting server via uvicorn: {str(e)}')
             raise
