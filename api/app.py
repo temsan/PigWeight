@@ -358,6 +358,10 @@ class CameraStream:
         self.ema_count = None        # экспоненциальное сглаживание
         self.ema_alpha = float(os.getenv("COUNT_EMA_ALPHA", "0.2"))
 
+        # Cached overlay image to avoid per-frame mask re-blending
+        self._overlay_image = None
+        self._overlay_shape = None
+
         # balanced counting state
         self.balanced = BALANCED_DEFAULT
 
@@ -525,6 +529,30 @@ class CameraStream:
                     # balancing и усреднение 
                     if self.balanced:
                         det_count = min(BALANCE_CAP, det_count * self.balance_alpha + self.balance_bias)
+
+                    # Build and cache overlay image once per inference result
+                    try:
+                        h, w = frame.shape[:2]
+                        overlay = np.zeros_like(frame)
+                        mask_data = getattr(r, 'masks', None)
+                        if mask_data is not None:
+                            mask_data = mask_data.data if hasattr(mask_data, 'data') else mask_data
+                            if hasattr(mask_data, 'cpu'):
+                                mask_data = mask_data.cpu().numpy()
+                            for tr in tracks:
+                                tid = tr['id']
+                                mi = tr.get('det_index', -1)
+                                if 0 <= mi < len(mask_data):
+                                    mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                    if mask.shape[:2] != (h, w):
+                                        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                    color = _pastel_color_for_id(int(tid))
+                                    overlay[mask > 0] = color
+                        self._overlay_image = overlay
+                        self._overlay_shape = (h, w)
+                    except Exception:
+                        pass
+
                     # накапливаем полное окно для статистики (например, 60 значений ~ 1-2 сек)
                     self.count_window_full.append(float(det_count))
                     max_full = max(self.avg_window * 3, 60)  # минимум 60 кадров
@@ -599,28 +627,13 @@ class CameraStream:
                 # line (optional visual indicator)
                 y_line = int(h * 0.5)
                 cv2.line(frame, (0, y_line), (w, y_line), (0, 180, 255), 2)
-                # Рисуем маски, если не было инференса на этом кадре
-                mask_data = None
-                if hasattr(self, '_last_masks') and self._last_masks is not None:
-                    mask_data = self._last_masks.data if hasattr(self._last_masks, 'data') else self._last_masks
-                    if hasattr(mask_data, 'cpu'):
-                        mask_data = mask_data.cpu().numpy()
-                if hasattr(self, '_last_tracks') and self._last_tracks and mask_data is not None:
-                    if mask_data is not None:
-                        if hasattr(mask_data, 'cpu'):
-                            mask_data = mask_data.cpu().numpy()
-                        mh, mw = frame.shape[:2]
-                        for tr in self._last_tracks:
-                            tid = tr['id']
-                            mi = tr.get('det_index', -1)
-                            if 0 <= mi < len(mask_data):
-                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                                if mask.shape[:2] != (mh, mw):
-                                    mask = cv2.resize(mask, (mw, mh), interpolation=cv2.INTER_NEAREST)
-                                color = _pastel_color_for_id(int(tid))
-                                overlay = frame.copy()
-                                overlay[mask > 0] = color
-                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                # Применяем кэшированный оверлей, если доступен
+                try:
+                    h, w = frame.shape[:2]
+                    if self._overlay_image is not None and self._overlay_image.shape[:2] == (h, w):
+                        frame = cv2.addWeighted(self._overlay_image, 0.35, frame, 0.65, 0)
+                except Exception:
+                    pass
                 # count HUD: текущее и устойчивое
                 cv2.rectangle(frame, (10, 10), (300, 80), (0, 0, 0), -1)
                 cv2.putText(frame, f"Count(cur): {int(cur_count)}", (18, 40),
@@ -630,8 +643,19 @@ class CameraStream:
             except Exception:
                 pass
 
+            # Encode with perf timing and log
+            t_enc0 = time.time()
             jpeg = encode_jpeg(frame)
+            enc_ms = (time.time() - t_enc0) * 1000.0
             if jpeg:
+                try:
+                    perf_logger.info(json.dumps({
+                        "phase": "live_frame",
+                        "camera": self.cam_id,
+                        "encode_ms": float(enc_ms)
+                    }, ensure_ascii=False))
+                except Exception:
+                    pass
                 async with self.lock:
                     self.last_jpeg = jpeg
                     if self.last_ts > 0:
@@ -904,18 +928,32 @@ async def _run_file_play_loop(sess_id: str):
                             mask_data = mask_data.cpu().numpy()
                     tracks = sess.get("_last_tracks") or []
                 if mask_data is not None and tracks:
-                    h, w = frame.shape[:2]
-                    for tr in tracks:
-                        tid = tr['id']
-                        mi = tr.get('det_index', -1)
-                        if 0 <= mi < len(mask_data):
-                            mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                            if mask.shape[:2] != (h, w):
-                                mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                            color = _pastel_color_for_id(int(tid))
-                            overlay = frame.copy()
-                            overlay[mask > 0] = color
-                            frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                    try:
+                        h, w = frame.shape[:2]
+                        overlay = np.zeros_like(frame)
+                        for tr in tracks:
+                            tid = tr['id']
+                            mi = tr.get('det_index', -1)
+                            if 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (h, w):
+                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))
+                                overlay[mask > 0] = color
+                        sess["overlay_image"] = overlay
+                        sess["overlay_shape"] = (h, w)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Применяем кэшированный оверлей (если есть)
+            try:
+                h, w = frame.shape[:2]
+                ov = sess.get("overlay_image")
+                sh = sess.get("overlay_shape")
+                if ov is not None and sh == (h, w):
+                    frame = cv2.addWeighted(ov, 0.35, frame, 0.65, 0)
             except Exception:
                 pass
 
@@ -1438,24 +1476,27 @@ def _gen_file_mjpeg(sess_id: str, rate: float):
                     if hasattr(mask_data, "cpu"):
                         mask_data = mask_data.cpu().numpy()
                     h, w = frame.shape[:2]
+                    overlay = np.zeros_like(frame)
                     for tr in tracks:
                         tid = tr['id']
                         mi = tr.get('det_index', -1)
-                        if mask_data is not None and 0 <= mi < len(mask_data):
+                        if 0 <= mi < len(mask_data):
                             mask = (mask_data[mi] > 0.5).astype(np.uint8)
                             if mask.shape[:2] != (h, w):
                                 mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
                             color = _pastel_color_for_id(int(tid))
-                            overlay = frame.copy()
                             overlay[mask > 0] = color
-                            frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
-                            ys, xs = np.where(mask > 0)
-                            if len(xs) > 0:
-                                cx, cy = int(xs.mean()), int(ys.mean())
-                                cv2.putText(frame, str(int(tid)), (max(0, cx-10), max(12, cy-8)),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30,30,30), 1, cv2.LINE_AA)
-                                cv2.putText(frame, str(int(tid)), (max(0, cx-10), max(12, cy-8)),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (245,245,245), 0, cv2.LINE_AA)
+                    sess["overlay_image"] = overlay
+                    sess["overlay_shape"] = (h, w)
+                    # optional ID labels kept minimal to reduce cost
+                    try:
+                        ys, xs = np.where(mask > 0)
+                        if len(xs) > 0:
+                            cx, cy = int(xs.mean()), int(ys.mean())
+                            cv2.putText(frame, str(int(tid)), (max(0, cx-10), max(12, cy-8)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30,30,30), 1, cv2.LINE_AA)
+                    except Exception:
+                        pass
                 # cache
                 sess["_last_tracks"] = tracks if do_infer else sess.get("_last_tracks")
                 sess["_last_masks"] = getattr(r, 'masks', None) if do_infer else sess.get("_last_masks")
@@ -1470,22 +1511,25 @@ def _gen_file_mjpeg(sess_id: str, rate: float):
                 # overlay last
                 mask_data = sess.get("_last_masks")
                 if mask_data is not None:
-                    mask_data = mask_data.data if hasattr(mask_data, 'data') else mask_data
-                    if hasattr(mask_data, 'cpu'):
-                        mask_data = mask_data.cpu().numpy()
-                    tracks = sess.get("_last_tracks") or []
-                    h, w = frame.shape[:2]
-                    for tr in tracks:
-                        tid = tr['id']
-                        mi = tr.get('det_index', -1)
-                        if mask_data is not None and 0 <= mi < len(mask_data):
-                            mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                            if mask.shape[:2] != (h, w):
-                                mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                            color = _pastel_color_for_id(int(tid))
-                            overlay = frame.copy()
-                            overlay[mask > 0] = color
-                            frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                    try:
+                        if hasattr(mask_data, 'cpu'):
+                            mask_data = mask_data.cpu().numpy()
+                        tracks = sess.get("_last_tracks") or []
+                        h, w = frame.shape[:2]
+                        overlay = np.zeros_like(frame)
+                        for tr in tracks:
+                            tid = tr['id']
+                            mi = tr.get('det_index', -1)
+                            if 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (h, w):
+                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))
+                                overlay[mask > 0] = color
+                        sess["overlay_image"] = overlay
+                        sess["overlay_shape"] = (h, w)
+                    except Exception:
+                        pass
             # HUD: стадии обработки в секундах
             try:
                 seek_s = (float(sess.get('last_seek_ms', 0.0)))/1000.0
@@ -1550,18 +1594,7 @@ async def api_video_file_play(id: str = Query(default="file1"),
             return JSONResponse({"error": "file session not opened"}, status_code=400)
     return StreamingResponse(_gen_file_mjpeg(id, rate), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
 
-@app.get("/api/video_file/last_count")
-async def api_video_file_last_count(id: str = Query(default="file1")):
-    async with _file_sessions_lock:
-        sess = _file_sessions.get(id)
-        if not sess:
-            return JSONResponse({"error": "file session not opened"}, status_code=400)
-        return {
-            "id": id,
-            "count": int(sess.get("last_count", 0) or 0),
-            "avg": float(sess.get("avg_count", 0.0) or 0.0)
-        }
-
+# /api/video_file/last_count removed (WS provides updates)
 # --- Shutdown hook ---
 @app.on_event("shutdown")
 async def shutdown_event():

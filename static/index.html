@@ -815,44 +815,7 @@
 
     // Перемотка/таймлайн и +/-10с убраны для MJPEG live
 
-    // --- Сохранение ручного ввода ---
-    saveManualBtn.onclick = () => {
-      const count = parseInt(manualCount.value);
-      const totalWeight = parseFloat(manualTotalWeight.value);
-      let avgWeight = parseFloat(manualAvgWeight.value);
-
-      // Убираем алерты: тихо валидируем и подсвечиваем поля
-      const invalidCount = !count || isNaN(count) || count <= 0;
-      const invalidTotal = !totalWeight || isNaN(totalWeight) || totalWeight <= 0;
-
-      manualCount.style.borderColor = invalidCount ? '#e14a4a' : '#b6c6e6';
-      manualTotalWeight.style.borderColor = invalidTotal ? '#e14a4a' : '#b6c6e6';
-
-      if (invalidCount || invalidTotal) {
-        console.warn('Некорректные значения: заполните количество и общий вес.');
-        return;
-      }
-
-      if (!avgWeight || isNaN(avgWeight)) avgWeight = (totalWeight / count).toFixed(2);
-      // Сохраняем в историю
-      // Определяем имя выбранной камеры
-      let cameraName = '';
-      const camRadio = document.querySelector('input[name="cameraRadio"]:checked');
-      if (camRadio) {
-        const cam = config.cameras.find(c => c.id === camRadio.value);
-        if (cam) cameraName = cam.name;
-      }
-      const history = JSON.parse(localStorage.getItem('history') || '[]');
-      history.unshift({
-        date: new Date().toLocaleString(),
-        camera: cameraName,
-        count,
-        total_weight: totalWeight,
-        avg_weight: avgWeight
-      });
-      localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
-      updateHistory();
-    };
+    // Сохранение ручного ввода обрабатывается единым обработчиком ниже (saveManualBtnEl.onclick). Дубликат удалён.
 
     // --- Автоматический пересчёт среднего веса (удалена дубляция) ---
     // Функции и подписки перенесены ниже в единую секцию
@@ -866,35 +829,7 @@
     // Кнопка "Кадр" удалена по требованию — запрос кадров управляется автоматически через WS
 
     const mjpegUrl = (config.cameras[0] && config.cameras[0].url) || '/api/video_feed?mode=server';
-    videoPlayPauseBtn.addEventListener('click', async () => {
-      const img = document.getElementById('videoStream');
-      const src = String(video.src || '');
-      const isFileMode = src.includes('/api/video_file/');
-      if (isFileMode) {
-        // Универсальная кнопка в файловом режиме: /play ↔ /frame
-        const { id, camera, duration } = fileSession || {};
-        if (!id) return;
-        // при старте повторного воспроизведения берём текущее значение ползунка как t
-        const t = Math.max(0, Math.min(duration || 0, parseFloat(seekRange.value || '0') || 0));
-        if (isVideoPlaying) {
-          // Пауза: статический кадр на текущем времени
-          const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
-          video.src = frameUrl;
-          isVideoPlaying = false;
-          curTime.textContent = t.toFixed(1);
-          videoPlayPauseBtn.textContent = 'Старт';
-        } else {
-          // Плей (всегда перезапускаем поток с параметром ts для обхода кэша)
-          const playUrl = `/api/video_file/play?id=${encodeURIComponent(id)}&camera=${encodeURIComponent(camera)}&rate=1.0&ts=${Date.now()}`;
-          video.src = playUrl;
-          isVideoPlaying = true;
-          videoPlayPauseBtn.textContent = 'Стоп';
-        }
-        // WS уже обновляет "Количество"; polling не нужен
-      }
-      // polling не используется
-      return;
-    });
+    // Единый обработчик Старт/Стоп для файлового WS ниже (1076+). Эта версия удалена.
 
     /**
      * Перемотка файла на клиенте:
@@ -921,26 +856,7 @@
     
     // refreshFileCounts удалён: обновление идёт через WS файла
 
-    // Управление запросами при перемотке (AbortController)
-    let seekController = null;
-    seekRange.addEventListener('input', async () => {
-      const t = parseFloat(seekRange.value || '0') || 0;
-      curTime.textContent = t.toFixed(1);
-      if (!fileSession.id) return;
-      if (seekController) { try { seekController.abort(); } catch(_){} }
-      seekController = new AbortController();
-      const frameUrl = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${t}&req=${Date.now()}&ts=${Date.now()}`;
-      const imgEl = document.getElementById('videoStream');
-      if (imgEl) {
-        const onLoad = () => { /* count обновится через WS */ };
-        imgEl.removeEventListener('load', onLoad);
-        imgEl.addEventListener('load', onLoad, { once: true });
-        imgEl.src = frameUrl;
-        isVideoPlaying = false;
-        const btn = document.getElementById('videoPlayPauseBtn');
-        if (btn) btn.textContent = 'Старт';
-      }
-    });
+    // Управление запросами при перемотке обрабатывается единым обработчиком ниже (1048+). Дубликат удалён.
 
     // Поддержка WS для file sessions
     let fileWs = null;
@@ -1061,7 +977,6 @@
           // Сервер рисует Seek/Infer, а мы оценим Encode (время загрузки изображения)
           const dt = performance.now() - t0;
           if (encodeTimeEl) encodeTimeEl.textContent = dt.toFixed(0);
-          refreshFileCounts();
         };
         imgEl.removeEventListener('load', onLoad);
         imgEl.addEventListener('load', onLoad, { once: true });
