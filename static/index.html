@@ -188,104 +188,7 @@
     // Поля правой панели
 
     // Автовоспроизведение при выборе файла (без alert), одна кнопка "Стоп", перемотка в паузе
-    if (fileInput) {
-      fileInput.addEventListener('change', async () => {
-        const f = fileInput.files && fileInput.files[0];
-        if (!f) return;
-
-        // Обновляем подпись кнопки на имя файла
-        const fileLabel = document.getElementById('fileInputLabel');
-        if (fileLabel) {
-          const maxLen = 36;
-          const name = f.name || 'файл выбран';
-          fileLabel.firstChild.nodeValue = (name.length > maxLen ? (name.slice(0, maxLen-3) + '...') : name);
-        }
-
-        // Всегда серверный путь: загружаем файл и используем /api/video_file/*
-        const cam = 'cam_file1';
-        const fid = 'file1';
-
-        // Общие UI переключения
-        selectedCameraId = cam;
-        // В файловом режиме используем ту же кнопку videoPlayPauseBtn как триггер: Стоп/Старт
-        const liveBtn = document.getElementById('videoPlayPauseBtn');
-        if (liveBtn) {
-          liveBtn.style.visibility = 'visible';
-          liveBtn.textContent = 'Стоп';
-          // фиксируем размер кнопки, чтобы при смене текста не прыгал layout
-          liveBtn.style.height = liveBtn.style.height || '32px';
-          liveBtn.style.lineHeight = liveBtn.style.lineHeight || '20px';
-          liveBtn.style.minWidth = liveBtn.style.minWidth || '64px';
-        }
-        isVideoPlaying = true;
-
-        try {
-          // 1) Мгновенно показать placeholder кадр (голубой-асфальтовый фон), чтобы пользователь видел “кадр всегда”
-          const imgEl = document.getElementById('videoStream');
-          if (imgEl) {
-            imgEl.src = `data:image/svg+xml;utf8,` + encodeURIComponent(
-              `<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360'>
-                 <defs>
-                   <linearGradient id='g' x1='0' x2='0' y1='0' y2='1'>
-                     <stop offset='0%' stop-color='#e9f1fb'/>
-                     <stop offset='100%' stop-color='#dde7f5'/>
-                   </linearGradient>
-                 </defs>
-                 <rect width='100%' height='100%' fill='url(#g)'/>
-                 <rect x='0' y='0' width='100%' height='100%' fill='rgba(40,60,90,0.08)'/>
-                 <text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#2f5078' font-size='22' font-family='Segoe UI, Roboto, Arial'>Загрузка файла...</text>
-               </svg>`
-            );
-          }
-
-          // 2) Загрузка файла на сервер
-          const form = new FormData();
-          form.append('camera', cam);
-          form.append('id', fid);
-          form.append('file', f, f.name);
-
-          const resp = await fetch('/api/video_file/open', { method: 'POST', body: form });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data.error || 'open failed');
-
-          fileSession = { id: fid, camera: cam, duration: data.duration || 0 };
-          // Настройка таймлайна
-          seekRange.min = 0;
-          seekRange.max = data.duration || 0;
-          seekRange.value = 0;
-          curTime.textContent = '0.0';
-          durTime.textContent = (data.duration || 0).toFixed(1);
-
-          // 3) Автоплей с оверлеями: показываем первый кадр, затем переключаемся на поток
-          const firstFrameUrl = `/api/video_file/frame?id=${encodeURIComponent(fid)}&camera=${encodeURIComponent(cam)}&t=0&ts=${Date.now()}`;
-          const playUrl = `/api/video_file/play?id=${encodeURIComponent(fid)}&camera=${encodeURIComponent(cam)}&rate=1.0&ts=${Date.now()}`;
-
-          const imgEl3 = document.getElementById('videoStream');
-          if (imgEl3) {
-            imgEl3.src = firstFrameUrl;
-            // Переключаемся на поток после загрузки первого кадра
-            imgEl3.addEventListener('load', () => {
-              // сразу подтянем среднее/последнее количество для поля
-              refreshFileCounts();
-              setTimeout(() => {
-                imgEl3.src = playUrl;
-                isVideoPlaying = true;
-                const btn = document.getElementById('videoPlayPauseBtn');
-                if (btn) btn.textContent = 'Стоп';
-              }, 200);
-            }, { once: true });
-          }
-        } catch (e) {
-          console.warn('Open/play file failed:', e);
-          const statusEl = document.getElementById('streamStatus');
-          if (statusEl) {
-            statusEl.textContent = 'Ошибка воспроизведения файла';
-            statusEl.style.color = '#e14a4a';
-            setTimeout(() => { statusEl.textContent = ''; statusEl.style.color = ''; }, 4000);
-          }
-        }
-      }); // end fileInput change handler
-    } // end if (fileInput)
+    if (fileInput) { /* unified file change handler defined below */ }
     // Убрана отдельная кнопка файлового режима: используется единая videoPlayPauseBtn
 
     // --- Радиокнопки для камер ---
@@ -943,7 +846,12 @@
         if (!imgEl) return;
         fileVideoWS = new WebSocket(url);
         fileVideoWS.binaryType = 'arraybuffer';
+        let lastApplied = 0;
+        const minGapMs = 40; // ~25fps максимум
         fileVideoWS.onmessage = (ev)=>{
+          const now = performance.now();
+          if (now - lastApplied < minGapMs) return; // throttle
+          lastApplied = now;
           try{
             const buf = ev.data;
             if (!(buf instanceof ArrayBuffer)) return;
@@ -1033,10 +941,9 @@
     // Слушаем именно IMG загрузку, чтобы при первом кадре холст подстроился
     const img0 = document.getElementById('videoStream');
     if (img0) {
-      img0.addEventListener('load', syncOverlaySize);
-      img0.addEventListener('resize', syncOverlaySize);
+      // отключаем слушатели ресайза/лоада канваса для снижения нагрузки
     }
-    window.addEventListener('resize', syncOverlaySize);
+    // window.addEventListener('resize', syncOverlaySize);
 
     // --- История ---
     function updateHistory() {
