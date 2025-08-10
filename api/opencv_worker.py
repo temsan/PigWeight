@@ -35,8 +35,8 @@ class _Worker(mp.Process):
         try:
             cap = cv2.VideoCapture(src)
             # try to reduce decoder threading/buffers
-            self._safe_set(cap, cv2.CAP_PROP_THREADS, 1)
-            self._safe_set(cap, cv2.CAP_PROP_BUFFERSIZE, 1)
+            self._safe_set(cap, getattr(cv2, 'CAP_PROP_THREADS', 42), 1)
+            self._safe_set(cap, getattr(cv2, 'CAP_PROP_BUFFERSIZE', 43), 1)
             if not cap or not cap.isOpened():
                 try:
                     cap.release()

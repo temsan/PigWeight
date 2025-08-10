@@ -225,8 +225,8 @@ def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Option
     return None
 
 def encode_image(frame) -> bytes:
-    # Lossless/near-lossless: PNG with zero compression; no downscale
-    ok, buf = cv2.imencode(".png", frame, [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
+    # Uncompressed BMP to minimize CPU; no downscale
+    ok, buf = cv2.imencode(".bmp", frame)
     if not ok:
         return b""
     return buf.tobytes()
@@ -234,7 +234,7 @@ def encode_image(frame) -> bytes:
 def multipart_chunk(img_bytes: bytes) -> bytes:
     header = (
         f"--{BOUNDARY}\r\n"
-        "Content-Type: image/png\r\n"
+        "Content-Type: image/bmp\r\n"
         f"Content-Length: {len(img_bytes)}\r\n\r\n"
     ).encode("utf-8")
     return header + img_bytes + b"\r\n"
@@ -1361,9 +1361,9 @@ async def api_video_file_frame(id: str = Query(default="file1"),
     # 5) JPEG кодирование
     try:
         t_enc0 = time.time()
-        ok, buf = cv2.imencode(".png", frame, [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
+        ok, buf = cv2.imencode(".bmp", frame)
         if not ok:
-            logger.error("[file_frame] png encode failed")
+            logger.error("[file_frame] bmp encode failed")
             return JSONResponse({"error": "Failed to encode frame"}, status_code=500)
         enc_ms = (time.time() - t_enc0) * 1000.0
         try:
@@ -1379,7 +1379,7 @@ async def api_video_file_frame(id: str = Query(default="file1"),
             "X-Infer-Ms": str(int(round(sess.get("last_infer_ms", 0.0) if 'sess' in locals() and sess else 0))),
             "X-Encode-Ms": str(int(round(enc_ms)))
         }
-        return Response(buf.tobytes(), media_type="image/png", headers=headers)
+        return Response(buf.tobytes(), media_type="image/bmp", headers=headers)
     except Exception as e:
         logger.exception("[file_frame] encoding error: %s", e)
         return JSONResponse({"error": f"Failed to encode frame: {e}"}, status_code=500)

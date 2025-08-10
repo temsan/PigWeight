@@ -855,7 +855,7 @@
           try{
             const buf = ev.data;
             if (!(buf instanceof ArrayBuffer)) return;
-            const blob = new Blob([new Uint8Array(buf)], { type: 'image/png' });
+            const blob = new Blob([new Uint8Array(buf)], { type: 'image/bmp' });
             const url = URL.createObjectURL(blob);
             imgEl.onload = () => { URL.revokeObjectURL(url); };
             imgEl.src = url;
