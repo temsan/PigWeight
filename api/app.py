@@ -224,18 +224,9 @@ def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Option
         return None
     return None
 
-def encode_jpeg(frame) -> bytes:
-    # Optional downscale to reduce latency/bandwidth
-    try:
-        max_w = int(float(os.getenv("JPEG_MAX_WIDTH", "960")))
-    except Exception:
-        max_w = 960
-    if max_w and frame is not None:
-        h, w = frame.shape[:2]
-        if w > max_w and w > 0 and h > 0:
-            new_h = max(1, int(h * (max_w / float(w))))
-            frame = cv2.resize(frame, (max_w, new_h), interpolation=cv2.INTER_AREA)
-    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
+def encode_image(frame) -> bytes:
+    # Lossless/near-lossless: PNG with zero compression; no downscale
+    ok, buf = cv2.imencode(".png", frame, [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
     if not ok:
         return b""
     return buf.tobytes()
@@ -243,7 +234,7 @@ def encode_jpeg(frame) -> bytes:
 def multipart_chunk(img_bytes: bytes) -> bytes:
     header = (
         f"--{BOUNDARY}\r\n"
-        "Content-Type: image/jpeg\r\n"
+        "Content-Type: image/png\r\n"
         f"Content-Length: {len(img_bytes)}\r\n\r\n"
     ).encode("utf-8")
     return header + img_bytes + b"\r\n"
@@ -635,9 +626,9 @@ class CameraStream:
 
             # Encode with perf timing and log
             t_enc0 = time.time()
-            jpeg = encode_jpeg(frame)
+            img_bytes = encode_image(frame)
             enc_ms = (time.time() - t_enc0) * 1000.0
-            if jpeg:
+            if img_bytes:
                 try:
                     perf_logger.info(json.dumps({
                         "phase": "live_frame",
@@ -647,7 +638,7 @@ class CameraStream:
                 except Exception:
                     pass
                 async with self.lock:
-                    self.last_jpeg = jpeg
+                    self.last_jpeg = img_bytes
                     if self.last_ts > 0:
                         inst = 1.0 / max(1e-6, now - self.last_ts)
                         self.fps_window.append(inst)
@@ -1370,9 +1361,9 @@ async def api_video_file_frame(id: str = Query(default="file1"),
     # 5) JPEG кодирование
     try:
         t_enc0 = time.time()
-        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
+        ok, buf = cv2.imencode(".png", frame, [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
         if not ok:
-            logger.error("[file_frame] jpeg encode failed")
+            logger.error("[file_frame] png encode failed")
             return JSONResponse({"error": "Failed to encode frame"}, status_code=500)
         enc_ms = (time.time() - t_enc0) * 1000.0
         try:
@@ -1388,7 +1379,7 @@ async def api_video_file_frame(id: str = Query(default="file1"),
             "X-Infer-Ms": str(int(round(sess.get("last_infer_ms", 0.0) if 'sess' in locals() and sess else 0))),
             "X-Encode-Ms": str(int(round(enc_ms)))
         }
-        return Response(buf.tobytes(), media_type="image/jpeg", headers=headers)
+        return Response(buf.tobytes(), media_type="image/png", headers=headers)
     except Exception as e:
         logger.exception("[file_frame] encoding error: %s", e)
         return JSONResponse({"error": f"Failed to encode frame: {e}"}, status_code=500)
@@ -1547,7 +1538,7 @@ def _gen_file_mjpeg(sess_id: str, rate: float):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 220, 255), 1, cv2.LINE_AA)
 
             t_enc0 = time.time()
-            img = encode_jpeg(frame)
+            img = encode_image(frame)
             enc_ms = (time.time() - t_enc0) * 1000.0
             if not img:
                 _time.sleep(0.005)
