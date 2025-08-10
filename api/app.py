@@ -380,6 +380,13 @@ class CameraStream:
         # Soft flag to skip model inference if decoding misbehaves
         self.decode_unstable = False
 
+        # Background inference state (decoupled from streaming)
+        self._infer_task: Optional[asyncio.Task] = None
+        self._infer_running: bool = False
+        self._infer_frame = None  # latest BGR frame snapshot for inference
+        self._infer_frame_seq = 0
+        self._infer_lock = asyncio.Lock()
+
     def _open(self) -> bool:
         # Открываем RTSP в изолированном процессе
         try:
@@ -419,6 +426,143 @@ class CameraStream:
             pass
         self.opened = False
 
+    async def _infer_loop(self):
+        """Run YOLO inference in background on the latest available frame,
+        update tracks, counts and cached overlay. Decoupled from streaming FPS."""
+        self._infer_running = True
+        # Lazy-load the model here to avoid blocking the first frames
+        if not self.model_loaded:
+            try:
+                from ultralytics import YOLO
+                model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
+                if os.path.exists(model_path):
+                    self.model = YOLO(model_path)
+                    self.model_loaded = True
+                    logger.info("[%s] YOLO model loaded (infer loop): %s", self.cam_id, model_path)
+            except Exception as e:
+                logger.exception("[%s] YOLO model load failed (infer loop): %s", self.cam_id, e)
+                self.model = None
+                self.model_loaded = False
+        while self._infer_running:
+            try:
+                # Take snapshot
+                frame = None
+                async with self._infer_lock:
+                    if self._infer_frame is not None:
+                        frame = self._infer_frame.copy()
+                        self._infer_frame = None
+                if frame is None:
+                    await asyncio.sleep(0.01)
+                    continue
+                if not self.model_loaded or frame is None:
+                    await asyncio.sleep(0.005)
+                    continue
+                # Predict
+                results = self.model.predict(
+                    frame,
+                    imgsz=640,
+                    conf=self.conf_thres,
+                    verbose=False,
+                    retina_masks=True
+                )
+                r = results[0] if results else None
+                det_bboxes = []
+                det_idx_map = []
+                if r is not None and hasattr(r, "boxes") and r.boxes is not None:
+                    xyxy = r.boxes.xyxy
+                    cls = r.boxes.cls
+                    conf = r.boxes.conf
+                    if hasattr(xyxy, "cpu"): xyxy = xyxy.cpu().numpy()
+                    if hasattr(cls, "cpu"): cls = cls.cpu().numpy()
+                    if hasattr(conf, "cpu"): conf = conf.cpu().numpy()
+                    for i, b in enumerate(xyxy):
+                        c = int(cls[i]) if i < len(cls) else -1
+                        cf = float(conf[i]) if i < len(conf) else 0.0
+                        if (c in self.target_class_ids) and (cf >= self.conf_thres):
+                            x1, y1, x2, y2 = map(float, b)
+                            det_bboxes.append([x1, y1, x2, y2])
+                            det_idx_map.append(i)
+                tracks = self.tracker.update([det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]) if det_bboxes else []
+                det_count = len(tracks)
+
+                # build cached overlay once per inference
+                try:
+                    h, w = frame.shape[:2]
+                    overlay = np.zeros_like(frame)
+                    mask_data = getattr(r, 'masks', None)
+                    if mask_data is not None:
+                        mask_data = mask_data.data if hasattr(mask_data, 'data') else mask_data
+                        if hasattr(mask_data, 'cpu'):
+                            mask_data = mask_data.cpu().numpy()
+                        for tr in tracks:
+                            tid = tr['id']
+                            mi = tr.get('det_index', -1)
+                            if 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (h, w):
+                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))
+                                overlay[mask > 0] = color
+                    self._overlay_image = overlay
+                    self._overlay_shape = (h, w)
+                except Exception:
+                    pass
+
+                # update rolling stats
+                if self.balanced:
+                    det_count = min(BALANCE_CAP, det_count * self.balance_alpha + self.balance_bias)
+                self.count_window.append(float(det_count))
+                if len(self.count_window) > self.avg_window:
+                    self.count_window.pop(0)
+                self.avg_count = sum(self.count_window) / max(1, len(self.count_window))
+                self.last_count = int(round(self.avg_count))
+                # robust stat window + ema
+                try:
+                    self.count_window_full.append(float(det_count))
+                    max_full = max(self.avg_window * 3, 60)
+                    if len(self.count_window_full) > max_full:
+                        self.count_window_full.pop(0)
+                    arr = sorted(self.count_window_full)
+                    n = len(arr)
+                    if n >= 5:
+                        k = max(1, int(n * 0.1))
+                        trimmed = arr[k:-k] if (2*k) < n else arr
+                        m = trimmed[(len(trimmed)-1)//2]
+                    else:
+                        m = arr[n//2] if n else 0.0
+                    if self.ema_count is None:
+                        self.ema_count = float(m)
+                    else:
+                        self.ema_count = float(self.ema_alpha * m + (1.0 - self.ema_alpha) * self.ema_count)
+                    self.stat_count = float(self.ema_count)
+                except Exception:
+                    self.stat_count = float(det_count)
+
+                # auto-calibration
+                try:
+                    if self.balanced and AUTO_CALIBRATE:
+                        self.calib_window.append(self.last_count)
+                        if len(self.calib_window) > CALIB_WINDOW:
+                            self.calib_window.pop(0)
+                        if len(self.calib_window) >= max(10, CALIB_WINDOW // 3):
+                            avg = sum(self.calib_window) / len(self.calib_window)
+                            avg = max(0.0, min(BALANCE_CAP, avg))
+                            target_mid = (CALIB_TARGET_MIN + CALIB_TARGET_MAX) * 0.5
+                            err = target_mid - avg
+                            self.balance_bias += CALIB_LR_BIAS * err
+                            self.balance_bias = float(max(-50.0, min(50.0, self.balance_bias)))
+                            self.balance_alpha += CALIB_LR_ALPHA * (1.0 if err > 0 else -1.0)
+                            self.balance_alpha = float(max(0.5, min(1.5, self.balance_alpha)))
+                except Exception:
+                    pass
+
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(0.01)
+                continue
+        self._infer_running = False
+
     async def _loop(self):
         self.running = True
         backoff = 0.5
@@ -448,197 +592,43 @@ class CameraStream:
                 backoff = min(max_back, max(0.5, backoff * 2))
                 continue
 
+            # provide latest frame to infer loop (non-blocking)
+            try:
+                if frame is not None:
+                    async with self._infer_lock:
+                        if self._infer_frame is None:
+                            self._infer_frame = frame.copy()
+                            self._infer_frame_seq += 1
+            except Exception:
+                pass
+
             # throttle
             elapsed = now - self.last_ts
             if elapsed < self.target_dt:
                 await asyncio.sleep(self.target_dt - elapsed)
                 now = time.time()
 
-            # --- Server-side inference with rolling average (no norfair tracking) ---
-            # suppress inference for a couple frames after unstable decode to reduce pressure
-            do_infer = (self.model_loaded and not self.decode_unstable and (self.frame_idx % max(1, self.frame_skip) == 0))
-            cur_count = self.last_count
-            if do_infer:
-                try:
-                    results = self.model.predict(
-                        frame,
-                        imgsz=640,
-                        conf=self.conf_thres,
-                        verbose=False,
-                        retina_masks=True
-                    )
-                    r = results[0] if results else None
-                    det_bboxes = []
-                    det_classes = []
-                    det_idx_map = []
-                    if r is not None and hasattr(r, "boxes") and r.boxes is not None:
-                        xyxy = r.boxes.xyxy
-                        cls = r.boxes.cls
-                        conf = r.boxes.conf
-                        if hasattr(xyxy, "cpu"):
-                            xyxy = xyxy.cpu().numpy()
-                        if hasattr(cls, "cpu"):
-                            cls = cls.cpu().numpy()
-                        if hasattr(conf, "cpu"):
-                            conf = conf.cpu().numpy()
-                        for i, b in enumerate(xyxy):
-                            c = int(cls[i]) if i < len(cls) else -1
-                            cf = float(conf[i]) if i < len(conf) else 0.0
-                            if c in self.target_class_ids and cf >= self.conf_thres:
-                                x1, y1, x2, y2 = map(float, b)
-                                det_bboxes.append([x1, y1, x2, y2])
-                                det_classes.append(c)
-                                det_idx_map.append(i)
-                    # Обновляем трекер и кэш последнего результата для промежуточных кадров
-                    detections_for_tracker = [det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]
-                    tracks = self.tracker.update(detections_for_tracker)
-                    self._last_tracks = tracks
-                    self._last_masks = getattr(r, 'masks', None)
-                    det_count = len(tracks)
-                    # Отрисовка bbox/ID/масок
-                    mask_data = None
-                    if hasattr(r, "masks") and r.masks is not None:
-                        mask_data = r.masks.data
-                        if hasattr(mask_data, "cpu"):
-                            mask_data = mask_data.cpu().numpy()
-                        # ensure mask spatial dims match frame
-                        h, w = frame.shape[:2]
-                    for tr in tracks:
-                        tid = tr['id']
-                        if mask_data is not None:
-                            mi = tr.get('det_index', -1)
-                            if 0 <= mi < len(mask_data):
-                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                                if mask.shape[:2] != (h, w):
-                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                                color = _pastel_color_for_id(int(tid))  # BGR
-                                overlay = frame.copy()
-                                overlay[mask > 0] = color
-                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
-                                # Подпись ID на маске: найдём центр масс маски грубо
-                                ys, xs = np.where(mask > 0)
-                                if len(xs) > 0:
-                                    cx, cy = int(xs.mean()), int(ys.mean())
-                                    label = str(int(tid))
-                                    pos = (max(0, cx-10), max(12, cy-8))
-                                    cv2.putText(frame, label, pos,
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30, 30, 30), 1, cv2.LINE_AA)
-                                    cv2.putText(frame, label, pos,
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (245, 245, 245), 1, cv2.LINE_AA)
-                    
-                    # balancing и усреднение 
-                    if self.balanced:
-                        det_count = min(BALANCE_CAP, det_count * self.balance_alpha + self.balance_bias)
-
-                    # Build and cache overlay image once per inference result
-                    try:
-                        h, w = frame.shape[:2]
-                        overlay = np.zeros_like(frame)
-                        mask_data = getattr(r, 'masks', None)
-                        if mask_data is not None:
-                            mask_data = mask_data.data if hasattr(mask_data, 'data') else mask_data
-                            if hasattr(mask_data, 'cpu'):
-                                mask_data = mask_data.cpu().numpy()
-                            for tr in tracks:
-                                tid = tr['id']
-                                mi = tr.get('det_index', -1)
-                                if 0 <= mi < len(mask_data):
-                                    mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                                    if mask.shape[:2] != (h, w):
-                                        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                                    color = _pastel_color_for_id(int(tid))
-                                    overlay[mask > 0] = color
-                        self._overlay_image = overlay
-                        self._overlay_shape = (h, w)
-                    except Exception:
-                        pass
-
-                    # накапливаем полное окно для статистики (например, 60 значений ~ 1-2 сек)
-                    self.count_window_full.append(float(det_count))
-                    max_full = max(self.avg_window * 3, 60)  # минимум 60 кадров
-                    if len(self.count_window_full) > max_full:
-                        self.count_window_full.pop(0)
-
-                    # робастная оценка: усечённая медиана + EMA
-                    try:
-                        arr = sorted(self.count_window_full)
-                        n = len(arr)
-                        if n >= 5:
-                            k = max(1, int(n * 0.1))  # усечём по 10% хвостов
-                            trimmed = arr[k:-k] if (2*k) < n else arr
-                            # медиана усечённого массива
-                            m = trimmed[n//2 - k] if ((n - 2*k) % 2 == 1) else (0.5 * (trimmed[(n - 2*k)//2 - 1] + trimmed[(n - 2*k)//2]))
-                        else:
-                            m = arr[n//2] if n else 0.0
-                        # EMA поверх медианы
-                        if self.ema_count is None:
-                            self.ema_count = float(m)
-                        else:
-                            self.ema_count = float(self.ema_alpha * m + (1.0 - self.ema_alpha) * self.ema_count)
-                        self.stat_count = float(self.ema_count)
-                    except Exception:
-                        self.stat_count = float(det_count)
-
-                    # rolling avg (быстрый индикатор)
-                    self.count_window.append(float(det_count))
-                    if len(self.count_window) > self.avg_window:
-                        self.count_window.pop(0)
-                    self.avg_count = sum(self.count_window) / max(1, len(self.count_window))
-                    cur_count = int(round(self.avg_count))
-                    self.last_count = cur_count
-                    self.last_debug_classes = det_classes
-                    self.last_debug_ids = [tr['id'] for tr in tracks]
-                    self.last_debug_bboxes = [tr['bbox'] for tr in tracks]
-
-                    # auto-calibration to stabilize in [CALIB_TARGET_MIN, CALIB_TARGET_MAX]
-                    try:
-                        if self.balanced and AUTO_CALIBRATE:
-                            self.calib_window.append(cur_count)
-                            if len(self.calib_window) > CALIB_WINDOW:
-                                self.calib_window.pop(0)
-                            if len(self.calib_window) >= max(10, CALIB_WINDOW // 3):
-                                avg = sum(self.calib_window) / len(self.calib_window)
-                                # если выбросы — ограничим
-                                avg = max(0.0, min(BALANCE_CAP, avg))
-                                # простая "градиентная" подстройка: тянем среднее в центр коридора
-                                target_mid = (CALIB_TARGET_MIN + CALIB_TARGET_MAX) * 0.5
-                                err = target_mid - avg
-                                # bias сдвигает уровень, alpha влияет на масштаб
-                                self.balance_bias += CALIB_LR_BIAS * err
-                                # ограничим bias, чтобы не уплывал
-                                self.balance_bias = float(max(-50.0, min(50.0, self.balance_bias)))
-                                # для alpha делаем маленькую подстройку, тянем к 1.0 +/- поправка
-                                self.balance_alpha += CALIB_LR_ALPHA * (1.0 if err > 0 else -1.0)
-                                self.balance_alpha = float(max(0.5, min(1.5, self.balance_alpha)))
-                    except Exception:
-                        pass
-                except Exception:
-                    # keep previous count on failure
-                    pass
-
-            self.frame_idx += 1
             # clear unstable flag occasionally when we pass decode/read stage
+            self.frame_idx += 1
             if self.decode_unstable and (self.frame_idx % 15 == 0):
                 self.decode_unstable = False
 
-            # draw overlays: используем последний результат на промежуточных кадрах
+            # draw overlays and HUD
             try:
                 h, w = frame.shape[:2]
-                # line (optional visual indicator)
                 y_line = int(h * 0.5)
                 cv2.line(frame, (0, y_line), (w, y_line), (0, 180, 255), 2)
-                # Применяем кэшированный оверлей, если доступен
+                # apply cached overlay if present
                 try:
-                    h, w = frame.shape[:2]
                     if self._overlay_image is not None and self._overlay_image.shape[:2] == (h, w):
                         frame = cv2.addWeighted(self._overlay_image, 0.35, frame, 0.65, 0)
                 except Exception:
                     pass
-                # count HUD: текущее и устойчивое
+                # HUD: current/stat counts from infer loop
                 cv2.rectangle(frame, (10, 10), (300, 80), (0, 0, 0), -1)
-                cv2.putText(frame, f"Count(cur): {int(cur_count)}", (18, 40),
+                cv2.putText(frame, f"Count(cur): {int(self.last_count)}", (18, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
-                cv2.putText(frame, f"Count(stat): {int(round(getattr(self, 'stat_count', cur_count)))}", (18, 70),
+                cv2.putText(frame, f"Count(stat): {int(round(getattr(self, 'stat_count', self.last_count)))}", (18, 70),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
             except Exception:
                 pass
@@ -670,6 +660,8 @@ class CameraStream:
     async def start(self):
         if self.task is None or self.task.done():
             self.task = asyncio.create_task(self._loop())
+        if self._infer_task is None or self._infer_task.done():
+            self._infer_task = asyncio.create_task(self._infer_loop())
 
     async def stop(self):
         self.running = False
@@ -679,6 +671,14 @@ class CameraStream:
             except Exception:
                 pass
             self.task = None
+        # stop infer task
+        if self._infer_task:
+            try:
+                self._infer_running = False
+                self._infer_task.cancel()
+            except Exception:
+                pass
+            self._infer_task = None
         self._close()
 
     async def get_last_jpeg(self) -> Optional[bytes]:
