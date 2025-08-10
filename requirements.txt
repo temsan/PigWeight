@@ -6,6 +6,7 @@ python-multipart==0.0.9
 python-dotenv
 
 # Video/Imaging
+numpy<2
 opencv-python-headless==4.9.0.80
 # Стабильный декодер и seek для файлов (замена проблемного OpenCV-ffmpeg пути)
 av==12.2.0

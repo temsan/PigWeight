@@ -1,0 +1,65 @@
+# GPU Video Processing Requirements
+# Основные зависимости для максимальной производительности
+
+# FastAPI и веб-сервер
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# Обработка видео и изображений
+opencv-python==4.8.1.78
+numpy==1.24.3
+Pillow==10.1.0
+
+# GPU ускорение и ML
+torch>=2.1.0
+torchvision>=0.16.0
+# Для CUDA (раскомментировать при наличии GPU)
+# torch==2.1.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+# torchvision==0.16.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+
+# WebRTC для real-time стриминга
+aiortc==1.6.0
+aiohttp==3.9.1
+python-socketio==5.10.0
+aiohttp-cors==0.7.0
+
+# Дополнительные зависимости для WebRTC
+av==10.0.0
+cffi==1.16.0
+cryptography==41.0.7
+pyopenssl==23.3.0
+
+# Мониторинг GPU
+pynvml==11.5.0
+psutil==5.9.6
+
+# Утилиты
+typing-extensions==4.8.0
+pydantic==2.5.0
+python-jose[cryptography]==3.3.0
+
+# Для индексирования и кеширования
+pickle-mixin==1.0.2
+pathlib==1.0.1
+
+# Логирование и отладка
+rich==13.7.0
+colorlog==6.8.0
+
+# Async поддержка
+asyncio==3.4.3
+aiofiles==23.2.1
+concurrent-futures==3.1.1
+
+# Дополнительно для production
+gunicorn==21.2.0
+supervisor==4.2.5
+redis==5.0.1  # Для расширенного кеширования
+
+# Инструменты разработки
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+flake8==6.1.0

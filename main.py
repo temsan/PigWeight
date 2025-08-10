@@ -17,10 +17,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Config from environment ---
-DETECTION_MODE = os.getenv("DETECTION_MODE", "balanced")
+DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only")
 PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.pt")
 BALANCED_MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
 ONNX_PATH = os.getenv("ONNX_PATH", "models/yolo11n.onnx")
+
+# Debug and hot-reload settings
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+RELOAD = os.getenv("RELOAD", "true" if DEBUG else "false").lower() == "true"
 
 # Set model path based on detection mode
 if DETECTION_MODE == "pig-only":
@@ -106,28 +110,28 @@ def main():
         # Import ASGI app and start server
         logger.info(f'Starting server at http://{HOST}:{PORT}')
         logger.info(f'API Health Check: http://{HOST}:{PORT}/api/health')
-        logger.info(f'Debug mode: {DEBUG}')
+        logger.info(f'Debug mode: {DEBUG}, Hot-reload: {RELOAD}')
 
         try:
             import uvicorn
-            if DEBUG:
-                # Для reload uvicorn требует import string
-                uvicorn.run(
-                    "api.app:app",
-                    host=HOST,
-                    port=PORT,
-                    reload=True,
-                    log_level="debug"
-                )
-            else:
+            # Для reload uvicorn требует import string, а не объект приложения
+            # Используем RELOAD из .env или автоматически включаем при DEBUG, если не указано
+            app_str = "api.app:app" if RELOAD or DEBUG else None
+            
+            if app_str is None:
+                # Если RELOAD=False и DEBUG=False, загружаем приложение напрямую для производительности
                 from api.app import app as fastapi_app
-                uvicorn.run(
-                    fastapi_app,
-                    host=HOST,
-                    port=PORT,
-                    reload=False,
-                    log_level="info"
-                )
+                app = fastapi_app
+            else:
+                app = app_str
+                
+            uvicorn.run(
+                app,
+                host=HOST,
+                port=PORT,
+                reload=RELOAD or DEBUG,  # Релоад включается, если включён RELOAD или DEBUG
+                log_level="debug" if DEBUG else "info"
+            )
         except Exception as e:
             logger.error(f'Error starting server via uvicorn: {str(e)}')
             raise

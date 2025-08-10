@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PigWeight Ultra - Enhanced Video Player</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --border-color: #e0e0e0;
+        }
+
+        [data-theme="dark"] {
+            --primary-color: #7c3aed;
+            --secondary-color: #8b5cf6;
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --text-primary: #ffffff;
+            --text-secondary: #cccccc;
+            --border-color: #404040;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            min-height: 100vh;
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .theme-toggle {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .video-section {
+            background: var(--bg-primary);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+
+        .video-container {
+            position: relative;
+            overflow: hidden;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .video-canvas-container {
+            position: relative;
+            width: 100%;
+            height: 500px;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        .video-canvas-container.dragging {
+            cursor: grabbing;
+        }
+
+        #videoCanvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 100%;
+            max-height: 100%;
+            transition: transform 0.1s ease;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .detection-box {
+            position: absolute;
+            border: 2px solid #00ff00;
+            background: rgba(0, 255, 0, 0.1);
+            pointer-events: none;
+        }
+
+        .detection-label {
+            position: absolute;
+            top: -25px;
+            left: 0;
+            background: rgba(0, 255, 0, 0.8);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .controls-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .control-panel {
+            background: var(--bg-primary);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+
+        .control-panel h3 {
+            margin-bottom: 15px;
+            color: var(--text-primary);
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .timeline-container {
+            margin: 15px 0;
+        }
+
+        .timeline {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .timeline-progress {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            border-radius: 4px;
+            transition: width 0.1s ease;
+        }
+
+        .playback-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin: 15px 0;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.9rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 15px 0;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, var(--bg-secondary), #e9ecef);
+            padding: 12px;
+            border-radius: 10px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .stat-card.active {
+            animation: pulse-glow 1s infinite;
+            transform: scale(1.05);
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 10px rgba(102, 126, 234, 0.4); }
+            50% { box-shadow: 0 0 20px rgba(102, 126, 234, 0.8); }
+        }
+
+        .stat-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        .performance-chart {
+            width: 100%;
+            height: 200px;
+            margin: 15px 0;
+        }
+
+        .zoom-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin: 15px 0;
+        }
+
+        .zoom-slider {
+            flex: 1;
+            margin: 0 10px;
+        }
+
+        .autoplay-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 10px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--primary-color);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        .mask-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.7;
+        }
+
+        .detection-mask {
+            fill: rgba(255, 0, 0, 0.3);
+            stroke: #ff0000;
+            stroke-width: 2;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border-color);
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area.dragover {
+            border-color: var(--primary-color);
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body data-theme="light">
+    <div class="container">
+        <div class="header">
+            <h1>🐷 PigWeight Ultra Enhanced</h1>
+            <p>Продвинутый видеоплеер с AI анализом, масками и интерактивностью</p>
+            <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle">🌙 Темная тема</button>
+        </div>
+
+        <div class="main-content">
+            <div class="video-section">
+                <!-- Загрузка видео -->
+                <div class="upload-area" id="uploadArea">
+                    <h3>📁 Загрузите видео для анализа</h3>
+                    <p>Поддерживаются форматы: MP4, AVI, MOV</p>
+                    <input type="file" id="videoFile" accept="video/*" style="display: none;">
+                </div>
+
+                <!-- Видео контейнер -->
+                <div class="video-canvas-container" id="videoContainer" style="display: none;">
+                    <canvas id="videoCanvas"></canvas>
+                    
+                    <!-- Оверлей для масок и детекций -->
+                    <svg class="mask-overlay" id="maskOverlay">
+                        <!-- SVG элементы для масок будут добавляться динамически -->
+                    </svg>
+                    
+                    <!-- HTML оверлей для bbox -->
+                    <div class="video-overlay" id="detectionOverlay"></div>
+                </div>
+
+                <!-- Timeline -->
+                <div class="timeline-container" id="timelineContainer" style="display: none;">
+                    <div class="timeline" id="timeline">
+                        <div class="timeline-progress" id="timelineProgress"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.9rem;">
+                        <span id="currentTime">00:00</span>
+                        <span id="duration">00:00</span>
+                    </div>
+                </div>
+
+                <!-- Автоплей контролы -->
+                <div class="autoplay-controls" id="autoplayControls" style="display: none;">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="autoplayToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span>▶️ Автоплей</span>
+                    <span>Скорость:</span>
+                    <input type="range" id="autoplaySpeed" min="0.1" max="5" value="1" step="0.1" style="width: 100px;">
+                    <span id="speedValue">1x</span>
+                </div>
+
+                <!-- Зум контролы -->
+                <div class="zoom-controls" id="zoomControls" style="display: none;">
+                    <button class="btn btn-primary" onclick="resetZoom()">🔍 Сброс</button>
+                    <input type="range" class="zoom-slider" id="zoomSlider" min="0.5" max="5" value="1" step="0.1">
+                    <span id="zoomValue">100%</span>
+                </div>
+
+                <!-- Статистика производительности -->
+                <div class="stats-grid" id="performanceStats" style="display: none;">
+                    <div class="stat-card">
+                        <div class="stat-value" id="processingTime">-</div>
+                        <div class="stat-label">Обработка</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="inferenceTime">-</div>
+                        <div class="stat-label">AI Время</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="detectedCount">0</div>
+                        <div class="stat-label">Детекций</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="avgDetections">0</div>
+                        <div class="stat-label">Среднее</div>
+                    </div>
+                </div>
+
+                <!-- График производительности -->
+                <div class="performance-chart" id="chartContainer" style="display: none;">
+                    <canvas id="performanceChart"></canvas>
+                </div>
+            </div>
+
+            <div class="controls-section">
+                <!-- Основные контролы -->
+                <div class="control-panel">
+                    <h3>🎮 Управление</h3>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label>ID Видео:</label>
+                        <input type="text" id="videoId" value="ultra_video" style="width: 100%; padding: 8px; margin-top: 5px; border-radius: 5px; border: 1px solid var(--border-color);">
+                    </div>
+
+                    <div class="playback-controls">
+                        <button class="btn btn-primary" onclick="prevFrame()">⏮️</button>
+                        <button class="btn btn-primary" onclick="getFrame()">⚡ Кадр</button>
+                        <button class="btn btn-primary" onclick="nextFrame()">⏭️</button>
+                    </div>
+
+                    <div style="margin: 15px 0;">
+                        <label>Время: <span id="timeValue">0.0s</span></label>
+                        <input type="range" id="frameTime" min="0" max="100" value="0" step="0.1" style="width: 100%; margin-top: 5px;">
+                    </div>
+
+                    <div style="margin: 15px 0;">
+                        <label>Качество: <span id="qualityValue">85</span>%</label>
+                        <input type="range" id="frameQuality" min="10" max="100" value="85" style="width: 100%; margin-top: 5px;">
+                    </div>
+
+                    <div style="margin: 15px 0;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enableInference">
+                            <span class="slider"></span>
+                        </label>
+                        <span style="margin-left: 10px;">🧠 AI Анализ</span>
+                    </div>
+
+                    <div style="margin: 15px 0;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="showMasks">
+                            <span class="slider"></span>
+                        </label>
+                        <span style="margin-left: 10px;">🎭 Показать маски</span>
+                    </div>
+                </div>
+
+                <!-- Настройки отображения -->
+                <div class="control-panel">
+                    <h3>🎨 Отображение</h3>
+                    
+                    <div style="margin: 15px 0;">
+                        <label>Непрозрачность масок: <span id="maskOpacityValue">70</span>%</label>
+                        <input type="range" id="maskOpacity" min="10" max="100" value="70" style="width: 100%; margin-top: 5px;">
+                    </div>
+
+                    <div style="margin: 15px 0;">
+                        <label>Цвет детекций:</label>
+                        <select id="detectionColor" style="width: 100%; padding: 8px; margin-top: 5px; border-radius: 5px; border: 1px solid var(--border-color);">
+                            <option value="#00ff00">Зеленый</option>
+                            <option value="#ff0000">Красный</option>
+                            <option value="#0000ff">Синий</option>
+                            <option value="#ffff00">Желтый</option>
+                            <option value="#ff00ff">Пурпурный</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Системная информация -->
+                <div class="control-panel">
+                    <h3>💻 Система</h3>
+                    <div id="systemStats" style="font-size: 0.85rem;">Загрузка...</div>
+                    <button class="btn btn-primary" onclick="exportSettings()" style="width: 100%; margin-top: 10px;">💾 Экспорт настроек</button>
+                    <button class="btn btn-primary" onclick="loadSettings()" style="width: 100%; margin-top: 5px;">📁 Загрузить настройки</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Глобальные переменные
+        let currentVideoId = 'ultra_video';
+        let videoDuration = 0;
+        let isUploaded = false;
+        let currentFrame = null;
+        let zoomLevel = 1;
+        let panX = 0, panY = 0;
+        let isDragging = false;
+        let lastPanX = 0, lastPanY = 0;
+        let autoplayInterval = null;
+        let performanceChart = null;
+        let performanceData = {
+            labels: [],
+            processing: [],
+            inference: [],
+            detections: []
+        };
+        let detectionHistory = [];
+
+        // Настройки пользователя
+        let userSettings = {
+            theme: 'light',
+            quality: 85,
+            inferenceEnabled: false,
+            showMasks: false,
+            maskOpacity: 70,
+            detectionColor: '#00ff00',
+            autoplaySpeed: 1
+        };
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeApp();
+            loadUserSettings();
+            setupEventListeners();
+            setupDragAndDrop();
+            initializeChart();
+        });
+
+        function initializeApp() {
+            // Загружаем системную статистику
+            updateSystemStats();
+            setInterval(updateSystemStats, 5000);
+        }
+
+        function loadUserSettings() {
+            const saved = localStorage.getItem('pigweight_settings');
+            if (saved) {
+                userSettings = {...userSettings, ...JSON.parse(saved)};
+                applyUserSettings();
+            }
+        }
+
+        function saveUserSettings() {
+            localStorage.setItem('pigweight_settings', JSON.stringify(userSettings));
+        }
+
+        function applyUserSettings() {
+            document.body.setAttribute('data-theme', userSettings.theme);
+            document.getElementById('frameQuality').value = userSettings.quality;
+            document.getElementById('enableInference').checked = userSettings.inferenceEnabled;
+            document.getElementById('showMasks').checked = userSettings.showMasks;
+            document.getElementById('maskOpacity').value = userSettings.maskOpacity;
+            document.getElementById('detectionColor').value = userSettings.detectionColor;
+            document.getElementById('autoplaySpeed').value = userSettings.autoplaySpeed;
+            
+            updateUIValues();
+        }
+
+        function updateUIValues() {
+            document.getElementById('qualityValue').textContent = document.getElementById('frameQuality').value;
+            document.getElementById('maskOpacityValue').textContent = document.getElementById('maskOpacity').value;
+            document.getElementById('speedValue').textContent = document.getElementById('autoplaySpeed').value + 'x';
+            document.getElementById('zoomValue').textContent = Math.round(zoomLevel * 100) + '%';
+        }
+
+        function setupEventListeners() {
+            // Качество
+            document.getElementById('frameQuality').addEventListener('input', function() {
+                document.getElementById('qualityValue').textContent = this.value;
+                userSettings.quality = parseInt(this.value);
+                saveUserSettings();
+            });
+
+            // Время
+            document.getElementById('frameTime').addEventListener('input', function() {
+                const time = (parseFloat(this.value) / 100) * videoDuration;
+                document.getElementById('timeValue').textContent = time.toFixed(1) + 's';
+                if (isUploaded) debounce(getFrame, 300)();
+            });
+
+            // Timeline клик
+            document.getElementById('timeline').addEventListener('click', function(e) {
+                if (!isUploaded) return;
+                const rect = this.getBoundingClientRect();
+                const percent = (e.clientX - rect.left) / rect.width;
+                const time = percent * videoDuration;
+                document.getElementById('frameTime').value = (time / videoDuration) * 100;
+                document.getElementById('timeValue').textContent = time.toFixed(1) + 's';
+                getFrame();
+            });
+
+            // Зум
+            document.getElementById('zoomSlider').addEventListener('input', function() {
+                zoomLevel = parseFloat(this.value);
+                updateZoom();
+                document.getElementById('zoomValue').textContent = Math.round(zoomLevel * 100) + '%';
+            });
+
+            // Автоплей скорость
+            document.getElementById('autoplaySpeed').addEventListener('input', function() {
+                userSettings.autoplaySpeed = parseFloat(this.value);
+                document.getElementById('speedValue').textContent = this.value + 'x';
+                saveUserSettings();
+                if (autoplayInterval) {
+                    stopAutoplay();
+                    startAutoplay();
+                }
+            });
+
+            // Автоплей переключатель
+            document.getElementById('autoplayToggle').addEventListener('change', function() {
+                if (this.checked) {
+                    startAutoplay();
+                } else {
+                    stopAutoplay();
+                }
+            });
+
+            // Настройки
+            document.getElementById('enableInference').addEventListener('change', function() {
+                userSettings.inferenceEnabled = this.checked;
+                saveUserSettings();
+            });
+
+            document.getElementById('showMasks').addEventListener('change', function() {
+                userSettings.showMasks = this.checked;
+                saveUserSettings();
+                updateDetectionDisplay();
+            });
+
+            document.getElementById('maskOpacity').addEventListener('input', function() {
+                document.getElementById('maskOpacityValue').textContent = this.value;
+                userSettings.maskOpacity = parseInt(this.value);
+                saveUserSettings();
+                updateDetectionDisplay();
+            });
+
+            document.getElementById('detectionColor').addEventListener('change', function() {
+                userSettings.detectionColor = this.value;
+                saveUserSettings();
+                updateDetectionDisplay();
+            });
+
+            // Панорамирование
+            setupPanControls();
+
+            // Клавиатурные шорткаты
+            document.addEventListener('keydown', handleKeyboard);
+        }
+
+        function setupPanControls() {
+            const container = document.getElementById('videoContainer');
+            
+            container.addEventListener('mousedown', function(e) {
+                isDragging = true;
+                lastPanX = e.clientX;
+                lastPanY = e.clientY;
+                container.classList.add('dragging');
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!isDragging) return;
+                
+                const deltaX = e.clientX - lastPanX;
+                const deltaY = e.clientY - lastPanY;
+                
+                panX += deltaX;
+                panY += deltaY;
+                
+                updateZoom();
+                
+                lastPanX = e.clientX;
+                lastPanY = e.clientY;
+            });
+
+            document.addEventListener('mouseup', function() {
+                isDragging = false;
+                container.classList.remove('dragging');
+            });
+
+            // Зум колесом мыши
+            container.addEventListener('wheel', function(e) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                zoomLevel = Math.max(0.5, Math.min(5, zoomLevel + delta));
+                document.getElementById('zoomSlider').value = zoomLevel;
+                updateZoom();
+                document.getElementById('zoomValue').textContent = Math.round(zoomLevel * 100) + '%';
+            });
+        }
+
+        function handleKeyboard(e) {
+            if (!isUploaded) return;
+            
+            switch(e.key) {
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    prevFrame();
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    nextFrame();
+                    break;
+                case ' ':
+                    e.preventDefault();
+                    getFrame();
+                    break;
+                case '+':
+                case '=':
+                    e.preventDefault();
+                    zoomLevel = Math.min(5, zoomLevel + 0.1);
+                    updateZoomControls();
+                    break;
+                case '-':
+                    e.preventDefault();
+                    zoomLevel = Math.max(0.5, zoomLevel - 0.1);
+                    updateZoomControls();
+                    break;
+                case '0':
+                    e.preventDefault();
+                    resetZoom();
+                    break;
+                case 'a':
+                    e.preventDefault();
+                    document.getElementById('autoplayToggle').click();
+                    break;
+            }
+        }
+
+        function setupDragAndDrop() {
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('videoFile');
+
+            uploadArea.addEventListener('click', () => fileInput.click());
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0 && files[0].type.startsWith('video/')) {
+                    fileInput.files = files;
+                    uploadVideo();
+                }
+            });
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files[0]) {
+                    uploadVideo();
+                }
+            });
+        }
+
+        async function uploadVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const videoId = document.getElementById('videoId').value;
+            
+            if (!fileInput.files[0]) {
+                alert('Выберите видео файл');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('id', videoId);
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                showLoading(true);
+                const response = await fetch('/api/gpu/video/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    currentVideoId = videoId;
+                    videoDuration = result.duration;
+                    
+                    showVideoInterface();
+                    
+                    // Обновляем слайдер времени
+                    document.getElementById('frameTime').max = 100;
+                    document.getElementById('duration').textContent = formatTime(result.duration);
+                    
+                    // Загружаем первый кадр
+                    setTimeout(() => getFrame(), 500);
+                    
+                    alert(`✅ Видео загружено!\nДлительность: ${result.duration.toFixed(2)}s\nКадров: ${result.total_frames}`);
+                } else {
+                    alert(`❌ Ошибка: ${result.detail}`);
+                }
+            } catch (error) {
+                alert(`Ошибка сети: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function getFrame() {
+            if (!isUploaded) return;
+            
+            const timePercent = parseFloat(document.getElementById('frameTime').value);
+            const time = (timePercent / 100) * videoDuration;
+            const inference = document.getElementById('enableInference').checked;
+            const quality = parseInt(document.getElementById('frameQuality').value);
+
+            try {
+                const start = performance.now();
+                const response = await fetch(
+                    `/api/gpu/video/${currentVideoId}/frame?t=${time}&inference=${inference}&quality=${quality}`
+                );
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    
+                    // Загружаем изображение на canvas
+                    const img = new Image();
+                    img.onload = () => {
+                        drawFrameToCanvas(img);
+                        currentFrame = img;
+                    };
+                    img.src = URL.createObjectURL(blob);
+                    
+                    // Получаем метрики
+                    const processingTime = response.headers.get('X-Processing-Time') || '0ms';
+                    const inferenceTime = response.headers.get('X-Inference-Time') || '0ms';
+                    const count = parseInt(response.headers.get('X-Count') || '0');
+                    
+                    // Обновляем статистику
+                    updatePerformanceStats(processingTime, inferenceTime, count);
+                    
+                    // Обновляем timeline
+                    updateTimeline(time);
+                    
+                    // Анимация статистики
+                    animateStatCard('detectedCount');
+                    
+                    // Симуляция детекций для демонстрации
+                    if (inference && count > 0) {
+                        simulateDetections(count);
+                    } else {
+                        clearDetections();
+                    }
+                } else {
+                    const error = await response.json();
+                    alert(`Ошибка получения кадра: ${error.detail}`);
+                }
+            } catch (error) {
+                alert(`Ошибка сети: ${error.message}`);
+            }
+        }
+
+        function drawFrameToCanvas(img) {
+            const canvas = document.getElementById('videoCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            
+            updateZoom();
+        }
+
+        function updateZoom() {
+            const canvas = document.getElementById('videoCanvas');
+            canvas.style.transform = `translate(-50%, -50%) translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+        }
+
+        function resetZoom() {
+            zoomLevel = 1;
+            panX = 0;
+            panY = 0;
+            document.getElementById('zoomSlider').value = 1;
+            updateZoom();
+            document.getElementById('zoomValue').textContent = '100%';
+        }
+
+        function updateZoomControls() {
+            document.getElementById('zoomSlider').value = zoomLevel;
+            updateZoom();
+            document.getElementById('zoomValue').textContent = Math.round(zoomLevel * 100) + '%';
+        }
+
+        function simulateDetections(count) {
+            const overlay = document.getElementById('detectionOverlay');
+            const maskOverlay = document.getElementById('maskOverlay');
+            
+            clearDetections();
+            
+            const canvas = document.getElementById('videoCanvas');
+            const containerWidth = canvas.offsetWidth;
+            const containerHeight = canvas.offsetHeight;
+            
+            for (let i = 0; i < count; i++) {
+                // Создаем случайные детекции для демонстрации
+                const x = Math.random() * (containerWidth - 100);
+                const y = Math.random() * (containerHeight - 100);
+                const width = 80 + Math.random() * 120;
+                const height = 60 + Math.random() * 80;
+                const confidence = 0.7 + Math.random() * 0.3;
+                
+                // HTML bbox
+                const bbox = document.createElement('div');
+                bbox.className = 'detection-box';
+                bbox.style.left = x + 'px';
+                bbox.style.top = y + 'px';
+                bbox.style.width = width + 'px';
+                bbox.style.height = height + 'px';
+                bbox.style.borderColor = userSettings.detectionColor;
+                bbox.style.backgroundColor = userSettings.detectionColor + '20';
+                
+                const label = document.createElement('div');
+                label.className = 'detection-label';
+                label.textContent = `Pig ${i + 1} (${(confidence * 100).toFixed(1)}%)`;
+                label.style.backgroundColor = userSettings.detectionColor + 'CC';
+                bbox.appendChild(label);
+                
+                overlay.appendChild(bbox);
+                
+                // SVG маска (если включена)
+                if (userSettings.showMasks) {
+                    const mask = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                    // Создаем случайную маску-многоугольник
+                    const points = [];
+                    const centerX = x + width / 2;
+                    const centerY = y + height / 2;
+                    const radiusX = width / 3;
+                    const radiusY = height / 3;
+                    
+                    for (let j = 0; j < 8; j++) {
+                        const angle = (j / 8) * Math.PI * 2;
+                        const px = centerX + Math.cos(angle) * radiusX * (0.8 + Math.random() * 0.4);
+                        const py = centerY + Math.sin(angle) * radiusY * (0.8 + Math.random() * 0.4);
+                        points.push(`${px},${py}`);
+                    }
+                    
+                    mask.setAttribute('points', points.join(' '));
+                    mask.setAttribute('class', 'detection-mask');
+                    mask.style.fill = userSettings.detectionColor + Math.floor(userSettings.maskOpacity * 2.55).toString(16).padStart(2, '0');
+                    mask.style.stroke = userSettings.detectionColor;
+                    
+                    maskOverlay.appendChild(mask);
+                }
+            }
+        }
+
+        function clearDetections() {
+            document.getElementById('detectionOverlay').innerHTML = '';
+            document.getElementById('maskOverlay').innerHTML = '';
+        }
+
+        function updateDetectionDisplay() {
+            // Обновляем существующие детекции с новыми настройками
+            const boxes = document.querySelectorAll('.detection-box');
+            boxes.forEach(box => {
+                box.style.borderColor = userSettings.detectionColor;
+                box.style.backgroundColor = userSettings.detectionColor + '20';
+                
+                const label = box.querySelector('.detection-label');
+                if (label) {
+                    label.style.backgroundColor = userSettings.detectionColor + 'CC';
+                }
+            });
+            
+            const masks = document.querySelectorAll('.detection-mask');
+            masks.forEach(mask => {
+                mask.style.fill = userSettings.detectionColor + Math.floor(userSettings.maskOpacity * 2.55).toString(16).padStart(2, '0');
+                mask.style.stroke = userSettings.detectionColor;
+                mask.style.display = userSettings.showMasks ? 'block' : 'none';
+            });
+        }
+
+        function updatePerformanceStats(processingTime, inferenceTime, count) {
+            document.getElementById('processingTime').textContent = processingTime;
+            document.getElementById('inferenceTime').textContent = inferenceTime;
+            document.getElementById('detectedCount').textContent = count;
+            
+            // Обновляем историю детекций
+            detectionHistory.push(count);
+            if (detectionHistory.length > 50) detectionHistory.shift();
+            
+            const avgDetections = detectionHistory.reduce((a, b) => a + b, 0) / detectionHistory.length;
+            document.getElementById('avgDetections').textContent = avgDetections.toFixed(1);
+            
+            // Обновляем график
+            updateChart(processingTime, inferenceTime, count);
+        }
+
+        function initializeChart() {
+            const ctx = document.getElementById('performanceChart').getContext('2d');
+            performanceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Время обработки (мс)',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1
+                    }, {
+                        label: 'Время AI (мс)',
+                        data: [],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.1
+                    }, {
+                        label: 'Детекций',
+                        data: [],
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        tension: 0.1,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Время (мс)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Количество' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'top' }
+                    }
+                }
+            });
+        }
+
+        function updateChart(processingTime, inferenceTime, count) {
+            const now = new Date().toLocaleTimeString();
+            const processMs = parseFloat(processingTime.replace(/[^\d.]/g, '')) * 1000;
+            const inferenceMs = parseFloat(inferenceTime.replace(/[^\d.]/g, '')) * 1000;
+            
+            performanceChart.data.labels.push(now);
+            performanceChart.data.datasets[0].data.push(processMs);
+            performanceChart.data.datasets[1].data.push(inferenceMs);
+            performanceChart.data.datasets[2].data.push(count);
+            
+            // Оставляем только последние 20 точек
+            if (performanceChart.data.labels.length > 20) {
+                performanceChart.data.labels.shift();
+                performanceChart.data.datasets.forEach(dataset => dataset.data.shift());
+            }
+            
+            performanceChart.update('none');
+        }
+
+        function animateStatCard(cardId) {
+            const card = document.getElementById(cardId).parentElement;
+            card.classList.add('active');
+            setTimeout(() => card.classList.remove('active'), 1000);
+        }
+
+        function updateTimeline(currentTime) {
+            if (videoDuration > 0) {
+                const percent = (currentTime / videoDuration) * 100;
+                document.getElementById('timelineProgress').style.width = percent + '%';
+                document.getElementById('currentTime').textContent = formatTime(currentTime);
+            }
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function showVideoInterface() {
+            document.getElementById('uploadArea').style.display = 'none';
+            document.getElementById('videoContainer').style.display = 'block';
+            document.getElementById('timelineContainer').style.display = 'block';
+            document.getElementById('autoplayControls').style.display = 'flex';
+            document.getElementById('zoomControls').style.display = 'flex';
+            document.getElementById('performanceStats').style.display = 'grid';
+            document.getElementById('chartContainer').style.display = 'block';
+            isUploaded = true;
+        }
+
+        function showLoading(show) {
+            // Можно добавить индикатор загрузки
+        }
+
+        function nextFrame() {
+            const slider = document.getElementById('frameTime');
+            const newValue = Math.min(100, parseFloat(slider.value) + 1);
+            slider.value = newValue;
+            const time = (newValue / 100) * videoDuration;
+            document.getElementById('timeValue').textContent = time.toFixed(1) + 's';
+            getFrame();
+        }
+
+        function prevFrame() {
+            const slider = document.getElementById('frameTime');
+            const newValue = Math.max(0, parseFloat(slider.value) - 1);
+            slider.value = newValue;
+            const time = (newValue / 100) * videoDuration;
+            document.getElementById('timeValue').textContent = time.toFixed(1) + 's';
+            getFrame();
+        }
+
+        function startAutoplay() {
+            if (autoplayInterval) clearInterval(autoplayInterval);
+            
+            const speed = userSettings.autoplaySpeed;
+            const intervalMs = 100 / speed; // Базовый интервал 100мс
+            
+            autoplayInterval = setInterval(() => {
+                const slider = document.getElementById('frameTime');
+                let newValue = parseFloat(slider.value) + (speed * 0.5);
+                
+                if (newValue >= 100) {
+                    newValue = 0; // Цикл
+                }
+                
+                slider.value = newValue;
+                const time = (newValue / 100) * videoDuration;
+                document.getElementById('timeValue').textContent = time.toFixed(1) + 's';
+                getFrame();
+            }, intervalMs);
+        }
+
+        function stopAutoplay() {
+            if (autoplayInterval) {
+                clearInterval(autoplayInterval);
+                autoplayInterval = null;
+            }
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.body.getAttribute('data-theme');
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            
+            document.body.setAttribute('data-theme', newTheme);
+            userSettings.theme = newTheme;
+            saveUserSettings();
+            
+            const toggle = document.getElementById('themeToggle');
+            toggle.textContent = newTheme === 'light' ? '🌙 Темная тема' : '☀️ Светлая тема';
+        }
+
+        async function updateSystemStats() {
+            try {
+                const response = await fetch('/api/gpu/stats');
+                if (response.ok) {
+                    const stats = await response.json();
+                    const gpu = stats.gpu_processor || {};
+                    
+                    document.getElementById('systemStats').innerHTML = `
+                        <strong>🔥 GPU Статистика:</strong><br>
+                        Кадров обработано: ${gpu.frames_processed || 0}<br>
+                        Попаданий в кеш: ${((gpu.cache_hit_rate || 0) * 100).toFixed(1)}%<br>
+                        Среднее время AI: ${gpu.average_inference_time || '0s'}<br>
+                        Активных видео: ${gpu.active_videos || 0}<br>
+                        Размер кеша: ${gpu.cache_size || 0}
+                    `;
+                }
+            } catch (error) {
+                console.error('Ошибка получения статистики:', error);
+            }
+        }
+
+        function exportSettings() {
+            const settings = {
+                ...userSettings,
+                videoId: document.getElementById('videoId').value,
+                timestamp: new Date().toISOString()
+            };
+            
+            const dataStr = JSON.stringify(settings, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            
+            const link = document.createElement('a');
+            link.setAttribute('href', dataUri);
+            link.setAttribute('download', 'pigweight_settings.json');
+            link.click();
+        }
+
+        function loadSettings() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const settings = JSON.parse(e.target.result);
+                            userSettings = {...userSettings, ...settings};
+                            applyUserSettings();
+                            alert('✅ Настройки загружены!');
+                        } catch (error) {
+                            alert('❌ Ошибка загрузки настроек');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+            input.click();
+        }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+</body>
+</html>

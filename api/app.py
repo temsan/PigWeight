@@ -56,6 +56,16 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '')
         pass
 
 app = FastAPI(title="PigWeight API (FastAPI)")
+
+# Import and include simplified endpoints
+try:
+    from .simple_endpoints import router as simple_router, cleanup_all as simple_cleanup
+    app.include_router(simple_router)
+    logger.info("Lightweight endpoints enabled at /api/simple")
+except ImportError as e:
+    logger.warning(f"Lightweight endpoints not available: {e}")
+    simple_cleanup = None
+
 # Прогреваем воркер на старте (уменьшает таймаут на первом вызове)
 @app.on_event("startup")
 async def _warmup_worker():
@@ -224,21 +234,70 @@ def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Option
         return None
     return None
 
-def encode_jpeg(frame) -> bytes:
-    # Optional downscale to reduce latency/bandwidth
+def get_frame_with_overlays(frame, detections=None, masks=None, tracks=None):
+    """Добавляет оверлеи к кадру и возвращает его.
+    
+    Args:
+        frame: Входной кадр (numpy array)
+        detections: Список детекций в формате [x1, y1, x2, y2, conf, class_id]
+        masks: Маски сегментации (если есть)
+        tracks: Треки объектов (если есть), может быть списком словарей или кортежей
+        
+    Returns:
+        Кадр с наложенными оверлеями (numpy array в формате BGR)
+    """
+    if frame is None:
+        return None
+        
+    # Создаем копию кадра для рисования
+    overlay_frame = frame.copy()
+    
+    # Рисуем маски (если есть)
+    if masks is not None and tracks is not None:
+        try:
+            h, w = frame.shape[:2]
+            for tr in tracks:
+                # Обрабатываем как словарь или кортеж
+                if hasattr(tr, 'get'):  # словарь
+                    tid = tr.get('id', 0)
+                    idx = tr.get('det_index', -1)
+                elif isinstance(tr, (tuple, list)) and len(tr) >= 2:  # кортеж или список
+                    tid = tr[0] if len(tr) > 0 else 0
+                    idx = tr[1] if len(tr) > 1 else -1
+                else:
+                    continue  # пропускаем непонятный формат
+                    
+                if 0 <= idx < len(masks):
+                    mask = (masks[idx] > 0.5).astype(np.uint8)
+                    if mask.shape[:2] != (h, w):
+                        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                    color = _pastel_color_for_id(int(tid))
+                    overlay = frame.copy()
+                    overlay[mask > 0] = color
+                    overlay_frame = cv2.addWeighted(overlay, 0.35, overlay_frame, 0.65, 0)
+        except Exception as e:
+            logger.error(f"Ошибка при рисовании масок: {e}")
+    
+    # Рисуем боксы (если есть)
+    if detections is not None:
+        try:
+            for det in detections:
+                if len(det) >= 6:  # x1, y1, x2, y2, conf, class_id
+                    x1, y1, x2, y2, conf, cls_id = map(float, det[:6])
+                    color = _pastel_color_for_id(int(cls_id))
+                    cv2.rectangle(overlay_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+        except Exception as e:
+            logger.error(f"Ошибка при рисовании боксов: {e}")
+    
+    # Добавляем FPS и счетчики (если есть)
     try:
-        max_w = int(float(os.getenv("JPEG_MAX_WIDTH", "960")))
-    except Exception:
-        max_w = 960
-    if max_w and frame is not None:
-        h, w = frame.shape[:2]
-        if w > max_w and w > 0 and h > 0:
-            new_h = max(1, int(h * (max_w / float(w))))
-            frame = cv2.resize(frame, (max_w, new_h), interpolation=cv2.INTER_AREA)
-    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(JPEG_QUALITY)])
-    if not ok:
-        return b""
-    return buf.tobytes()
+        cv2.putText(overlay_frame, f"FPS: {1/(time.time() - getattr(get_frame_with_overlays, '_last_time', time.time()-0.1)):.1f}",
+                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    except:
+        pass
+    
+    get_frame_with_overlays._last_time = time.time()
+    return overlay_frame
 
 def multipart_chunk(img_bytes: bytes) -> bytes:
     header = (
@@ -248,9 +307,41 @@ def multipart_chunk(img_bytes: bytes) -> bytes:
     ).encode("utf-8")
     return header + img_bytes + b"\r\n"
 
-# --- Local OpenCV fallback (для файлов) ---
+# Local JPEG encoder helper (BGR frame -> JPEG bytes)
+def encode_jpeg(frame: np.ndarray, quality: Optional[int] = None) -> Optional[bytes]:
+    try:
+        q = int(quality if quality is not None else JPEG_QUALITY)
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), q])
+        if not ok:
+            return None
+        return buf.tobytes()
+    except Exception:
+        return None
+
+# --- Video file backends (PyAV with OpenCV fallback) ---
 def _open_file_cap_local(path: str):
-    """Простое и стабильное открытие файла локально с выбором бэкенда"""
+    """Открывает видеофайл, используя PyAV как основной бэкенд, с fallback на OpenCV.
+    
+    Returns:
+        tuple: (cap, meta), где cap - объект контейнера PyAV или VideoCapture,
+               meta - словарь с метаданными {'fps': float, 'frame_count': int, 'duration': float, 'backend': str}
+    """
+    from .pyav_utils import pyav_open_container, pyav_get_meta
+    
+    # Сначала пробуем открыть через PyAV
+    container, stream = pyav_open_container(str(path))
+    if container is not None and stream is not None:
+        meta = pyav_get_meta(container, stream)
+        meta.update({
+            "type": "local",
+            "backend": "pyav",
+            "_pyav_container": container,
+            "_pyav_stream": stream
+        })
+        return container, meta
+    
+    # Fallback на OpenCV, если PyAV не доступен
+    logger.warning("PyAV not available, falling back to OpenCV")
     backends = [
         getattr(cv2, 'CAP_MSMF', 1400),
         getattr(cv2, 'CAP_DSHOW', 700),
@@ -272,7 +363,13 @@ def _open_file_cap_local(path: str):
             fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
             duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
-            return cap, {"fps": fps, "frame_count": frame_count, "duration": duration, "type": "local", "backend": int(backend)}
+            return cap, {
+                "fps": fps, 
+                "frame_count": frame_count, 
+                "duration": duration, 
+                "type": "local", 
+                "backend": f"opencv_{backend}"
+            }
         except Exception as e:
             last_err = str(e)
             try: cap.release()
@@ -281,48 +378,70 @@ def _open_file_cap_local(path: str):
     return None, {"error": last_err or "all backends failed"}
 
 def _read_frame_local(cap, t_sec: float = 0.0) -> Optional[np.ndarray]:
-    """Чтение кадра с seek по времени с несколькими стратегиями.
-    1) POS_FRAMES → read
-    2) POS_MSEC → read
-    3) POS_FRAMES (откат на 2 кадра) → два чтения
+    """Чтение кадра с seek по времени, поддерживает как PyAV, так и OpenCV бэкенды.
+    
+    Args:
+        cap: Объект контейнера PyAV или VideoCapture
+        t_sec: Временная метка в секундах
+        
+    Returns:
+        numpy.ndarray or None: Кадр в формате BGR или None при ошибке
     """
+    from .pyav_utils import pyav_read_frame
+    
     try:
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        if t_sec < 0:
-            t_sec = 0.0
-        idx = int(max(0, min(total - 1 if total > 0 else 10**9, round(t_sec * fps))))
+        # PyAV backend
+        if hasattr(cap, 'seek') and hasattr(cap, 'decode'):
+            # PyAV container
+            meta = getattr(cap, 'meta', {})
+            stream = meta.get('_pyav_stream')
+            if stream is not None:
+                # Используем PyAV для чтения кадра
+                frame = pyav_read_frame(cap, stream, t_sec)
+                if frame is not None and frame.size > 0:
+                    return frame
+            return None
+            
+        # OpenCV backend
+        if hasattr(cap, 'get') and callable(cap.get):
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            if t_sec < 0:
+                t_sec = 0.0
+            idx = int(max(0, min(total - 1 if total > 0 else 10**9, round(t_sec * fps))))
 
-        # Strategy 1: POS_FRAMES
-        try:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            ok, frame = cap.read()
-            if ok and frame is not None:
-                return frame
-        except Exception:
-            pass
+            # Strategy 1: POS_FRAMES
+            try:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    return frame
+            except Exception as e:
+                logger.debug(f"OpenCV POS_FRAMES failed: {e}")
 
-        # Strategy 2: POS_MSEC
-        try:
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t_sec * 1000.0))
-            ok, frame = cap.read()
-            if ok and frame is not None:
-                return frame
-        except Exception:
-            pass
+            # Strategy 2: POS_MSEC
+            try:
+                cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t_sec * 1000.0))
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    return frame
+            except Exception as e:
+                logger.debug(f"OpenCV POS_MSEC failed: {e}")
 
-        # Strategy 3: rewind a bit and read twice (to pass keyframe)
-        try:
-            rewind = max(0, idx - 2)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, rewind)
-            _ = cap.read()
-            ok, frame = cap.read()
-            if ok and frame is not None:
-                return frame
-        except Exception:
-            pass
+            # Strategy 3: rewind a bit and read twice (to pass keyframe)
+            try:
+                rewind = max(0, idx - 2)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, rewind)
+                _ = cap.read()
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    return frame
+            except Exception as e:
+                logger.debug(f"OpenCV rewind strategy failed: {e}")
+                
         return None
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error in _read_frame_local: {e}", exc_info=True)
         return None
 
 # --- Camera Manager (single capture per camera with backoff) ---
@@ -330,15 +449,17 @@ class CameraStream:
     def __init__(self, cam_id: str, rtsp_url: str):
         self.cam_id = cam_id
         self.rtsp_url = rtsp_url
-        self.cap: Optional[cv2.VideoCapture] = None
+        self.stream: Optional[PyAVStream] = None
         self.opened = False
         self.running = False
         self.last_jpeg: Optional[bytes] = None
+        self.last_frame: Optional[np.ndarray] = None
         self.last_ts = 0.0
         self.lock = asyncio.Lock()
         self.task: Optional[asyncio.Task] = None
         self.fps_window = []
         self.target_dt = 1.0 / max(1e-3, TARGET_FPS)
+        self.last_frame_time = 0.0
 
         # --- Server-side inference config (single source of truth) ---
         self.model = None
@@ -368,303 +489,198 @@ class CameraStream:
 
         # простой трекер без внешних зависимостей
         self.tracker = SimpleTracker(iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
-                                     max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
+                                   max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
 
-        # Serialize any access to underlying VideoCapture to avoid FFmpeg race
-        # and disable threaded decoding where possible.
-        self.cap_lock = asyncio.Lock()
         # Soft flag to skip model inference if decoding misbehaves
         self.decode_unstable = False
+        
+        # Initialize PyAV stream
+        self._init_stream()
+    
+    def _init_stream(self):
+        """Инициализация PyAV потока"""
+        if self.stream is not None:
+            self.stream.stop()
+            
+        self.stream = PyAVStream(
+            url=self.rtsp_url,
+            stream_id=f"cam_{self.cam_id}",
+            max_queue_size=2,  # Минимальный размер очереди для минимизации задержки
+            reconnect_attempts=DEFAULT_RECONNECT_ATTEMPTS,
+            reconnect_delay=DEFAULT_RECONNECT_DELAY
+        )
 
-    def _open(self) -> bool:
-        # Открываем RTSP в изолированном процессе
+    async def _open(self) -> bool:
+        """Open camera with PyAV stream"""
+        if self.opened:
+            return True
+
         try:
-            ocv_open_rtsp(self.cam_id, self.rtsp_url)
-            logger.info("[%s] RTSP opened (worker)", self.cam_id)
-        except Exception as e:
-            logger.warning("[%s] RTSP open failed: %s", self.cam_id, e)
+            # Initialize stream if not already done
+            if self.stream is None:
+                self._init_stream()
+            
+            # Start the stream
+            success = await asyncio.get_event_loop().run_in_executor(
+                None, self.stream.start
+            )
+            
+            if not success:
+                logger.error(f"Failed to start PyAV stream for camera {self.cam_id}")
+                return False
+                
+            # Wait for first frame with timeout
+            start_time = time.time()
+            while time.time() - start_time < 5.0:  # 5s timeout
+                frame = await asyncio.get_event_loop().run_in_executor(
+                    None, self.stream.get_last_frame, 0.5
+                )
+                if frame is not None:
+                    self.opened = True
+                    self.decode_unstable = False
+                    self.last_frame = frame
+                    self.last_ts = time.time()
+                    logger.info(f"Successfully opened camera {self.cam_id} with PyAV")
+                    return True
+                await asyncio.sleep(0.1)
+                
+            logger.error(f"Timeout waiting for first frame from camera {self.cam_id}")
             return False
-        self.opened = True
-        # lazy model load on first successful open
-        if not self.model_loaded:
-            try:
-                from ultralytics import YOLO
-                # читаем актуальную модель из глобального MODEL_PATH
-                model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
-                if os.path.exists(model_path):
-                    self.model = YOLO(model_path)
-                    self.model_loaded = True
-                    logger.info("[%s] YOLO model loaded: %s", self.cam_id, model_path)
-                else:
-                    logger.warning("[%s] Model file not found: %s", self.cam_id, model_path)
-                    self.model = None
-                    self.model_loaded = False
-            except Exception as e:
-                logger.exception("[%s] Failed to load YOLO model: %s", self.cam_id, e)
-                self.model = None
-                self.model_loaded = False
-        # сброс трекера при переоткрытии
-        self.tracker = self.tracker or SimpleTracker(iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
-                                                    max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
-        return True
-
-    def _close(self):
-        try:
-            ocv_close(self.cam_id)
-        except Exception:
-            pass
-        self.opened = False
+            
+        except Exception as e:
+            logger.error(f"Error opening camera {self.cam_id} with PyAV: {e}", exc_info=True)
+            return False
 
     async def _loop(self):
-        self.running = True
-        backoff = 0.5
-        max_back = 5.0
+        """Main camera loop: read frames, run inference, track"""
+        last_frame_time = time.time()
+        frame_count = 0
+        fps = 0.0
+        
         while self.running:
-            if not self.opened:
-                if not self._open():
-                    logger.warning("[%s] open failed, retry in %.2fs", self.cam_id, backoff)
-                    await asyncio.sleep(backoff)
-                    backoff = min(max_back, backoff * 2)
-                    continue
-                backoff = 0.5
-            # Читаем JPEG из воркера и декодируем
-            jpeg = ocv_read_jpeg(self.cam_id, timeout=1.0)
-            ok, frame = False, None
-            if jpeg:
-                arr = np.frombuffer(jpeg, dtype=np.uint8)
-                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                ok = frame is not None
-            now = time.time()
-            if not ok or frame is None:
-                # mark unstable, and force close-reopen
-                self.decode_unstable = True
-                self._close()
-                logger.warning("[%s] read failed, reconnecting...", self.cam_id)
-                await asyncio.sleep(backoff)
-                backoff = min(max_back, max(0.5, backoff * 2))
-                continue
-
-            # throttle
-            elapsed = now - self.last_ts
-            if elapsed < self.target_dt:
-                await asyncio.sleep(self.target_dt - elapsed)
-                now = time.time()
-
-            # --- Server-side inference with rolling average (no norfair tracking) ---
-            # suppress inference for a couple frames after unstable decode to reduce pressure
-            do_infer = (self.model_loaded and not self.decode_unstable and (self.frame_idx % max(1, self.frame_skip) == 0))
-            cur_count = self.last_count
-            if do_infer:
-                try:
-                    results = self.model.predict(
-                        frame,
-                        imgsz=640,
-                        conf=self.conf_thres,
-                        verbose=False,
-                        retina_masks=True
-                    )
-                    r = results[0] if results else None
-                    det_bboxes = []
-                    det_classes = []
-                    det_idx_map = []
-                    if r is not None and hasattr(r, "boxes") and r.boxes is not None:
-                        xyxy = r.boxes.xyxy
-                        cls = r.boxes.cls
-                        conf = r.boxes.conf
-                        if hasattr(xyxy, "cpu"):
-                            xyxy = xyxy.cpu().numpy()
-                        if hasattr(cls, "cpu"):
-                            cls = cls.cpu().numpy()
-                        if hasattr(conf, "cpu"):
-                            conf = conf.cpu().numpy()
-                        for i, b in enumerate(xyxy):
-                            c = int(cls[i]) if i < len(cls) else -1
-                            cf = float(conf[i]) if i < len(conf) else 0.0
-                            if c in self.target_class_ids and cf >= self.conf_thres:
-                                x1, y1, x2, y2 = map(float, b)
-                                det_bboxes.append([x1, y1, x2, y2])
-                                det_classes.append(c)
-                                det_idx_map.append(i)
-                    # Обновляем трекер и кэш последнего результата для промежуточных кадров
-                    detections_for_tracker = [det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]
-                    tracks = self.tracker.update(detections_for_tracker)
-                    self._last_tracks = tracks
-                    self._last_masks = getattr(r, 'masks', None)
-                    det_count = len(tracks)
-                    # Отрисовка bbox/ID/масок
-                    mask_data = None
-                    if hasattr(r, "masks") and r.masks is not None:
-                        mask_data = r.masks.data
-                        if hasattr(mask_data, "cpu"):
-                            mask_data = mask_data.cpu().numpy()
-                        # ensure mask spatial dims match frame
-                        h, w = frame.shape[:2]
-                    for tr in tracks:
-                        tid = tr['id']
-                        if mask_data is not None:
-                            mi = tr.get('det_index', -1)
-                            if 0 <= mi < len(mask_data):
-                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                                if mask.shape[:2] != (h, w):
-                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                                color = _pastel_color_for_id(int(tid))  # BGR
-                                overlay = frame.copy()
-                                overlay[mask > 0] = color
-                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
-                                # Подпись ID на маске: найдём центр масс маски грубо
-                                ys, xs = np.where(mask > 0)
-                                if len(xs) > 0:
-                                    cx, cy = int(xs.mean()), int(ys.mean())
-                                    label = str(int(tid))
-                                    pos = (max(0, cx-10), max(12, cy-8))
-                                    cv2.putText(frame, label, pos,
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30, 30, 30), 1, cv2.LINE_AA)
-                                    cv2.putText(frame, label, pos,
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (245, 245, 245), 1, cv2.LINE_AA)
-                    
-                    # balancing и усреднение 
-                    if self.balanced:
-                        det_count = min(BALANCE_CAP, det_count * self.balance_alpha + self.balance_bias)
-                    # накапливаем полное окно для статистики (например, 60 значений ~ 1-2 сек)
-                    self.count_window_full.append(float(det_count))
-                    max_full = max(self.avg_window * 3, 60)  # минимум 60 кадров
-                    if len(self.count_window_full) > max_full:
-                        self.count_window_full.pop(0)
-
-                    # робастная оценка: усечённая медиана + EMA
-                    try:
-                        arr = sorted(self.count_window_full)
-                        n = len(arr)
-                        if n >= 5:
-                            k = max(1, int(n * 0.1))  # усечём по 10% хвостов
-                            trimmed = arr[k:-k] if (2*k) < n else arr
-                            # медиана усечённого массива
-                            m = trimmed[n//2 - k] if ((n - 2*k) % 2 == 1) else (0.5 * (trimmed[(n - 2*k)//2 - 1] + trimmed[(n - 2*k)//2]))
-                        else:
-                            m = arr[n//2] if n else 0.0
-                        # EMA поверх медианы
-                        if self.ema_count is None:
-                            self.ema_count = float(m)
-                        else:
-                            self.ema_count = float(self.ema_alpha * m + (1.0 - self.ema_alpha) * self.ema_count)
-                        self.stat_count = float(self.ema_count)
-                    except Exception:
-                        self.stat_count = float(det_count)
-
-                    # rolling avg (быстрый индикатор)
-                    self.count_window.append(float(det_count))
-                    if len(self.count_window) > self.avg_window:
-                        self.count_window.pop(0)
-                    self.avg_count = sum(self.count_window) / max(1, len(self.count_window))
-                    cur_count = int(round(self.avg_count))
-                    self.last_count = cur_count
-                    self.last_debug_classes = det_classes
-                    self.last_debug_ids = [tr['id'] for tr in tracks]
-                    self.last_debug_bboxes = [tr['bbox'] for tr in tracks]
-
-                    # auto-calibration to stabilize in [CALIB_TARGET_MIN, CALIB_TARGET_MAX]
-                    try:
-                        if self.balanced and AUTO_CALIBRATE:
-                            self.calib_window.append(cur_count)
-                            if len(self.calib_window) > CALIB_WINDOW:
-                                self.calib_window.pop(0)
-                            if len(self.calib_window) >= max(10, CALIB_WINDOW // 3):
-                                avg = sum(self.calib_window) / len(self.calib_window)
-                                # если выбросы — ограничим
-                                avg = max(0.0, min(BALANCE_CAP, avg))
-                                # простая "градиентная" подстройка: тянем среднее в центр коридора
-                                target_mid = (CALIB_TARGET_MIN + CALIB_TARGET_MAX) * 0.5
-                                err = target_mid - avg
-                                # bias сдвигает уровень, alpha влияет на масштаб
-                                self.balance_bias += CALIB_LR_BIAS * err
-                                # ограничим bias, чтобы не уплывал
-                                self.balance_bias = float(max(-50.0, min(50.0, self.balance_bias)))
-                                # для alpha делаем маленькую подстройку, тянем к 1.0 +/- поправка
-                                self.balance_alpha += CALIB_LR_ALPHA * (1.0 if err > 0 else -1.0)
-                                self.balance_alpha = float(max(0.5, min(1.5, self.balance_alpha)))
-                    except Exception:
-                        pass
-                except Exception:
-                    # keep previous count on failure
-                    pass
-
-            self.frame_idx += 1
-            # clear unstable flag occasionally when we pass decode/read stage
-            if self.decode_unstable and (self.frame_idx % 15 == 0):
-                self.decode_unstable = False
-
-            # draw overlays: используем последний результат на промежуточных кадрах
             try:
-                h, w = frame.shape[:2]
-                # line (optional visual indicator)
-                y_line = int(h * 0.5)
-                cv2.line(frame, (0, y_line), (w, y_line), (0, 180, 255), 2)
-                # Рисуем маски, если не было инференса на этом кадре
-                mask_data = None
-                if hasattr(self, '_last_masks') and self._last_masks is not None:
-                    mask_data = self._last_masks.data if hasattr(self._last_masks, 'data') else self._last_masks
-                    if hasattr(mask_data, 'cpu'):
-                        mask_data = mask_data.cpu().numpy()
-                if hasattr(self, '_last_tracks') and self._last_tracks and mask_data is not None:
-                    if mask_data is not None:
-                        if hasattr(mask_data, 'cpu'):
-                            mask_data = mask_data.cpu().numpy()
-                        mh, mw = frame.shape[:2]
-                        for tr in self._last_tracks:
-                            tid = tr['id']
-                            mi = tr.get('det_index', -1)
-                            if 0 <= mi < len(mask_data):
-                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                                if mask.shape[:2] != (mh, mw):
-                                    mask = cv2.resize(mask, (mw, mh), interpolation=cv2.INTER_NEAREST)
-                                color = _pastel_color_for_id(int(tid))
-                                overlay = frame.copy()
-                                overlay[mask > 0] = color
-                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
-                # count HUD: текущее и устойчивое
-                cv2.rectangle(frame, (10, 10), (300, 80), (0, 0, 0), -1)
-                cv2.putText(frame, f"Count(cur): {int(cur_count)}", (18, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
-                cv2.putText(frame, f"Count(stat): {int(round(getattr(self, 'stat_count', cur_count)))}", (18, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-            except Exception:
-                pass
-
-            jpeg = encode_jpeg(frame)
-            if jpeg:
-                async with self.lock:
-                    self.last_jpeg = jpeg
-                    if self.last_ts > 0:
-                        inst = 1.0 / max(1e-6, now - self.last_ts)
-                        self.fps_window.append(inst)
-                        if len(self.fps_window) > 30:
-                            self.fps_window.pop(0)
+                # Skip if we're not opened yet
+                if not self.opened and not await self._open():
+                    await asyncio.sleep(1.0)
+                    continue
+                
+                # Get frame from PyAV stream with timeout
+                try:
+                    frame = await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        lambda: self.stream.get_last_frame(timeout=0.5)
+                    )
+                    
+                    if frame is None:
+                        logger.warning(f"No frame received from {self.cam_id}")
+                        await self._close()
+                        await asyncio.sleep(1.0)
+                        continue
+                        
+                    frame_count += 1
+                    now = time.time()
+                    
+                    # Calculate FPS
+                    dt = now - last_frame_time
+                    last_frame_time = now
+                    fps = 0.9 * fps + 0.1 * (1.0 / max(1e-6, dt))
+                    
+                    # Update FPS window for stats
+                    self.fps_window = (self.fps_window + [fps])[-self.avg_window:]
+                    
+                    # Store last frame and timestamp
+                    self.last_frame = frame
                     self.last_ts = now
+                    
+                    # Process frame (inference, tracking, etc.)
+                    await self._process_frame(frame, now)
+                    
+                except Exception as e:
+                    logger.error(f"Error reading frame from {self.cam_id}: {e}", exc_info=True)
+                    await self._close()
+                    await asyncio.sleep(1.0)
+                    continue
+                
+                # Maintain target FPS
+                elapsed = time.time() - now
+                sleep_time = max(0, self.target_dt - elapsed)
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                    
+            except Exception as e:
+                logger.error(f"Error in camera loop for {self.cam_id}: {e}", exc_info=True)
+                await asyncio.sleep(1.0)
 
-        self._close()
+    async def _close(self):
+        """Close camera resources"""
+        try:
+            if self.stream is not None:
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self.stream.stop
+                )
+                self.stream = None
+            self.opened = False
+        except Exception as e:
+            logger.warning(f"Error closing camera {self.cam_id}: {e}")
+        finally:
+            self.opened = False
 
     async def start(self):
-        if self.task is None or self.task.done():
-            self.task = asyncio.create_task(self._loop())
-
+        """Start camera streaming and processing loop"""
+        if self.running:
+            return
+            
+        self.running = True
+        self.task = asyncio.create_task(self._loop())
+        logger.info(f"Started camera {self.cam_id} with PyAV")
+        
     async def stop(self):
+        """Stop camera streaming and cleanup"""
+        if not self.running:
+            return
+            
         self.running = False
-        if self.task:
+        if self.task is not None:
+            self.task.cancel()
             try:
-                await asyncio.wait_for(self.task, timeout=1.0)
-            except Exception:
+                await self.task
+            except asyncio.CancelledError:
                 pass
             self.task = None
-        self._close()
-
-    async def get_last_jpeg(self) -> Optional[bytes]:
-        async with self.lock:
-            return self.last_jpeg
-
+            
+        await self._close()
+        logger.info(f"Stopped camera {self.cam_id}")
+        
+    def get_last_jpeg(self) -> Optional[bytes]:
+        """Get the last processed JPEG frame"""
+        return self.last_jpeg
+        
+    @property
     def fps(self) -> float:
+        """Get current FPS"""
         if not self.fps_window:
             return 0.0
         return sum(self.fps_window) / len(self.fps_window)
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get stream statistics"""
+        stats = {
+            'fps': self.fps,
+            'frame_count': self.frame_idx,
+            'avg_count': self.avg_count,
+            'last_count': self.last_count,
+            'running': self.running,
+            'opened': self.opened,
+            'decode_unstable': self.decode_unstable,
+            'stream_type': 'RTSP',
+            'url': self.rtsp_url
+        }
+        
+        # Add PyAV stream stats if available
+        if self.stream is not None:
+            stats.update(self.stream.get_stats())
+            
+        return stats
 
 class CameraManager:
     def __init__(self):
@@ -814,30 +830,100 @@ FILE_MODEL = None
 FILE_MODEL_PATH = ""
 
 # Фоновая петля воспроизведения файла для WS/H TTP источников: обновляет latest_jpeg в сессии
+def _get_or_create_cap(sess: dict) -> tuple:
+    """Создает или возвращает существующий контейнер PyAV или VideoCapture.
+    
+    Returns:
+        tuple: (cap, meta) где cap - контейнер PyAV или VideoCapture,
+               meta - метаданные о видео
+    """
+    if sess.get("_cap") is None:
+        try:
+            # Сначала пробуем открыть через PyAV
+            container, stream = pyav_open_container(sess["path"])
+            if container is not None and stream is not None:
+                meta = pyav_get_meta(container, stream)
+                meta.update({
+                    "type": "local",
+                    "backend": "pyav",
+                    "_pyav_container": container,
+                    "_pyav_stream": stream
+                })
+                sess["_cap"] = container
+                sess["_meta"] = meta
+                sess["_cap_opened"] = True
+                return container, meta
+                
+            # Fallback на OpenCV
+            logger.warning("PyAV not available, falling back to OpenCV")
+            cap, meta = _open_file_cap_local(sess["path"])
+            if cap is not None:
+                sess["_cap"] = cap
+                sess["_meta"] = meta
+                sess["_cap_opened"] = True
+                return cap, meta
+        except Exception as e:
+            logger.error(f"Error creating video capture: {e}")
+            # В случае ошибки возвращаем None и пустой словарь
+            return None, {}
+    
+    # Возвращаем существующие cap и meta
+    return sess.get("_cap"), sess.get("_meta", {})
+
 async def _run_file_play_loop(sess_id: str):
-    """Latest-only: кадр всегда перезаписывается в sess['latest_jpeg'].
-    Оверлеи и счёт обновляются как в HTTP-потоке, инференс по FRAME_SKIP."""
+    """Основной цикл воспроизведения видеофайла с использованием PyAV."""
     global FILE_MODEL, FILE_MODEL_PATH, MODEL_PATH
     frame_idx_local = 0
+    
     try:
         while True:
+            # Получаем сессию
             sess = _file_sessions.get(sess_id)
             if not sess or sess.get("type") != "local":
+                logger.debug("Session not found or invalid type")
                 break
-            cap = sess.get("cap")
-            if cap is None:
-                await asyncio.sleep(0.02)
-                continue
+                
+                # Получаем или создаем контейнер
+                cap, meta = _get_or_create_cap(sess)
+                if cap is None:
+                    logger.warning("Failed to create video capture")
+                    await asyncio.sleep(0.02)
+                    continue
 
-            fps = max(5.0, float(sess.get("fps", 25.0) or 25.0))
+            # Получаем FPS и интервал кадров
+            fps = max(5.0, float(meta.get("fps", 25.0) or 25.0))
+            frame_interval = 1.0 / fps
             t0 = time.time()
 
-            # Чтение кадра под сессионным lock, чтобы не конфликтовать с seek из /frame
-            lock: asyncio.Lock = sess.get("lock")
-            async with lock:
-                ok, frame = cap.read()
-            if not ok or frame is None:
-                await asyncio.sleep(max(0.005, 1.0 / fps))
+            try:
+                # Чтение кадра с учетом текущей позиции
+                frame = None
+                if meta.get("backend") == "pyav":
+                    # Используем PyAV для чтения
+                    frame = pyav_read_frame(
+                        cap,
+                        meta["_pyav_stream"],
+                        seek_time=None  # Читаем следующий кадр
+                    )
+                else:
+                    # Fallback на OpenCV
+                    async with sess.get("lock"):
+                        ret, frame = cap.read()
+                        if not ret:
+                            frame = None
+                
+                if frame is None:
+                    # Достигнут конец видео, перематываем в начало
+                    if meta.get("backend") == "pyav":
+                        pyav_seek_frame(cap, meta["_pyav_stream"], 0)
+                    else:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    await asyncio.sleep(0.1)
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Error reading frame: {e}")
+                await asyncio.sleep(0.1)
                 continue
 
             do_infer = (frame_idx_local % max(1, FRAME_SKIP) == 0)
@@ -845,12 +931,11 @@ async def _run_file_play_loop(sess_id: str):
             r = None
             tracks = []
             if do_infer:
+                from ultralytics import YOLO
                 try:
-                    from ultralytics import YOLO
-                    try:
-                        target_model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
-                    except Exception:
-                        target_model_path = os.getenv("MODEL_PATH", "models/yolo11n-seg.pt")
+                    target_model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
+                except Exception:
+                    target_model_path = os.getenv("MODEL_PATH", "models/yolo11n-seg.pt")
                     if (FILE_MODEL is None) or (FILE_MODEL_PATH != target_model_path):
                         logger.info("[file_ws] Loading YOLO model: %s", target_model_path)
                         FILE_MODEL = YOLO(target_model_path)
@@ -866,6 +951,7 @@ async def _run_file_play_loop(sess_id: str):
                         r = results[0]
                         det_bboxes = []
                         det_idx_map = []
+                        det_classes = []
                         if hasattr(r, "boxes") and r.boxes is not None:
                             xyxy = r.boxes.xyxy
                             cls = r.boxes.cls
@@ -880,98 +966,213 @@ async def _run_file_play_loop(sess_id: str):
                                     x1, y1, x2, y2 = map(float, b)
                                     det_bboxes.append([x1, y1, x2, y2])
                                     det_idx_map.append(i)
-                        tracker = sess.get("tracker")
-                        tracks = tracker.update([det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]) if tracker else []
-                        det_count = len(tracks)
-                except Exception:
-                    pass
+                                    det_classes.append(c)
 
-            # Рисуем маски по последнему результату (или актуальному)
-            try:
-                mask_data = None
-                if r is not None and hasattr(r, "masks") and r.masks is not None:
-                    mask_data = r.masks.data
-                    if hasattr(mask_data, "cpu"):
-                        mask_data = mask_data.cpu().numpy()
-                    sess["_last_masks"] = r.masks
-                    sess["_last_tracks"] = tracks
-                else:
-                    # использовать предыдущее
-                    lm = sess.get("_last_masks")
-                    if lm is not None:
-                        mask_data = lm.data if hasattr(lm, 'data') else lm
-                        if hasattr(mask_data, 'cpu'):
+                    tracker = sess.get("tracker")
+                    tracks = tracker.update([det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]) if tracker else []
+                    det_count = len(tracks)
+
+                    # Отрисовка bbox/ID/масок
+                    mask_data = None
+                    if hasattr(r, "masks") and r.masks is not None:
+                        mask_data = r.masks.data
+                        if hasattr(mask_data, "cpu"):
                             mask_data = mask_data.cpu().numpy()
-                    tracks = sess.get("_last_tracks") or []
-                if mask_data is not None and tracks:
-                    h, w = frame.shape[:2]
+                        h, w = frame.shape[:2]
                     for tr in tracks:
                         tid = tr['id']
+                        if mask_data is not None:
+                            mi = tr.get('det_index', -1)
+                            if 0 <= mi < len(mask_data):
+                                mask = (mask_data[mi] > 0.5).astype(np.uint8)
+                                if mask.shape[:2] != (h, w):
+                                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                                color = _pastel_color_for_id(int(tid))  # BGR
+                                overlay = frame.copy()
+                                overlay[mask > 0] = color
+                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                                ys, xs = np.where(mask > 0)
+                                if len(xs) > 0:
+                                    cx, cy = int(xs.mean()), int(ys.mean())
+                                    label = str(int(tid))
+                                    pos = (max(0, cx-10), max(12, cy-8))
+                                    cv2.putText(frame, label, pos,
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (30, 30, 30), 1, cv2.LINE_AA)
+                                    cv2.putText(frame, label, pos,
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (245, 245, 245), 1, cv2.LINE_AA)
+
+                # balancing и усреднение 
+                if self.balanced:
+                    det_count = min(BALANCE_CAP, det_count * self.balance_alpha + self.balance_bias)
+                # накапливаем полное окно для статистики (например, 60 значений ~ 1-2 сек)
+                self.count_window_full.append(float(det_count))
+                max_full = max(self.avg_window * 3, 60)  # минимум 60 кадров
+                if len(self.count_window_full) > max_full:
+                    self.count_window_full.pop(0)
+
+                # робастная оценка: усечённая медиана + EMA
+                try:
+                    arr = sorted(self.count_window_full)
+                    n = len(arr)
+                    if n >= 5:
+                        k = max(1, int(n * 0.1))  # усечём по 10% хвостов
+                        trimmed = arr[k:-k] if (2*k) < n else arr
+                        # медиана усечённого массива
+                        m = trimmed[n//2 - k] if ((n - 2*k) % 2 == 1) else (0.5 * (trimmed[(n - 2*k)//2 - 1] + trimmed[(n - 2*k)//2]))
+                    else:
+                        m = arr[n//2] if n else 0.0
+                    # EMA поверх медианы
+                    if self.ema_count is None:
+                        self.ema_count = float(m)
+                    else:
+                        self.ema_count = float(self.ema_alpha * m + (1.0 - self.ema_alpha) * self.ema_count)
+                    self.stat_count = float(self.ema_count)
+                except Exception:
+                    self.stat_count = float(det_count)
+
+                # rolling avg (быстрый индикатор)
+                self.count_window.append(float(det_count))
+                if len(self.count_window) > self.avg_window:
+                    self.count_window.pop(0)
+                self.avg_count = sum(self.count_window) / max(1, len(self.count_window))
+                cur_count = int(round(self.avg_count))
+                self.last_count = cur_count
+                self.last_debug_classes = det_classes
+                self.last_debug_ids = [tr['id'] for tr in tracks]
+                self.last_debug_bboxes = [tr['bbox'] for tr in tracks]
+
+                # auto-calibration to stabilize in [CALIB_TARGET_MIN, CALIB_TARGET_MAX]
+                try:
+                    if self.balanced and AUTO_CALIBRATE:
+                        self.calib_window.append(cur_count)
+                        if len(self.calib_window) > CALIB_WINDOW:
+                            self.calib_window.pop(0)
+                        if len(self.calib_window) >= max(10, CALIB_WINDOW // 3):
+                            avg = sum(self.calib_window) / len(self.calib_window)
+                            # если выбросы — ограничим
+                            avg = max(0.0, min(BALANCE_CAP, avg))
+                            # простая "градиентная" подстройка: тянем среднее в центр коридора
+                            target_mid = (CALIB_TARGET_MIN + CALIB_TARGET_MAX) * 0.5
+                            err = target_mid - avg
+                            # bias сдвигает уровень, alpha влияет на масштаб
+                            self.balance_bias += CALIB_LR_BIAS * err
+                            # ограничим bias, чтобы не уплывал
+                            self.balance_bias = float(max(-50.0, min(50.0, self.balance_bias)))
+                            # для alpha делаем маленькую подстройку, тянем к 1.0 +/- поправка
+                            self.balance_alpha += CALIB_LR_ALPHA * (1.0 if err > 0 else -1.0)
+                            self.balance_alpha = float(max(0.5, min(1.5, self.balance_alpha)))
+                except Exception as e:
+                    logger.error(f"Error in auto-calibration: {e}")
+                    pass
+            # keep previous count on failure
+            pass
+
+        self.frame_idx += 1
+        # clear unstable flag occasionally when we pass decode/read stage
+        if self.decode_unstable and (self.frame_idx % 15 == 0):
+            self.decode_unstable = False
+
+        # draw overlays: используем последний результат на промежуточных кадрах
+        try:
+            h, w = frame.shape[:2]
+            # line (optional visual indicator)
+            y_line = int(h * 0.5)
+            cv2.line(frame, (0, y_line), (w, y_line), (0, 180, 255), 2)
+            # Рисуем маски, если не было инференса на этом кадре
+            mask_data = None
+            if hasattr(self, '_last_masks') and self._last_masks is not None:
+                mask_data = self._last_masks.data if hasattr(self._last_masks, 'data') else self._last_masks
+                if hasattr(mask_data, 'cpu'):
+                    mask_data = mask_data.cpu().numpy()
+            if hasattr(self, '_last_tracks') and self._last_tracks and mask_data is not None:
+                if mask_data is not None:
+                    if hasattr(mask_data, 'cpu'):
+                        mask_data = mask_data.cpu().numpy()
+                    mh, mw = frame.shape[:2]
+                for tr in self._last_tracks:
+                    tid = tr['id']
+                    if mask_data is not None:
                         mi = tr.get('det_index', -1)
                         if 0 <= mi < len(mask_data):
                             mask = (mask_data[mi] > 0.5).astype(np.uint8)
-                            if mask.shape[:2] != (h, w):
-                                mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                            if mask.shape[:2] != (mh, mw):
+                                mask = cv2.resize(mask, (mw, mh), interpolation=cv2.INTER_NEAREST)
                             color = _pastel_color_for_id(int(tid))
                             overlay = frame.copy()
                             overlay[mask > 0] = color
                             frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-            # HUD и статистики
+        # HUD и статистики
+        try:
+            sess["last_count"] = int(det_count)
+            cw = sess.setdefault("count_window", [])
+            cw.append(float(det_count))
+            if len(cw) > AVG_WINDOW:
+                cw.pop(0)
+            sess["avg_count"] = (sum(cw) / len(cw)) if cw else 0.0
+            cv2.rectangle(frame, (10, 10), (320, 80), (0, 0, 0), -1)
+            cv2.putText(frame, f"Count(cur): {int(sess.get('last_count', 0) or 0)}", (18, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(frame, f"Count(avg): {int(round(sess.get('avg_count', 0.0) or 0.0))}", (18, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+        except Exception:
+            pass
+
+        # Сохраняем кадр с оверлеями для отображения
+        try:
+            # Сохраняем кадр как есть, без кодирования в JPEG
+            sess["latest_frame"] = frame
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении кадра: {e}")
+            sess["latest_frame"] = None
+
+            # Обработка кадра (детекция, трекинг и т.д.)
             try:
-                sess["last_count"] = int(det_count)
-                cw = sess.setdefault("count_window", [])
-                cw.append(float(det_count))
-                if len(cw) > AVG_WINDOW:
-                    cw.pop(0)
-                sess["avg_count"] = (sum(cw) / len(cw)) if cw else 0.0
-                cv2.rectangle(frame, (10, 10), (320, 80), (0, 0, 0), -1)
-                cv2.putText(frame, f"Count(cur): {int(sess.get('last_count', 0) or 0)}", (18, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-                cv2.putText(frame, f"Count(avg): {int(round(sess.get('avg_count', 0.0) or 0.0))}", (18, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
-            except Exception:
-                pass
+                await _process_frame(sess, frame, frame_idx_local)
+                frame_idx_local += 1
 
-            # Кодирование и публикация latest-only
-            try:
-                img = encode_jpeg(frame)
-                if img:
-                    sess["latest_jpeg"] = img
-            except Exception:
-                pass
-
-            # pacing
-            spent = time.time() - t0
-            target = max(0.005, (1.0 / fps))
-            await asyncio.sleep(max(0.0, target - spent))
-            frame_idx_local += 1
+                # Поддержание FPS
+                elapsed = time.time() - t0
+                sleep_time = max(0, frame_interval - elapsed)
+                await asyncio.sleep(sleep_time)
+                
+            except Exception as e:
+                logger.error(f"Error processing frame: {e}")
+                await asyncio.sleep(0.1)
+                
     except asyncio.CancelledError:
-        return
-    except Exception:
-        logger.exception("[file_ws] play loop error")
+        logger.debug("Play loop cancelled")
+    except Exception as e:
+        logger.exception("Fatal error in play loop")
+    finally:
+        _cleanup_session(sess_id)
 
 @app.post("/api/video_file/open")
 async def api_video_file_open(camera: str = Form(default="cam_file1"),
                               id: str = Form(default="file1"),
                               file: UploadFile = File(...)):
-    # Закрыть предыдущую сессию с тем же id (если была), чтобы освободить cap и файловые блокировки
+    from .pyav_utils import pyav_close_container
+    
+    # Закрыть предыдущую сессию с тем же id (если была)
     async with _file_sessions_lock:
         old = _file_sessions.pop(id, None)
         if old:
             try:
+                # Освобождаем ресурсы PyAV, если они есть
+                if "_pyav_container" in old and old["_pyav_container"] is not None:
+                    pyav_close_container(old["_pyav_container"])
+                # Освобождаем ресурсы OpenCV, если они есть
                 cap_old = old.get("cap")
                 if cap_old is not None:
-                    cap_old.release()
-            except Exception:
-                pass
-            try:
-                if old.get("type") == "opencv":
-                    get_ocv().close(id)
-            except Exception:
-                pass
+                    try:
+                        cap_old.release()
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error(f"Error cleaning up old session {id}: {e}")
+    
     try:
         # Нормализуем имя и путь, делаем уникальным, чтобы не перетирать файл в использовании
         raw_name = file.filename or "upload.bin"
@@ -1000,57 +1201,92 @@ async def api_video_file_open(camera: str = Form(default="cam_file1"),
     except PermissionError as e:
         return JSONResponse({"error": f"upload failed: {e}"}, status_code=500)
     except Exception as e:
-        # Всегда JSON-ответ об ошибке загрузки
         return JSONResponse({"error": f"upload failed: {e}"}, status_code=500)
 
-    # Открываем файл локально (просто и стабильно)
+    # Открываем файл с помощью PyAV (с fallback на OpenCV)
     try:
-        logger.info("[file_open] local opening id=%s path=%s", id, dst)
-        cap, meta_local = _open_file_cap_local(str(dst))
+        logger.info("[file_open] opening id=%s path=%s", id, dst)
+        cap, meta = _open_file_cap_local(str(dst))
         if cap is None:
-            return JSONResponse({"error": f"local open failed: {meta_local.get('error', 'unknown')}"}, status_code=500)
-        logger.info("[file_open] local opened id=%s meta=%s", id, meta_local)
+            return JSONResponse({"error": f"open failed: {meta.get('error', 'unknown')}"}, status_code=500)
+        
+        # Логируем информацию о бэкенде
+        backend = meta.get("backend", "unknown")
+        logger.info(f"[file_open] opened id={id} backend={backend} meta={meta}")
 
-        # Регистрируем локальную сессию
+        # Создаем сессию
+        sess = {
+            "id": id,
+            "path": str(dst),
+            "type": "local",
+            "meta": meta,
+            "fps": meta.get("fps", 25.0),
+            "frame_count": meta.get("frame_count", 0),
+            "duration": meta.get("duration", 0.0),
+            "backend": backend,
+            "tracker": SimpleTracker(
+                iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
+                max_age=int(os.getenv("TRACK_MAX_AGE", "30"))
+            ),
+            "last_count": 0,
+            "avg_count": 0.0,
+            "count_window": [],
+            "_cap_opened": False,
+            # Пер-сессионная блокировка для безопасного чтения/seek
+            "lock": asyncio.Lock(),
+            # Счётчик запросов для отмены устаревших
+            "seq": 0
+        }
+        
+        # Сохраняем каптру в сессию (если это OpenCV) или контейнер PyAV
+        if backend.startswith("opencv"):
+            # Храним под единым ключом 'cap' (и дублируем в '_cap' для обратной совместимости)
+            sess["cap"] = cap
+            sess["_cap"] = cap
+            sess["_cap_opened"] = True
+        elif backend == "pyav":
+            # Для PyAV также единообразно сохраняем в 'cap' (контейнер) и метаданные
+            sess["_pyav_container"] = cap
+            sess["_pyav_stream"] = meta.get("_pyav_stream")
+            # Добавляем метаданные в объект контейнера для удобства доступа
+            try:
+                cap.meta = meta
+            except Exception:
+                pass
+            sess["cap"] = cap
+            sess["_cap"] = cap
+        
+        # Регистрируем сессию
         async with _file_sessions_lock:
-            _file_sessions[id] = {
-                "type": "local",
-                "cap": cap,
-                "path": str(dst),
-                "camera": camera,
-                "fps": float(meta_local.get("fps", 25.0)),
-                "frame_count": int(meta_local.get("frame_count", 0)),
-                "duration": float(meta_local.get("duration", 0.0)),
-                "balanced": BALANCED_DEFAULT,
-                "tracker": SimpleTracker(iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
-                                          max_age=int(os.getenv("TRACK_MAX_AGE", "30"))),
-                "lock": asyncio.Lock(),
-                "seq": 0,
-            }
-
-        # Перф-лог: завершили open
+            _file_sessions[id] = sess
+            
+        # Возвращаем метаданные
+        # Логируем успешное открытие файла
         try:
             perf_logger.info(json.dumps({
                 "phase": "file_open_done",
                 "id": id,
                 "path": str(dst),
-                "fps": _file_sessions[id]["fps"],
-                "frame_count": _file_sessions[id]["frame_count"],
-                "duration": _file_sessions[id]["duration"]
+                "fps": sess["fps"],
+                "frame_count": sess["frame_count"],
+                "duration": sess["duration"],
+                "backend": backend
             }, ensure_ascii=False))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error logging file open: {e}")
 
-        return JSONResponse({
+        # Возвращаем метаданные
+        response_data = {
             "id": id,
             "camera": camera,
             "path": str(dst),
-            "fps": _file_sessions[id]["fps"],
-            "frame_count": _file_sessions[id]["frame_count"],
-            "duration": _file_sessions[id]["duration"],
-            "balanced": BALANCED_DEFAULT,
-            "backend": "local"
-        }, status_code=200)
+            "fps": sess["fps"],
+            "frame_count": sess["frame_count"],
+            "duration": sess["duration"],
+            "backend": backend,
+            "balanced": BALANCED_DEFAULT
+        }
+        return JSONResponse(response_data, status_code=200)
     except Exception as e:
         return JSONResponse({"error": f"file open failed: {e}"}, status_code=500)
 
@@ -1188,17 +1424,28 @@ async def api_video_file_frame(id: str = Query(default="file1"),
 
             frame = None
 
-            # 2) Извлечение кадра через локальный OpenCV (просто и стабильно)
+            # 2) Извлечение кадра (PyAV или OpenCV). Гарантируем наличие cap и lock.
             sess = _file_sessions.get(id)
-            if not sess or sess.get("type") != "local" or sess.get("cap") is None:
+            if not sess or sess.get("type") != "local":
                 return JSONResponse({"error": "file session not opened or invalid"}, status_code=400)
+            # Создадим недостающие поля
+            if sess.get("lock") is None:
+                sess["lock"] = asyncio.Lock()
+            if sess.get("cap") is None:
+                cap2, meta2 = _get_or_create_cap(sess)
+                if cap2 is None:
+                    return JSONResponse({"error": "failed to init capture"}, status_code=500)
+                sess["cap"] = cap2
+                sess["_cap"] = cap2
+                if meta2:
+                    sess["meta"] = meta2
 
             # отмена устаревших запросов: увеличиваем seq и сравниваем
             lock: asyncio.Lock = sess.get("lock")
             async with lock:
                 sess["seq"] = int(sess.get("seq", 0)) + 1
                 cur_seq = sess["seq"]
-                cap = sess.get("cap")
+                cap = sess.get("cap") or sess.get("_cap")
                 t_seek0 = time.time()
                 frame = _read_frame_local(cap, t)
                 seek_ms = (time.time() - t_seek0) * 1000.0
@@ -1368,7 +1615,7 @@ def _gen_file_mjpeg(sess_id: str, rate: float):
             sess = _file_sessions.get(sess_id)
             if not sess or sess.get("type") != "local":
                 break
-            
+                
             cap = sess.get("cap")
             if cap is None:
                 _time.sleep(0.02)
@@ -1566,18 +1813,45 @@ async def api_video_file_last_count(id: str = Query(default="file1")):
 @app.on_event("shutdown")
 async def shutdown_event():
     """Корректное освобождение ресурсов при остановке сервера"""
-    logger.info("Shutting down server, cleaning up resources...")
-    for cam in CAMERAS.cams.values():
-        await cam.stop()
-    for sess in _file_sessions.values():
+    from .pyav_utils import pyav_close_container
+    
+    # Очищаем ресурсы упрощенных эндпоинтов
+    if simple_cleanup is not None:
         try:
-            if sess.get("type") == "opencv" and sess.get("cap"):
-                sess["cap"].release()
-            elif sess.get("type") == "pyav" and sess.get("container"):
-                sess["container"].close()
-        except Exception:
-            pass
-    logger.info("All resources cleaned up.")
+            simple_cleanup()
+            logger.info("Simple endpoints cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during simple endpoints cleanup: {e}")
+    
+    # Останавливаем все камеры
+    for cam_id in list(CAMERAS.cams.keys()):
+        try:
+            await CAMERAS.cams[cam_id].stop()
+        except Exception as e:
+            logger.error(f"Error stopping camera {cam_id}: {e}")
+    
+    # Закрываем все сессии файлов
+    for sess_id in list(_file_sessions.keys()):
+        try:
+            sess = _file_sessions[sess_id]
+            # Закрываем PyAV контейнер, если используется
+            if "_pyav_container" in sess and sess["_pyav_container"] is not None:
+                try:
+                    pyav_close_container(sess["_pyav_container"])
+                except Exception as e:
+                    logger.error(f"Error closing PyAV container for session {sess_id}: {e}")
+            # Закрываем OpenCV VideoCapture, если используется
+            elif "_cap" in sess and sess["_cap"] is not None:
+                try:
+                    sess["_cap"].release()
+                except Exception as e:
+                    logger.error(f"Error releasing OpenCV cap for session {sess_id}: {e}")
+            # Очищаем сессию
+            _file_sessions.pop(sess_id, None)
+        except Exception as e:
+            logger.error(f"Error cleaning up session {sess_id}: {e}")
+    
+    logger.info("Cleanup completed")
 
 # --- Tracking utils ---
 def _iou(boxA, boxB):
@@ -1654,6 +1928,90 @@ def _pastel_color_for_id(track_id: int) -> tuple[int, int, int]:
     v = 1.0
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
     return (int(b * 255), int(g * 255), int(r * 255))
+
+async def _process_frame(sess: dict, frame: np.ndarray, frame_idx: int):
+    """Обработка кадра: детекция, трекинг, отрисовка оверлеев."""
+    try:
+        # Пропускаем кадры согласно FRAME_SKIP
+        if frame_idx % max(1, FRAME_SKIP) != 0:
+            return
+
+        # Запускаем детекцию
+        detections = []
+        if hasattr(sess, 'model') and sess.model is not None:
+            results = sess.model.predict(
+                frame,
+                imgsz=640,
+                conf=CONF_THRESHOLD,
+                verbose=False,
+                retina_masks=True
+            )
+            if results and len(results) > 0:
+                r = results[0]
+                if hasattr(r, 'boxes') and r.boxes is not None:
+                    xyxy = r.boxes.xyxy.cpu().numpy() if hasattr(r.boxes.xyxy, 'cpu') else r.boxes.xyxy
+                    cls = r.boxes.cls.cpu().numpy() if hasattr(r.boxes.cls, 'cpu') else r.boxes.cls
+                    conf = r.boxes.conf.cpu().numpy() if hasattr(r.boxes.conf, 'cpu') else r.boxes.conf
+                    for i, b in enumerate(xyxy):
+                        c = int(cls[i]) if i < len(cls) else -1
+                        cf = float(conf[i]) if i < len(conf) else 0.0
+                        if (c in TARGET_CLASS_IDS) and (cf >= CONF_THRESHOLD):
+                            x1, y1, x2, y2 = map(float, b)
+                            detections.append([x1, y1, x2, y2, cf, c])
+        
+        # Обновляем трекер
+        tracker = sess.setdefault("tracker", SimpleTracker())
+        tracks = tracker.update(detections) if detections else []
+        
+        # Рисуем оверлеи
+        frame_with_overlays = get_frame_with_overlays(
+            frame.copy(),
+            detections=detections,
+            tracks=tracks
+        )
+        
+        # Сохраняем кадр для отображения
+        sess["latest_frame"] = frame_with_overlays
+        sess["last_count"] = len(tracks)
+        
+    except Exception as e:
+        logger.error(f"Error processing frame: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+def _cleanup_session(sess_id: str):
+    """Освобождает ресурсы сессии."""
+    sess = _file_sessions.get(sess_id)
+    if not sess:
+        return
+        
+    try:
+        # Освобождаем ресурсы PyAV
+        if "_pyav_container" in sess and sess["_pyav_container"] is not None:
+            try:
+                from .pyav_utils import pyav_close_container
+                pyav_close_container(sess["_pyav_container"])
+            except Exception as e:
+                logger.error(f"Error closing PyAV container: {e}")
+            sess["_pyav_container"] = None
+            
+        # Освобождаем ресурсы OpenCV
+        if "_cap" in sess and sess["_cap"] is not None:
+            try:
+                sess["_cap"].release()
+            except Exception as e:
+                logger.error(f"Error releasing OpenCV capture: {e}")
+            sess["_cap"] = None
+            sess["_cap_opened"] = False
+            
+        # Очищаем другие ресурсы
+        if "tracker" in sess:
+            del sess["tracker"]
+            
+    except Exception as e:
+        logger.error(f"Error cleaning up session {sess_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 # Глобально ограничим потоки OpenCV для стабильности
 try:
