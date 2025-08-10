@@ -1694,3 +1694,48 @@ def _cap_safe_set(cap, prop, value):
     except Exception:
         return False
     return True
+
+@app.websocket("/ws/video")
+async def ws_video(ws: WebSocket):
+    await ws.accept()
+    try:
+        q = ws.query_params or {}
+        sess_id = q.get('id')
+        camera = q.get('camera', DEFAULT_CAM_ID)
+        if sess_id:
+            # file session: latest-only frames
+            while True:
+                await asyncio.sleep(0.02)
+                sess = _file_sessions.get(sess_id)
+                if not sess:
+                    break
+                img = sess.get("latest_jpeg")
+                if not img:
+                    continue
+                try:
+                    await ws.send_bytes(img)
+                except Exception:
+                    break
+        else:
+            # live camera: latest-only frames from CameraStream
+            cam = CAMERAS.get_or_create(camera, CAM_URL)
+            await CAMERAS.start_camera(camera)
+            while True:
+                await asyncio.sleep(0.02)
+                try:
+                    jpeg = await cam.get_last_jpeg()
+                except Exception:
+                    jpeg = None
+                if not jpeg:
+                    continue
+                try:
+                    await ws.send_bytes(jpeg)
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.exception("/ws/video error: %s", e)
+    finally:
+        with contextlib.suppress(Exception):
+            await ws.close()
