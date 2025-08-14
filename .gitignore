@@ -6,3 +6,4 @@ __pycache__
 *.ts
 *.m3u8
 /.venv*
+/uploads/*

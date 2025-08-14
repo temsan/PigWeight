@@ -159,6 +159,7 @@ def main():
         f"batch={args.batch}",
         f"device={args.device}",
         "patience=30",  # раскомментируйте при необходимости
+        "verbose=True",
     ]
     print("[INFO] Запускаю обучение:", " ".join(train_cmd), flush=True)
     code = run(train_cmd, check=False)

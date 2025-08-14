@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>PigWeight Simple</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 16px; background:#f5f7fb; color:#1f2d3d; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .pill { padding:8px 14px; border-radius:999px; border:1px solid #c9d6ea; background:#fff; cursor:pointer; }
+    .pill.primary { background:#3a66db; color:#fff; border-color:#2f55b5; }
+    .pill:disabled { opacity:0.6; cursor:default; }
+    .box { background:#fff; border:1px solid #c9d6ea; border-radius:12px; padding:12px; }
+    #view { width:100%; max-width:960px; height:auto; display:block; object-fit:contain; background:linear-gradient(180deg,#eef4ff,#eaf0fb); }
+    #status { font-size:14px; color:#556; }
+    #seek { width:260px; }
+  </style>
+</head>
+<body>
+  <h2 style="margin:0 0 12px 0;">PigWeight Simple</h2>
+  <div class="row box">
+    <button id="btnLive" class="pill primary">Камера (Live)</button>
+    <label class="pill" for="file">Открыть файл</label>
+    <input id="file" type="file" accept="video/*,.mp4,.mkv,.avi,.mov,.m4v,.webm" style="display:none;" />
+    <button id="btnPlay" class="pill">Старт</button>
+    <button id="btnStop" class="pill">Стоп</button>
+    <input id="seek" type="range" min="0" max="0" step="0.1" value="0" />
+    <span id="time">0.0 / 0.0 c</span>
+    <span id="status"></span>
+  </div>
+  <div class="box">
+    <img id="view" alt="frame" />
+  </div>
+
+  <script>
+    // Минимальная логика без плеера: IMG + MJPEG/снимки (live) и /play|/frame (file)
+    const view = document.getElementById('view');
+    const btnLive = document.getElementById('btnLive');
+    const fileInput = document.getElementById('file');
+    const btnPlay = document.getElementById('btnPlay');
+    const btnStop = document.getElementById('btnStop');
+    const seek = document.getElementById('seek');
+    const timeLbl = document.getElementById('time');
+    const status = document.getElementById('status');
+
+    let mode = 'live'; // 'live' | 'file'
+    let playing = false;
+    let sessionId = 'file1';
+    let cameraId = 'cam1';
+
+    // --- LIVE ---
+    let snapshotTimer = null;
+    function stopSnapshots(){ if (snapshotTimer){ clearInterval(snapshotTimer); snapshotTimer=null; } }
+    function startSnapshots(){
+      stopSnapshots();
+      snapshotTimer = setInterval(async () => {
+        try {
+          const url = `/api/snapshot?camera=${encodeURIComponent(cameraId)}&ts=${Date.now()}`;
+          const resp = await fetch(url, { cache: 'no-store' });
+          if (resp.ok) {
+            const blob = await resp.blob();
+            if (blob.size > 0) {
+              const u = URL.createObjectURL(blob);
+              view.src = u; setTimeout(()=>URL.revokeObjectURL(u), 5000);
+              status.textContent = 'LIVE: снимки';
+            }
+          }
+        } catch (_) {}
+      }, 350);
+    }
+    async function startLive(){
+      mode = 'live';
+      playing = true;
+      stopSnapshots();
+      // сначала пробуем MJPEG
+      const mjpeg = `/api/video_feed?mode=server&camera=${encodeURIComponent(cameraId)}&ts=${Date.now()}`;
+      view.src = mjpeg;
+      status.textContent = 'LIVE: mjpeg';
+      // вотчер: если нет размера, включаем снимки
+      const deadline = Date.now() + 1200;
+      const w = setInterval(()=>{
+        const iw = view.naturalWidth||0, ih=view.naturalHeight||0;
+        if (iw>0 && ih>0){ clearInterval(w); return; }
+        if (Date.now()>deadline){ clearInterval(w); startSnapshots(); }
+      }, 150);
+    }
+
+    // --- FILE ---
+    async function openFile(f){
+      // POST /api/video_file/open  (бек уже кеширует по имени)
+      const fd = new FormData();
+      fd.append('file', f, f.name);
+      try {
+        await fetch('/api/video_file/open', { method:'POST', body: fd });
+        // duration можно запросить, если есть отдельный эндпоинт. Иначе оставим 0.
+        mode = 'file';
+        playing = false;
+        status.textContent = 'FILE открыт';
+        // показать первый кадр
+        const t = Number(seek.value)||0;
+        view.src = `/api/video_file/frame?id=${encodeURIComponent(sessionId)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+      } catch (e) {
+        status.textContent = 'Ошибка открытия файла';
+      }
+    }
+
+    function startFile(){
+      if (mode !== 'file') return;
+      playing = true;
+      stopSnapshots();
+      view.src = `/api/video_file/play?id=${encodeURIComponent(sessionId)}&rate=1.0&ts=${Date.now()}`;
+      status.textContent = 'FILE: play';
+    }
+    function stopFile(){
+      if (mode !== 'file') return;
+      playing = false;
+      const t = Number(seek.value)||0;
+      view.src = `/api/video_file/frame?id=${encodeURIComponent(sessionId)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+      status.textContent = 'FILE: pause';
+    }
+
+    // --- UI bindings ---
+    btnLive.addEventListener('click', startLive);
+    fileInput.addEventListener('change', async (e)=>{
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      await openFile(f);
+    });
+    btnPlay.addEventListener('click', ()=>{
+      if (mode==='live') startLive(); else startFile();
+    });
+    btnStop.addEventListener('click', ()=>{
+      if (mode==='live'){ playing=false; stopSnapshots(); status.textContent='LIVE: стоп'; }
+      else stopFile();
+    });
+    seek.addEventListener('input', ()=>{
+      const t = Number(seek.value)||0;
+      const max = Number(seek.max)||0;
+      timeLbl.textContent = `${t.toFixed(1)} / ${max.toFixed(1)} c`;
+      if (mode==='file' && !playing){
+        view.src = `/api/video_file/frame?id=${encodeURIComponent(sessionId)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+      }
+    });
+
+    // стартуем live по умолчанию
+    startLive();
+  </script>
+</body>
+</html>

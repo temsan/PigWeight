@@ -9,7 +9,12 @@ from typing import Any, Dict, Optional, Tuple
 
 def _encode_jpeg(frame, quality: int = 80) -> Optional[bytes]:
     try:
-        ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        encode_params = [
+            int(cv2.IMWRITE_JPEG_QUALITY), int(quality),
+            int(cv2.IMWRITE_JPEG_OPTIMIZE), 1,  # Включаем оптимизацию
+            int(cv2.IMWRITE_JPEG_PROGRESSIVE), 1  # Прогрессивный JPEG для веба
+        ]
+        ok, buf = cv2.imencode('.jpg', frame, encode_params)
         if not ok:
             return None
         return buf.tobytes()
@@ -77,18 +82,14 @@ class _Worker(mp.Process):
         cap = sess.get("cap")
         if cap is None:
             return False, None
-        t0 = time.time()
-        while True:
-            ok, frame = cap.read()
-            if ok and frame is not None:
-                img = _encode_jpeg(frame, self.jpeg_quality)
-                return (img is not None), img
-            if (time.time() - t0) > timeout_sec:
-                return False, None
-            # small sleep to yield
-            time.sleep(0.01)
+        # Простое чтение без петли ожидания - либо есть кадр, либо нет
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            img = _encode_jpeg(frame, self.jpeg_quality)
+            return (img is not None), img
+        return False, None
 
-    def _seek_and_read_jpeg(self, sid: str, t_sec: float, timeout_sec: float = 1.0) -> Tuple[bool, Optional[bytes]]:
+    def _seek_and_read_jpeg(self, sid: str, t_sec: float, timeout_sec: float = 2.0) -> Tuple[bool, Optional[bytes]]:
         sess = self.sessions.get(sid)
         if not sess:
             return False, None
@@ -98,12 +99,9 @@ class _Worker(mp.Process):
         fps = float(sess.get("fps") or 25.0)
         frame_idx = int(max(0, t_sec) * fps)
         try:
-            self._safe_set(cap, cv2.CAP_PROP_THREADS, 1)
-            self._safe_set(cap, cv2.CAP_PROP_BUFFERSIZE, 1)
+            # Быстрый seek без лишних настроек
             self._safe_set(cap, cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            # warm reads
-            _ = cap.read()
-            _ = cap.read()
+            # Одно чтение без warm-up
             ok, frame = cap.read()
             if not ok or frame is None:
                 return False, None
@@ -176,24 +174,66 @@ class OpenCVIsolate:
         if self.proc is None or not self.proc.is_alive():
             self._start()
 
-    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 5.0):
+    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 1.0):
+        """
+        Send a request to the worker and wait for a response.
+        On timeout we proactively terminate the worker process to avoid
+        lingering blocked ffmpeg/cv2 calls (reduces 30s hang issues).
+        """
         self._ensure()
-        assert self.parent_conn is not None
-        self.parent_conn.send((cmd, payload))
+        # parent_conn may be replaced by _start(); check again
+        if self.parent_conn is None:
+            raise RuntimeError("OpenCV worker connection not available")
+        try:
+            self.parent_conn.send((cmd, payload))
+        except Exception:
+            # If send fails, try to terminate and raise
+            try:
+                if self.proc and self.proc.is_alive():
+                    self.proc.terminate()
+                    self.proc.join(timeout=1.0)
+            except Exception:
+                pass
+            self.parent_conn = None
+            self.proc = None
+            raise RuntimeError("Failed to send command to OpenCV worker")
+
         t0 = time.time()
         while not self.parent_conn.poll(0.05):
             if (time.time() - t0) > timeout:
+                # Timed out waiting for worker — terminate it to avoid long ffmpeg hangs
+                try:
+                    if self.proc and self.proc.is_alive():
+                        try:
+                            self.proc.terminate()
+                        except Exception:
+                            pass
+                        try:
+                            self.proc.join(timeout=1.0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # Close parent_conn to avoid further use of a dead pipe
+                try:
+                    self.parent_conn.close()
+                except Exception:
+                    pass
+                self.parent_conn = None
+                self.proc = None
                 raise TimeoutError(f"OpenCV worker timeout on {cmd}")
+
         ok, data = self.parent_conn.recv()
         if not ok:
             raise RuntimeError(str(data))
         return data
 
     # public API
-    def open_rtsp(self, sid: str, url: str, timeout: float = 10.0) -> Dict[str, Any]:
+    def open_rtsp(self, sid: str, url: str, timeout: float = 8.0) -> Dict[str, Any]:
+        # Default timeout increased to 8s to allow slower RTSP handshakes while remaining responsive
         return self._req("open_rtsp", {"id": sid, "url": url}, timeout=timeout)
 
-    def open_file(self, sid: str, path: str, timeout: float = 10.0) -> Dict[str, Any]:
+    def open_file(self, sid: str, path: str, timeout: float = 3.0) -> Dict[str, Any]:
         return self._req("open_file", {"id": sid, "path": path}, timeout=timeout)
 
     def close(self, sid: str) -> None:
@@ -207,13 +247,13 @@ class OpenCVIsolate:
 
     def read_jpeg(self, sid: str, timeout: float = 1.0) -> Optional[bytes]:
         try:
-            return self._req("read_jpeg", {"id": sid, "timeout": float(timeout)}, timeout=timeout+1.0)
+            return self._req("read_jpeg", {"id": sid, "timeout": float(timeout)}, timeout=timeout+0.5)
         except Exception:
             return None
 
     def seek_read_jpeg(self, sid: str, t: float, timeout: float = 2.0) -> Optional[bytes]:
         try:
-            return self._req("seek_read_jpeg", {"id": sid, "t": float(t), "timeout": float(timeout)}, timeout=timeout+1.0)
+            return self._req("seek_read_jpeg", {"id": sid, "t": float(t), "timeout": float(timeout)}, timeout=timeout+0.5)
         except Exception:
             return None
 

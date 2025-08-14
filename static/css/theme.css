@@ -340,6 +340,26 @@ body[data-source="file"] .only-live{ display:none !important; }
   box-sizing:border-box;
 }
 
+/* Прозрачный фон у label-кнопок, чтобы края панели не затирались */
+.toggle-btn{
+  background: transparent !important;
+  border:1.5px solid #cfe0ff;
+  color:#0b4f94;
+  box-shadow:none !important;
+  border-radius: var(--radius-sm);
+  background-clip: padding-box; /* не «вылезает» за скругления */
+}
+.toggle-btn:hover{
+  background: rgba(255,255,255,0.35) !important;
+}
+.toggle-btn.selected{
+  background: linear-gradient(180deg, #4b95ff 0%, #2a74ea 100%) !important;
+  color:#fff !important;
+  border-color:#99c2ff;
+  box-shadow:none !important; /* убираем свечение, чтобы не мазало фон */
+  background-clip: padding-box;
+}
+
 /* Предотвращаем сдвиги при смене текста кнопки (например, “Стоп” -> “Старт”) */
 #videoPlayPauseBtn, #fileStopBtn, #countBtn, #fileInputLabel{
   min-width: 90px;      /* зарезервировать ширину */

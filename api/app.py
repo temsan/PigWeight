@@ -21,11 +21,22 @@ except Exception:
 import numpy as np
 from fastapi import Body
 import contextlib
-import base64 as _b64
+from contextlib import asynccontextmanager
 import math
 
-# Изолированный воркер для OpenCV
-from api.opencv_worker import OpenCVIsolate
+# Изолированный воркер для OpenCV (устойчивый импорт как пакетом, так и отдельным скриптом)
+import sys as _sys
+_CUR_DIR = Path(__file__).resolve().parent
+_ROOT_DIR = _CUR_DIR.parent
+if str(_ROOT_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_ROOT_DIR))
+try:
+    from api.opencv_worker import OpenCVIsolate  # запуск как пакет: python -m api.app
+except Exception:
+    try:
+        from .opencv_worker import OpenCVIsolate  # относительный импорт внутри пакета
+    except Exception:
+        from opencv_worker import OpenCVIsolate   # запуск как файл: python api/app.py
 
 # PyAV больше не используется в MVP: декодирование вынесено в отдельный процесс OpenCVIsolate
 _PYAV_AVAILABLE = False
@@ -55,15 +66,42 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '')
     except Exception:
         pass
 
-app = FastAPI(title="PigWeight API (FastAPI)")
-# Прогреваем воркер на старте (уменьшает таймаут на первом вызове)
-@app.on_event("startup")
-async def _warmup_worker():
+@asynccontextmanager
+async def lifespan(app):
+    # startup
     try:
-        get_ocv().ping()
-        logger.info("OpenCV worker warm-up done")
-    except Exception as e:
-        logger.warning("OpenCV worker warm-up failed: %s", e)
+        try:
+            get_ocv().ping()
+            logger.info("OpenCV worker warm-up done")
+        except Exception as e:
+            logger.warning("OpenCV worker warm-up failed: %s", e)
+        yield
+    finally:
+        # shutdown (performed reliably via lifespan)
+        logger.info("Shutting down server, cleaning up resources...")
+        # Stop camera streams
+        try:
+            for cam in list(CAMERAS.cams.values()):
+                try:
+                    await cam.stop()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Close file sessions / release caps
+        try:
+            for sess in list(_file_sessions.values()):
+                try:
+                    if sess.get("type") == "opencv" and sess.get("cap"):
+                        sess["cap"].release()
+                    elif sess.get("type") == "pyav" and sess.get("container"):
+                        sess["container"].close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        logger.info("All resources cleaned up.")
+app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan)
 
 
 # CORS
@@ -169,22 +207,11 @@ def _ocv_safe_call(method_name: str, *args, **kwargs):
 
 # Адаптер для совместимости с разными реализациями воркера
 def ocv_open_rtsp(stream_id: str, url: str) -> Dict[str, Any]:
-    try:
-        return _ocv_safe_call('open_rtsp', stream_id, url, timeout=15.0)
-    except AttributeError:
-        return _ocv_safe_call('open', stream_id, url)
+    # Use slightly longer timeout for RTSP open to balance responsiveness and unstable cameras
+    return _ocv_safe_call('open_rtsp', stream_id, url, timeout=8.0)
 
 def ocv_open_file(stream_id: str, path: str) -> Dict[str, Any]:
-    try:
-        try:
-            return _ocv_safe_call('open_file', stream_id, path, timeout=15.0)
-        except AttributeError:
-            return _ocv_safe_call('open', stream_id, path)
-    except Exception as e:
-        try:
-            return ocv_open_rtsp(stream_id, path)
-        except Exception:
-            raise e
+    return _ocv_safe_call('open_file', stream_id, path, timeout=3.0)
 
 def ocv_close(stream_id: str) -> None:
     try:
@@ -193,40 +220,32 @@ def ocv_close(stream_id: str) -> None:
         pass
 
 def ocv_read_jpeg(stream_id: str, timeout: float = 1.0) -> Optional[bytes]:
-    try:
-        return _ocv_safe_call('read_jpeg', stream_id, timeout=timeout)
-    except AttributeError:
-        # b64 fallback
-        try:
-            resp = _ocv_safe_call('read_jpeg_b64', stream_id)
-            if isinstance(resp, dict) and resp.get('ok') and 'jpeg_b64' in resp:
-                import base64 as _b64mod
-                return _b64mod.b64decode(resp['jpeg_b64'])
-        except Exception:
-            return None
-    except Exception:
-        return None
-    return None
+    return _ocv_safe_call('read_jpeg', stream_id, timeout=timeout)
 
 def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Optional[bytes]:
-    try:
-        return _ocv_safe_call('seek_read_jpeg', stream_id, t, timeout=timeout)
-    except AttributeError:
-        try:
-            _ocv_safe_call('pos_msec', stream_id, float(max(0.0, t) * 1000.0))
-            resp = _ocv_safe_call('read_jpeg_b64', stream_id)
-            if isinstance(resp, dict) and resp.get('ok') and 'jpeg_b64' in resp:
-                import base64 as _b64mod
-                return _b64mod.b64decode(resp['jpeg_b64'])
-        except Exception:
-            return None
-    except Exception:
-        return None
-    return None
+    return _ocv_safe_call('seek_read_jpeg', stream_id, t, timeout=timeout)
 
 def encode_image(frame) -> bytes:
-    # Uncompressed BMP to minimize CPU; no downscale
-    ok, buf = cv2.imencode(".bmp", frame)
+    # Оптимизированное JPEG кодирование для экономии трафика
+    encode_params = [
+        cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY,
+        cv2.IMWRITE_JPEG_OPTIMIZE, 1,  # Включаем оптимизацию
+        cv2.IMWRITE_JPEG_PROGRESSIVE, 1  # Прогрессивный JPEG для веба
+    ]
+    ok, buf = cv2.imencode(".jpg", frame, encode_params)
+    if not ok:
+        return b""
+    return buf.tobytes()
+
+def encode_jpeg(frame, quality: int = None) -> bytes:
+    # Оптимизированное JPEG кодирование для файловых операций
+    q = quality or JPEG_QUALITY
+    encode_params = [
+        cv2.IMWRITE_JPEG_QUALITY, q,
+        cv2.IMWRITE_JPEG_OPTIMIZE, 1,  # Включаем оптимизацию
+        cv2.IMWRITE_JPEG_PROGRESSIVE, 1  # Прогрессивный JPEG для веба
+    ]
+    ok, buf = cv2.imencode(".jpg", frame, encode_params)
     if not ok:
         return b""
     return buf.tobytes()
@@ -234,7 +253,7 @@ def encode_image(frame) -> bytes:
 def multipart_chunk(img_bytes: bytes) -> bytes:
     header = (
         f"--{BOUNDARY}\r\n"
-        "Content-Type: image/bmp\r\n"
+        "Content-Type: image/jpeg\r\n"
         f"Content-Length: {len(img_bytes)}\r\n\r\n"
     ).encode("utf-8")
     return header + img_bytes + b"\r\n"
@@ -272,21 +291,20 @@ def _open_file_cap_local(path: str):
     return None, {"error": last_err or "all backends failed"}
 
 def _read_frame_local(cap, t_sec: float = 0.0) -> Optional[np.ndarray]:
-    """Чтение кадра с seek по времени с несколькими стратегиями.
-    1) POS_FRAMES → read
-    2) POS_MSEC → read
-    3) POS_FRAMES (откат на 2 кадра) → два чтения
-    """
+    """Более надёжный seek: сначала пробуем POS_FRAMES по индексу, затем POS_MSEC, затем rewind fallback."""
     try:
+        if t_sec is None or t_sec < 0:
+            t_sec = 0.0
+        # Попробуем определить FPS и индекс кадра
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        if t_sec < 0:
-            t_sec = 0.0
-        idx = int(max(0, min(total - 1 if total > 0 else 10**9, round(t_sec * fps))))
+        frame_idx = int(round(max(0.0, float(t_sec)) * max(1.0, float(fps))))
+        if total > 0:
+            frame_idx = max(0, min(total - 1, frame_idx))
 
         # Strategy 1: POS_FRAMES
         try:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ok, frame = cap.read()
             if ok and frame is not None:
                 return frame
@@ -295,16 +313,16 @@ def _read_frame_local(cap, t_sec: float = 0.0) -> Optional[np.ndarray]:
 
         # Strategy 2: POS_MSEC
         try:
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t_sec * 1000.0))
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(t_sec) * 1000.0))
             ok, frame = cap.read()
             if ok and frame is not None:
                 return frame
         except Exception:
             pass
 
-        # Strategy 3: rewind a bit and read twice (to pass keyframe)
+        # Strategy 3: небольшая перемотка назад и два чтения (для keyframe)
         try:
-            rewind = max(0, idx - 2)
+            rewind = max(0, frame_idx - 2)
             cap.set(cv2.CAP_PROP_POS_FRAMES, rewind)
             _ = cap.read()
             ok, frame = cap.read()
@@ -312,6 +330,7 @@ def _read_frame_local(cap, t_sec: float = 0.0) -> Optional[np.ndarray]:
                 return frame
         except Exception:
             pass
+
         return None
     except Exception:
         return None
@@ -494,8 +513,27 @@ class CameraStream:
                                     mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
                                 color = _pastel_color_for_id(int(tid))
                                 overlay[mask > 0] = color
+                    else:
+                        # Fallback: if no masks available, draw simple bounding boxes for tracks
+                        try:
+                            for tr in tracks:
+                                tid = tr.get('id')
+                                bbox = tr.get('bbox') or tr.get('bbox', None)
+                                if bbox and len(bbox) >= 4:
+                                    x1, y1, x2, y2 = map(int, bbox[:4])
+                                    color = _pastel_color_for_id(int(tid))
+                                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, thickness=-1)
+                        except Exception:
+                            pass
+
                     self._overlay_image = overlay
                     self._overlay_shape = (h, w)
+                    # Публикацию оверлея в live отключаем: оставляем только внутреннее хранение
+                    # для возможной диагностики/метрик. JPEG с оверлеем не пишем в self.last_jpeg.
+                    try:
+                        _ = overlay  # оставим как артефакт для отладки, но не кодируем в JPEG
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 
@@ -566,15 +604,10 @@ class CameraStream:
                     backoff = min(max_back, backoff * 2)
                     continue
                 backoff = 0.5
-            # Читаем JPEG из воркера и декодируем
+            # Читаем JPEG из воркера и публикуем его как есть (минимальная задержка).
+            # Декодируем только по необходимости для фонового инференса.
             jpeg = ocv_read_jpeg(self.cam_id, timeout=1.0)
-            ok, frame = False, None
-            if jpeg:
-                arr = np.frombuffer(jpeg, dtype=np.uint8)
-                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                ok = frame is not None
-            now = time.time()
-            if not ok or frame is None:
+            if not jpeg:
                 # mark unstable, and force close-reopen
                 self.decode_unstable = True
                 self._close()
@@ -582,6 +615,42 @@ class CameraStream:
                 await asyncio.sleep(backoff)
                 backoff = min(max_back, max(0.5, backoff * 2))
                 continue
+
+            now = time.time()
+            # publish raw jpeg for minimal-latency streaming (no decode/encode cycle)
+            try:
+                async with self.lock:
+                    # Всегда публикуем сырой JPEG для максимально гладкого стрима
+                    self.last_jpeg = jpeg
+                    if self.last_ts > 0:
+                        inst = 1.0 / max(1e-6, now - self.last_ts)
+                        self.fps_window.append(inst)
+                        if len(self.fps_window) > 30:
+                            self.fps_window.pop(0)
+                    self.last_ts = now
+            except Exception:
+                pass
+
+            # Для инференса декодируем только иногда (frame_skip) — это экономит CPU на основном потоке
+            try:
+                decode_for_infer = (self.model_loaded and (self.frame_idx % max(1, self.frame_skip) == 0))
+                if decode_for_infer:
+                    arr = np.frombuffer(jpeg, dtype=np.uint8)
+                    frame_for_infer = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame_for_infer is not None:
+                        async with self._infer_lock:
+                            if self._infer_frame is None:
+                                self._infer_frame = frame_for_infer.copy()
+                                self._infer_frame_seq += 1
+            except Exception:
+                pass
+
+            # Обновим индекс кадра и состояние decode_unstable как раньше, затем продолжим цикл
+            self.frame_idx += 1
+            if self.decode_unstable and (self.frame_idx % 15 == 0):
+                self.decode_unstable = False
+            # Пропускаем дальнейшую отрисовку/кодирование в основном loop — стримим сырой JPEG
+            continue
 
             # provide latest frame to infer loop (non-blocking)
             try:
@@ -658,7 +727,7 @@ class CameraStream:
         self.running = False
         if self.task:
             try:
-                await asyncio.wait_for(self.task, timeout=1.0)
+                await asyncio.wait_for(self.task, timeout=2.0)
             except Exception:
                 pass
             self.task = None
@@ -726,9 +795,53 @@ def root():
 async def video_feed(mode: str = Query(default="server", pattern="^(server|client)$"),
                camera: str = Query(default=DEFAULT_CAM_ID)):
     cam = CAMERAS.get_or_create(camera, CAM_URL)
-    # Запускаем камеру асинхронно
-    await CAMERAS.start_camera(camera)
+    # Запускаем камеру асинхронно, не блокируя ответ (камера может быть недоступна)
+    try:
+        asyncio.create_task(CAMERAS.start_camera(camera))
+    except Exception:
+        pass
     return StreamingResponse(mjpeg_multicast(cam), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
+
+@app.get("/api/snapshot")
+async def api_snapshot(camera: str = Query(default=DEFAULT_CAM_ID)):
+    """Возвращает последний кадр камеры (JPEG) с оверлеем.
+    Если камера не запущена — запускает её. Если кадра ещё нет, ждём короткое время (до ~300мс),
+    чтобы не создавать на фронте частые пустые ответы и визуальные паузы.
+    """
+    try:
+        CAMERAS.get_or_create(camera, CAM_URL)
+        # Не зависаем, если камера недоступна: ограничим время запуска
+        try:
+            await asyncio.wait_for(CAMERAS.start_camera(camera), timeout=0.25)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    jpeg = None
+    # подождём немного появления кадра
+    t0 = time.time()
+    deadline = t0 + 0.30
+    while time.time() < deadline and not jpeg:
+        try:
+            existing = CAMERAS.get(camera)
+            if existing is not None:
+                jpeg = existing.last_jpeg
+        except Exception:
+            jpeg = None
+        if jpeg:
+            break
+        await asyncio.sleep(0.02)
+    if not jpeg:
+        return Response(status_code=204, headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        })
+    return Response(content=jpeg, media_type="image/jpeg", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 @app.websocket("/ws/count")
 async def ws_count(ws: WebSocket):
@@ -922,6 +1035,7 @@ async def _run_file_play_loop(sess_id: str):
                     try:
                         h, w = frame.shape[:2]
                         overlay = np.zeros_like(frame)
+                        label_pts = []
                         for tr in tracks:
                             tid = tr['id']
                             mi = tr.get('det_index', -1)
@@ -931,8 +1045,22 @@ async def _run_file_play_loop(sess_id: str):
                                     mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
                                 color = _pastel_color_for_id(int(tid))
                                 overlay[mask > 0] = color
+                                # центроид для нумерации
+                                try:
+                                    mu = cv2.moments((mask*255).astype(np.uint8))
+                                    if mu['m00'] > 1e-3:
+                                        cx = int(mu['m10']/mu['m00'])
+                                        cy = int(mu['m01']/mu['m00'])
+                                        label_pts.append((cx, cy))
+                                except Exception:
+                                    pass
                         sess["overlay_image"] = overlay
                         sess["overlay_shape"] = (h, w)
+                        sess["overlay_labels"] = label_pts
+                        try:
+                            perf_logger.info(json.dumps({"phase":"overlay_cached","id": sess_id, "h": int(h), "w": int(w)}, ensure_ascii=False))
+                        except Exception:
+                            pass
                     except Exception:
                         pass
             except Exception:
@@ -944,7 +1072,22 @@ async def _run_file_play_loop(sess_id: str):
                 ov = sess.get("overlay_image")
                 sh = sess.get("overlay_shape")
                 if ov is not None and sh == (h, w):
-                    frame = cv2.addWeighted(ov, 0.35, frame, 0.65, 0)
+                    # Смягчаем края маски лёгким блюром перед смешиванием
+                    try:
+                        ovb = cv2.GaussianBlur(ov, (11, 11), 0)
+                    except Exception:
+                        ovb = ov
+                    frame = cv2.addWeighted(ovb, 0.35, frame, 0.65, 0)
+                    # Рисуем номера слева-направо
+                    try:
+                        pts = list(sess.get("overlay_labels") or [])
+                        pts.sort(key=lambda p: p[0])
+                        for idx, (cx, cy) in enumerate(pts, start=1):
+                            label = str(idx)
+                            cv2.putText(frame, label, (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,0), 3, cv2.LINE_AA)
+                            cv2.putText(frame, label, (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2, cv2.LINE_AA)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -955,11 +1098,24 @@ async def _run_file_play_loop(sess_id: str):
                 cw.append(float(det_count))
                 if len(cw) > AVG_WINDOW:
                     cw.pop(0)
-                sess["avg_count"] = (sum(cw) / len(cw)) if cw else 0.0
+                # Средневзвешенное в сторону максимума: квадратично-взвешенное среднее
+                if cw:
+                    s1 = sum(cw)
+                    s2 = sum(x*x for x in cw)
+                    sess["avg_count"] = (s2 / s1) if s1 > 0 else 0.0
+                else:
+                    sess["avg_count"] = 0.0
+                # HUD
                 cv2.rectangle(frame, (10, 10), (320, 80), (0, 0, 0), -1)
-                cv2.putText(frame, f"Count(cur): {int(sess.get('last_count', 0) or 0)}", (18, 40),
+                cur_cnt = int(sess.get('last_count', 0) or 0)
+                avg_val = float(sess.get('avg_count', 0.0) or 0.0)
+                # ceil без импорта math
+                avg_int = int(avg_val)
+                if avg_val > avg_int:
+                    avg_int += 1
+                cv2.putText(frame, f"Count(cur): {cur_cnt}", (18, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-                cv2.putText(frame, f"Count(avg): {int(round(sess.get('avg_count', 0.0) or 0.0))}", (18, 70),
+                cv2.putText(frame, f"Count(avg): {avg_int}", (18, 70),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
             except Exception:
                 pass
@@ -1002,30 +1158,45 @@ async def api_video_file_open(camera: str = Form(default="cam_file1"),
             except Exception:
                 pass
     try:
-        # Нормализуем имя и путь, делаем уникальным, чтобы не перетирать файл в использовании
+        # Кеширование по исходному имени файла в каталоге uploads (без раздувания)
+        # 1) Санитизируем имя: оставляем буквы/цифры/._- и ограничиваем длину
         raw_name = file.filename or "upload.bin"
+        raw_name = os.path.basename(raw_name)
         p = Path(raw_name)
-        stem, suffix = p.stem or "upload", p.suffix or ".bin"
-        import uuid as _uuid
-        safe_name = f"{stem}_{_uuid.uuid4().hex[:8]}{suffix}"
+        stem, suffix = (p.stem or "upload"), (p.suffix or ".bin")
+        # Санитация stem
+        import re as _re
+        safe_stem = _re.sub(r"[^A-Za-z0-9._-]", "_", stem)[:120] or "upload"
+        safe_suffix = suffix if suffix.startswith(".") else f".{suffix}"
+        safe_name = f"{safe_stem}{safe_suffix}"
         dst = UPLOAD_DIR / safe_name
 
-        # Пишем файл порциями и закрываем дескриптор UploadFile
-        with open(dst, "wb") as out:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-        try:
-            await file.close()
-        except Exception:
-            pass
-        try:
-            sz = os.path.getsize(dst)
-        except Exception:
-            sz = -1
-        logger.info("[file_open] saved to %s, size=%s bytes", dst, sz)
+        # 2) Если файл уже существует — переиспользуем (кеш)
+        if dst.exists():
+            try:
+                await file.close()
+            except Exception:
+                pass
+            logger.info("[file_open] reuse cached file %s", dst)
+        else:
+            # 3) Пишем во временный файл и атомарно переименовываем
+            tmp_path = dst.with_suffix(dst.suffix + ".part")
+            with open(tmp_path, "wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+            try:
+                await file.close()
+            except Exception:
+                pass
+            os.replace(tmp_path, dst)
+            try:
+                sz = os.path.getsize(dst)
+            except Exception:
+                sz = -1
+            logger.info("[file_open] saved to %s, size=%s bytes", dst, sz)
     except PermissionError as e:
         return JSONResponse({"error": f"upload failed: {e}"}, status_code=500)
     except Exception as e:
@@ -1067,6 +1238,15 @@ async def api_video_file_open(camera: str = Form(default="cam_file1"),
                 "frame_count": _file_sessions[id]["frame_count"],
                 "duration": _file_sessions[id]["duration"]
             }, ensure_ascii=False))
+        except Exception:
+            pass
+
+        # Запускаем фоновую play-loop, чтобы /play и WS сразу начали выдавать latest_jpeg (маски)
+        try:
+            sess = _file_sessions.get(id)
+            if sess is not None:
+                if not sess.get("task") or sess["task"].done():
+                    sess["task"] = asyncio.create_task(_run_file_play_loop(id))
         except Exception:
             pass
 
@@ -1134,6 +1314,38 @@ def api_models():
         items = [p.name for p in MODELS_DIR.iterdir() if p.is_file() and p.suffix.lower()==".pt"]
         return {"models": items}
     except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/video_file/snapshot")
+async def api_video_file_snapshot(id: str = Query(default="file1")):
+    """Возвращает последний кадр файловой сессии (JPEG) без плеера.
+    Если latest_jpeg ещё не готов, пытается прочитать один кадр из cap и закодировать его.
+    """
+    try:
+        async with _file_sessions_lock:
+            sess = _file_sessions.get(id)
+            if not sess:
+                return JSONResponse({"error": "session not found"}, status_code=404)
+            jpeg = sess.get("latest_jpeg")
+            cap = sess.get("cap")
+        if not jpeg and cap is not None:
+            # Пытаемся синхронно прочитать один кадр
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                jpeg = encode_jpeg(frame)
+                # Кэшируем как latest
+                try:
+                    async with _file_sessions_lock:
+                        sess = _file_sessions.get(id)
+                        if sess is not None:
+                            sess["latest_jpeg"] = jpeg
+                except Exception:
+                    pass
+        if not jpeg:
+            return Response(status_code=204)
+        return Response(content=jpeg, media_type="image/jpeg")
+    except Exception as e:
+        logger.exception("/api/video_file/snapshot error: %s", e)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/balance_mode")
@@ -1238,10 +1450,12 @@ async def api_video_file_frame(id: str = Query(default="file1"),
             if frame is None:
                 return JSONResponse({"error": "Failed to read frame (local)"}, status_code=500)
 
-            # 3) Инференс с оверлеями (маски, ID, Count) для каждого кадра
-            if frame is not None:
-                # Кэш модели для файлов
-                global FILE_MODEL, FILE_MODEL_PATH, MODEL_PATH
+            # 3) Инференс и отрисовка оверлеев для одиночного запроса (чтобы seek отдавал маски)
+            global FILE_MODEL, FILE_MODEL_PATH, MODEL_PATH
+            det_count = int(sess.get("last_count", 0) or 0)
+            r = None
+            tracks = []
+            try:
                 from ultralytics import YOLO
                 try:
                     target_model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
@@ -1262,16 +1476,10 @@ async def api_video_file_frame(id: str = Query(default="file1"),
                 )
                 infer_ms = (time.time() - t_inf0) * 1000.0
                 sess["last_infer_ms"] = float(infer_ms)
-                # если за время инференса пришёл новый запрос — прерываемся
-                if cur_seq != sess.get("seq"):
-                    return JSONResponse({"error": "superseded"}, status_code=409)
-
-                det_count = 0
                 if results and len(results) > 0:
                     r = results[0]
                     det_bboxes = []
                     det_idx_map = []
-                    det_classes = []
                     if hasattr(r, "boxes") and r.boxes is not None:
                         xyxy = r.boxes.xyxy
                         cls = r.boxes.cls
@@ -1286,55 +1494,67 @@ async def api_video_file_frame(id: str = Query(default="file1"),
                                 x1, y1, x2, y2 = map(float, b)
                                 det_bboxes.append([x1, y1, x2, y2])
                                 det_idx_map.append(i)
-                                det_classes.append(c)
-
                     tracker = sess.get("tracker")
                     tracks = tracker.update([det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]) if tracker else []
                     det_count = len(tracks)
+            except Exception as e:
+                logger.debug("[file_frame] infer failed: %s", e)
+                infer_ms = float(sess.get("last_infer_ms", 0.0))
 
-                    # Отрисовка bbox/ID/масок
-                    mask_data = None
-                    if hasattr(r, "masks") and r.masks is not None:
-                        mask_data = r.masks.data
-                        if hasattr(mask_data, "cpu"):
+            # Отрисовка масок/оверлея по результатам инференса (или по кэшу)
+            try:
+                mask_data = None
+                if r is not None and hasattr(r, "masks") and r.masks is not None:
+                    mask_data = r.masks.data
+                    if hasattr(mask_data, "cpu"):
+                        mask_data = mask_data.cpu().numpy()
+                    sess["_last_masks"] = r.masks
+                    sess["_last_tracks"] = tracks
+                else:
+                    lm = sess.get("_last_masks")
+                    if lm is not None:
+                        mask_data = lm.data if hasattr(lm, 'data') else lm
+                        if hasattr(mask_data, 'cpu'):
                             mask_data = mask_data.cpu().numpy()
+                    tracks = sess.get("_last_tracks") or []
+
+                if mask_data is not None and tracks:
+                    try:
                         h, w = frame.shape[:2]
-                    for tr in tracks:
-                        tid = tr['id']
-                        if mask_data is not None:
+                        overlay = np.zeros_like(frame)
+                        for tr in tracks:
+                            tid = tr['id']
                             mi = tr.get('det_index', -1)
                             if 0 <= mi < len(mask_data):
                                 mask = (mask_data[mi] > 0.5).astype(np.uint8)
                                 if mask.shape[:2] != (h, w):
                                     mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                                color = _pastel_color_for_id(int(tid))  # BGR
-                                overlay = frame.copy()
+                                color = _pastel_color_for_id(int(tid))
                                 overlay[mask > 0] = color
-                                frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
-                                ys, xs = np.where(mask > 0)
-                                if len(xs) > 0:
-                                    cx, cy = int(xs.mean()), int(ys.mean())
-                                    label = str(int(tid))
-                                    pos = (max(0, cx-10), max(12, cy-8))
-                                    cv2.putText(frame, label, pos,
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (30, 30, 30), 1, cv2.LINE_AA)
-                                    cv2.putText(frame, label, pos,
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (245, 245, 245), 1, cv2.LINE_AA)
+                        # Наложение оверлея непосредственно на кадр, чтобы вернуть пользователю видимые маски
+                        frame = cv2.addWeighted(overlay, 0.35, frame, 0.65, 0)
+                        sess["overlay_image"] = overlay
+                        sess["overlay_shape"] = (h, w)
+                        try:
+                            perf_logger.info(json.dumps({"phase":"overlay_cached_file_frame","file_id": id, "h": int(h), "w": int(w)}, ensure_ascii=False))
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
 
-                # HUD
-                cv2.rectangle(frame, (10, 10), (390, 90), (0, 0, 0), -1)
-                cv2.putText(frame, f"Count: {int(det_count) if 'det_count' in locals() else 0}", (18, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
-                cv2.putText(frame, f"Seek: {seek_ms:.1f} ms  Infer: {infer_ms:.1f} ms", (18, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+            except Exception:
+                pass
 
-                # Обновим статистику в сессии для клиента
+            # update rolling avg/stat
+            try:
                 sess["last_count"] = int(det_count)
                 cw = sess.setdefault("count_window", [])
                 cw.append(float(det_count))
                 if len(cw) > AVG_WINDOW:
                     cw.pop(0)
                 sess["avg_count"] = (sum(cw) / len(cw)) if cw else 0.0
+            except Exception:
+                pass
 
     except Exception as e:
         logger.exception("[file_frame] unexpected pre-infer error: %s", e)
@@ -1358,12 +1578,12 @@ async def api_video_file_frame(id: str = Query(default="file1"),
         logger.exception("[file_frame] frame validation error: %s", e)
         return JSONResponse({"error": f"frame validation error: {e}"}, status_code=500)
 
-    # 5) JPEG кодирование
+    # 5) JPEG кодирование (заменено BMP на JPEG — экономия трафика и совместимость)
     try:
         t_enc0 = time.time()
-        ok, buf = cv2.imencode(".bmp", frame)
-        if not ok:
-            logger.error("[file_frame] bmp encode failed")
+        img_bytes = encode_jpeg(frame)
+        if not img_bytes:
+            logger.error("[file_frame] jpeg encode failed")
             return JSONResponse({"error": "Failed to encode frame"}, status_code=500)
         enc_ms = (time.time() - t_enc0) * 1000.0
         try:
@@ -1379,11 +1599,42 @@ async def api_video_file_frame(id: str = Query(default="file1"),
             "X-Infer-Ms": str(int(round(sess.get("last_infer_ms", 0.0) if 'sess' in locals() and sess else 0))),
             "X-Encode-Ms": str(int(round(enc_ms)))
         }
-        return Response(buf.tobytes(), media_type="image/bmp", headers=headers)
+        try:
+            # обновим latest_jpeg чтобы /play и WS сразу увидели результат seek
+            sess_update = _file_sessions.get(id)
+            if sess_update is not None:
+                sess_update["latest_jpeg"] = img_bytes
+        except Exception:
+            pass
+        return Response(img_bytes, media_type="image/jpeg", headers=headers)
     except Exception as e:
         logger.exception("[file_frame] encoding error: %s", e)
         return JSONResponse({"error": f"Failed to encode frame: {e}"}, status_code=500)
 
+def _gen_file_mjpeg_minimal(sess_id: str, rate: float):
+    """Минималистичный MJPEG-генератор для файлов — отдаёт sess['latest_jpeg'] без инференса/оверлеев."""
+    import time as _time
+    while True:
+        sess = _file_sessions.get(sess_id)
+        if not sess or sess.get("type") != "local":
+            break
+        img = sess.get("latest_jpeg")
+        if not img:
+            _time.sleep(0.02)
+            continue
+        try:
+            yield multipart_chunk(img)
+        except GeneratorExit:
+            break
+        except Exception:
+            _time.sleep(0.02)
+            continue
+        # небольшой sleep, чтобы клиентский браузер получал обновления с разумной частотой
+        try:
+            _time.sleep(max(0.05, 1.0 / max(1.0, float(TARGET_FPS))))
+        except Exception:
+            _time.sleep(0.05)
+            continue
 def _gen_file_mjpeg(sess_id: str, rate: float):
     """
     Простой генератор MJPEG для проигрывания файла через локальный OpenCV
@@ -1536,44 +1787,40 @@ def _gen_file_mjpeg(sess_id: str, rate: float):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
             cv2.putText(frame, f"Seek: {seek_s:.3f}s  Infer: {infer_s:.3f}s  Enc: {enc_s:.3f}s  Tot: {tot_s:.3f}s", (18, 92),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 220, 255), 1, cv2.LINE_AA)
-
+            
+            # Кодирование и отправка кадра
             t_enc0 = time.time()
-            img = encode_image(frame)
+            img_bytes = encode_jpeg(frame)
             enc_ms = (time.time() - t_enc0) * 1000.0
-            if not img:
-                _time.sleep(0.005)
-                continue
-
-            # сохраняем стадии в сессию для HUD и логируем агрегат
-            try:
-                tot_ms = (time.time() - t0) * 1000.0
-                sess['last_seek_ms'] = float(seek_ms)
-                sess['last_infer_ms'] = float(infer_ms) if do_infer else float(sess.get('last_infer_ms', 0.0))
-                sess['last_encode_ms'] = float(enc_ms)
-                sess['last_total_ms'] = float(tot_ms)
-                perf_logger.info(json.dumps({
-                    "phase": "file_play_frame",
-                    "id": sess_id,
-                    "seek_ms": float(seek_ms),
-                    "infer_ms": float(sess['last_infer_ms']),
-                    "encode_ms": float(enc_ms),
-                    "total_ms": float(tot_ms)
-                }, ensure_ascii=False))
-            except Exception:
-                pass
-
-            # latency-aware pacing
-            spent = _time.time() - t0
-            target = max(0.005, (1.0 / fps) / max(0.25, float(rate or 1.0)))
-            delay = max(0.0, target - spent)
-            yield multipart_chunk(img)
+            
+            # Сохраним метрики для HUD
+            sess["last_seek_ms"] = seek_ms
+            sess["last_infer_ms"] = infer_ms if do_infer else sess.get("last_infer_ms", 0.0)
+            sess["last_encode_ms"] = enc_ms
+            sess["last_total_ms"] = (time.time() - t0) * 1000.0
+            
+            # Сохраним последний JPEG для minimal-генератора
+            sess["latest_jpeg"] = img_bytes
+            
+            yield multipart_chunk(img_bytes)
+            
+            # Пауза для поддержания FPS
+            spent = time.time() - t0
+            target = max(0.005, (1.0 / fps))
+            time.sleep(max(0.0, target - spent))
             frame_idx_local += 1
-            _time.sleep(delay)
-        except GeneratorExit:
-            break
+        except asyncio.CancelledError:
+            return
         except Exception:
-            _time.sleep(0.02)
-            continue
+            logger.exception("[file_play] error")
+        finally:
+            # Освобождаем ресурсы при выходе из генератора
+            pass
+
+# Override old heavy generator with minimal one (keeps file but ensures minimal behavior is used)
+def _gen_file_mjpeg(sess_id: str, rate: float):
+    """Alias to minimal generator to avoid heavy per-frame processing."""
+    return _gen_file_mjpeg_minimal(sess_id, rate)
 
 @app.get("/api/video_file/play")
 async def api_video_file_play(id: str = Query(default="file1"),
@@ -1583,25 +1830,10 @@ async def api_video_file_play(id: str = Query(default="file1"),
     async with _file_sessions_lock:
         if id not in _file_sessions:
             return JSONResponse({"error": "file session not opened"}, status_code=400)
-    return StreamingResponse(_gen_file_mjpeg(id, rate), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
+    return StreamingResponse(_gen_file_mjpeg_minimal(id, rate), media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}")
 
 # /api/video_file/last_count removed (WS provides updates)
-# --- Shutdown hook ---
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Корректное освобождение ресурсов при остановке сервера"""
-    logger.info("Shutting down server, cleaning up resources...")
-    for cam in CAMERAS.cams.values():
-        await cam.stop()
-    for sess in _file_sessions.values():
-        try:
-            if sess.get("type") == "opencv" and sess.get("cap"):
-                sess["cap"].release()
-            elif sess.get("type") == "pyav" and sess.get("container"):
-                sess["container"].close()
-        except Exception:
-            pass
-    logger.info("All resources cleaned up.")
+# --- Shutdown handled by lifespan() ---
 
 # --- Tracking utils ---
 def _iou(boxA, boxB):
@@ -1678,6 +1910,14 @@ def _pastel_color_for_id(track_id: int) -> tuple[int, int, int]:
     v = 1.0
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
     return (int(b * 255), int(g * 255), int(r * 255))
+
+# Ультра-быстрые эндпоинты
+try:
+    from .ultra_fast_endpoints import add_ultra_fast_endpoints
+    add_ultra_fast_endpoints(app)
+    logger.info("Ultra-fast endpoints added successfully")
+except Exception as e:
+    logger.warning(f"Failed to add ultra-fast endpoints: {e}")
 
 # Глобально ограничим потоки OpenCV для стабильности
 try:

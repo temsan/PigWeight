@@ -1,0 +1,1 @@
+// (removed) JS video player was disabled

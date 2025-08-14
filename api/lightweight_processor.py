@@ -193,10 +193,15 @@ class StreamingVideoProcessor:
         self.processor.close()
 
 def encode_frame_fast(frame: np.ndarray, quality: int = 80) -> Optional[bytes]:
-    """Быстрое кодирование кадра в JPEG без лишних параметров"""
+    """Оптимизированное быстрое кодирование кадра в JPEG"""
     try:
-        # Минимальные параметры для максимальной скорости
-        success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        # Оптимизированные параметры для максимальной скорости и качества
+        encode_params = [
+            cv2.IMWRITE_JPEG_QUALITY, quality,
+            cv2.IMWRITE_JPEG_OPTIMIZE, 1,  # Включаем оптимизацию
+            cv2.IMWRITE_JPEG_PROGRESSIVE, 1  # Прогрессивный JPEG для веба
+        ]
+        success, buffer = cv2.imencode('.jpg', frame, encode_params)
         if success:
             return buffer.tobytes()
     except Exception as e:
