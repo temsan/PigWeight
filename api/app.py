@@ -7,6 +7,9 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, Generator, Any
 import colorsys
+from datetime import datetime, timedelta
+import csv
+from collections import deque
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, HTMLResponse, Response, JSONResponse, FileResponse
@@ -23,6 +26,15 @@ from fastapi import Body
 import contextlib
 from contextlib import asynccontextmanager
 import math
+from zoneinfo import ZoneInfo
+
+# APScheduler for robust cron scheduling
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+except Exception:
+    AsyncIOScheduler = None
+    CronTrigger = None
 
 # Изолированный воркер для OpenCV (устойчивый импорт как пакетом, так и отдельным скриптом)
 import sys as _sys
@@ -75,6 +87,63 @@ async def lifespan(app):
             logger.info("OpenCV worker warm-up done")
         except Exception as e:
             logger.warning("OpenCV worker warm-up failed: %s", e)
+        
+        # Автозапуск основной RTSP камеры (по умолчанию отключен, чтобы недоступная камера не тормозила старт)
+        try:
+            if AUTO_START_CAM:
+                main_cam = CAMERAS.get_or_create(DEFAULT_CAM_ID, CAM_URL)
+                import asyncio as _asyncio
+                _asyncio.create_task(CAMERAS.start_camera(DEFAULT_CAM_ID))
+                logger.info(f"Main RTSP camera start scheduled: {CAM_URL}")
+            else:
+                logger.info("AUTO_START_CAM is disabled; skipping camera autostart")
+            # Опциональная предварительная загрузка модели, чтобы разморозить инференс независимо от RTSP
+            if PRELOAD_MODEL:
+                try:
+                    cam = CAMERAS.get_or_create(DEFAULT_CAM_ID, CAM_URL)
+                    ok = cam.preload_model()
+                    logger.info("Model preload on startup: %s", "ok" if ok else "failed")
+                except Exception as e:
+                    logger.warning("Model preload failed on startup: %s", e)
+        except Exception as e:
+            logger.warning(f"Failed to schedule main camera start: {e}")
+        
+        # Запуск APScheduler по крону (прогрев в 08:59, запись с 09:00)
+        try:
+            if ENABLE_APSCHEDULER and AsyncIOScheduler and CronTrigger:
+                tz = ZoneInfo(TIMEZONE)
+                scheduler = AsyncIOScheduler(timezone=tz)
+                # Прогрев камеры: аккуратно и неблокирующе
+                scheduler.add_job(
+                    warmup_camera_job,
+                    CronTrigger(hour=8, minute=59),
+                    id="cam_warmup",
+                    coalesce=True,
+                    misfire_grace_time=3600,
+                    max_instances=1,
+                    replace_existing=True,
+                )
+                # Запись 09:00–10:00 (сама функция пишет до 10:00)
+                scheduler.add_job(
+                    record_inference_session,
+                    CronTrigger(hour=9, minute=0),
+                    id="record_9to10",
+                    coalesce=True,
+                    misfire_grace_time=3600,
+                    max_instances=1,
+                    replace_existing=True,
+                )
+                scheduler.start()
+                app.state.scheduler = scheduler
+                logger.info("APScheduler started with jobs: cam_warmup 08:59, record 09:00")
+            else:
+                if not ENABLE_APSCHEDULER:
+                    logger.info("ENABLE_APSCHEDULER is false; skipping APScheduler start")
+                else:
+                    logger.warning("APScheduler not available; install APScheduler to enable cron jobs")
+        except Exception as e:
+            logger.warning(f"Failed to start APScheduler: {e}")
+        
         yield
     finally:
         # shutdown (performed reliably via lifespan)
@@ -120,6 +189,29 @@ if STATIC_DIR.exists():
 MODELS_DIR = BASE_DIR / "models"
 if MODELS_DIR.exists():
     app.mount("/models", StaticFiles(directory=str(MODELS_DIR)), name="models")
+
+# Root page -> serve static/index.html (or simple.html) if available
+@app.get("/", response_class=HTMLResponse)
+async def root_page():
+    try:
+        idx = STATIC_DIR / "index.html"
+        if idx.exists():
+            return FileResponse(str(idx))
+        simple = STATIC_DIR / "simple.html"
+        if simple.exists():
+            return FileResponse(str(simple))
+    except Exception:
+        pass
+    # Fallback minimal page with link to static
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'><title>PigWeight</title>" 
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>" 
+        "</head><body>"
+        "<h1>PigWeight API</h1>"
+        "<p>Статические файлы доступны по <a href='/static/'>/static/</a>.</p>"
+        "</body></html>"
+    )
+    return HTMLResponse(html)
 
 # --- Config from environment ---
 CAM_DEFAULT = os.getenv("CAM_DEFAULT", "rtsp://admin:Qwerty.123@10.15.6.24/1/1")
@@ -174,8 +266,39 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
+# Camera/autostart controls
+AUTO_START_CAM = os.getenv("AUTO_START_CAM", "true").lower() == "true"
+PRELOAD_MODEL = os.getenv("PRELOAD_MODEL", "false").lower() == "true"
+
+# APScheduler controls
+ENABLE_APSCHEDULER = os.getenv("AP_SCHEDULER", "true").lower() == "true"
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
+
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Директория для записи результатов инференса
+RECORDS_DIR = BASE_DIR / "records"
+RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+
+# --- Weight records retention helpers ---
+def _cleanup_weight_records(retention_days: int = 7):
+    """Удаляет старые файлы weight_avg_*.csv старше retention_days по mtime."""
+    try:
+        if retention_days <= 0:
+            return
+        now_ts = time.time()
+        max_age = retention_days * 86400.0
+        for p in RECORDS_DIR.glob("weight_avg_*.csv"):
+            try:
+                st = p.stat()
+                if (now_ts - st.st_mtime) > max_age:
+                    with contextlib.suppress(Exception):
+                        p.unlink()
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 # Ленивая инициализация изолятора OpenCV (важно для Windows spawn)
 OCV: Optional[OpenCVIsolate] = None
@@ -397,6 +520,45 @@ class CameraStream:
         self._infer_frame_seq = 0
         self._infer_lock = asyncio.Lock()
 
+        # live time-series buffer for avg/stat counts
+        self.ts_buffer = deque(maxlen=int(max(1.0, TARGET_FPS)) * 60 * 15)  # up to ~15 min at target fps (decimated)
+        self._last_series_push = 0.0
+
+    def preload_model(self) -> bool:
+        """Безопасная предварительная загрузка модели YOLO.
+        Возвращает True при успехе, False при ошибке. Идempotent."""
+        if self.model_loaded:
+            return True
+        t0 = time.time()
+        try:
+            from ultralytics import YOLO
+            model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
+            if os.path.exists(model_path):
+                self.model = YOLO(model_path)
+                self.model_loaded = True
+                dt = (time.time() - t0) * 1000.0
+                logger.info("[%s] YOLO model loaded: %s (%.1f ms)", self.cam_id, model_path, dt)
+                try:
+                    perf_logger.info(json.dumps({
+                        "phase": "model_load",
+                        "camera": self.cam_id,
+                        "path": model_path,
+                        "load_ms": float(dt)
+                    }, ensure_ascii=False))
+                except Exception:
+                    pass
+                return True
+            else:
+                logger.warning("[%s] Model file not found: %s", self.cam_id, model_path)
+                self.model = None
+                self.model_loaded = False
+                return False
+        except Exception as e:
+            logger.exception("[%s] Failed to load YOLO model: %s", self.cam_id, e)
+            self.model = None
+            self.model_loaded = False
+            return False
+
     def _open(self) -> bool:
         # Открываем RTSP в изолированном процессе
         try:
@@ -408,25 +570,10 @@ class CameraStream:
         self.opened = True
         # lazy model load on first successful open
         if not self.model_loaded:
-            try:
-                from ultralytics import YOLO
-                # читаем актуальную модель из глобального MODEL_PATH
-                model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
-                if os.path.exists(model_path):
-                    self.model = YOLO(model_path)
-                    self.model_loaded = True
-                    logger.info("[%s] YOLO model loaded: %s", self.cam_id, model_path)
-                else:
-                    logger.warning("[%s] Model file not found: %s", self.cam_id, model_path)
-                    self.model = None
-                    self.model_loaded = False
-            except Exception as e:
-                logger.exception("[%s] Failed to load YOLO model: %s", self.cam_id, e)
-                self.model = None
-                self.model_loaded = False
+            _ = self.preload_model()
         # сброс трекера при переоткрытии
         self.tracker = self.tracker or SimpleTracker(iou_threshold=float(os.getenv("TRACK_IOU", "0.3")),
-                                                    max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
+                                                     max_age=int(os.getenv("TRACK_MAX_AGE", "30")))
         return True
 
     def _close(self):
@@ -439,20 +586,11 @@ class CameraStream:
     async def _infer_loop(self):
         """Run YOLO inference in background on the latest available frame,
         update tracks, counts and cached overlay. Decoupled from streaming FPS."""
+        logger.info("[%s] _infer_loop starting...", self.cam_id)
         self._infer_running = True
         # Lazy-load the model here to avoid blocking the first frames
         if not self.model_loaded:
-            try:
-                from ultralytics import YOLO
-                model_path = str((MODELS_DIR / MODEL_PATH.split("/")[-1]))
-                if os.path.exists(model_path):
-                    self.model = YOLO(model_path)
-                    self.model_loaded = True
-                    logger.info("[%s] YOLO model loaded (infer loop): %s", self.cam_id, model_path)
-            except Exception as e:
-                logger.exception("[%s] YOLO model load failed (infer loop): %s", self.cam_id, e)
-                self.model = None
-                self.model_loaded = False
+            _ = self.preload_model()
         while self._infer_running:
             try:
                 # Take snapshot
@@ -468,6 +606,7 @@ class CameraStream:
                     await asyncio.sleep(0.005)
                     continue
                 # Predict
+                t_pred0 = time.time()
                 results = self.model.predict(
                     frame,
                     imgsz=640,
@@ -475,6 +614,15 @@ class CameraStream:
                     verbose=False,
                     retina_masks=True
                 )
+                try:
+                    pred_ms = (time.time() - t_pred0) * 1000.0
+                    perf_logger.info(json.dumps({
+                        "phase": "infer_predict",
+                        "camera": self.cam_id,
+                        "pred_ms": float(pred_ms)
+                    }, ensure_ascii=False))
+                except Exception:
+                    pass
                 r = results[0] if results else None
                 det_bboxes = []
                 det_idx_map = []
@@ -492,11 +640,24 @@ class CameraStream:
                             x1, y1, x2, y2 = map(float, b)
                             det_bboxes.append([x1, y1, x2, y2])
                             det_idx_map.append(i)
+                t_track0 = time.time()
                 tracks = self.tracker.update([det_bboxes[k] + [det_idx_map[k]] for k in range(len(det_bboxes))]) if det_bboxes else []
+                try:
+                    track_ms = (time.time() - t_track0) * 1000.0
+                    perf_logger.info(json.dumps({
+                        "phase": "infer_track",
+                        "camera": self.cam_id,
+                        "track_ms": float(track_ms),
+                        "det_boxes": int(len(det_bboxes)),
+                        "tracks": int(len(tracks))
+                    }, ensure_ascii=False))
+                except Exception:
+                    pass
                 det_count = len(tracks)
 
                 # build cached overlay once per inference
                 try:
+                    t_ov0 = time.time()
                     h, w = frame.shape[:2]
                     overlay = np.zeros_like(frame)
                     mask_data = getattr(r, 'masks', None)
@@ -534,6 +695,16 @@ class CameraStream:
                         _ = overlay  # оставим как артефакт для отладки, но не кодируем в JPEG
                     except Exception:
                         pass
+                    try:
+                        ov_ms = (time.time() - t_ov0) * 1000.0
+                        perf_logger.info(json.dumps({
+                            "phase": "infer_overlay",
+                            "camera": self.cam_id,
+                            "overlay_ms": float(ov_ms),
+                            "tracks": int(len(tracks))
+                        }, ensure_ascii=False))
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 
@@ -567,6 +738,15 @@ class CameraStream:
                 except Exception:
                     self.stat_count = float(det_count)
 
+                # push to time-series buffer with throttling (~2 Hz)
+                try:
+                    now_ts = time.time()
+                    if (now_ts - self._last_series_push) >= 0.5:
+                        self.ts_buffer.append((now_ts, float(self.avg_count), float(self.stat_count)))
+                        self._last_series_push = now_ts
+                except Exception:
+                    pass
+
                 # auto-calibration
                 try:
                     if self.balanced and AUTO_CALIBRATE:
@@ -585,8 +765,6 @@ class CameraStream:
                 except Exception:
                     pass
 
-            except asyncio.CancelledError:
-                break
             except Exception:
                 await asyncio.sleep(0.01)
                 continue
@@ -606,7 +784,18 @@ class CameraStream:
                 backoff = 0.5
             # Читаем JPEG из воркера и публикуем его как есть (минимальная задержка).
             # Декодируем только по необходимости для фонового инференса.
+            t_read0 = time.time()
             jpeg = ocv_read_jpeg(self.cam_id, timeout=1.0)
+            try:
+                read_ms = (time.time() - t_read0) * 1000.0
+                perf_logger.info(json.dumps({
+                    "phase": "live_read",
+                    "camera": self.cam_id,
+                    "read_ms": float(read_ms),
+                    "ok": bool(bool(jpeg))
+                }, ensure_ascii=False))
+            except Exception:
+                pass
             if not jpeg:
                 # mark unstable, and force close-reopen
                 self.decode_unstable = True
@@ -628,6 +817,14 @@ class CameraStream:
                         if len(self.fps_window) > 30:
                             self.fps_window.pop(0)
                     self.last_ts = now
+                try:
+                    perf_logger.info(json.dumps({
+                        "phase": "live_publish",
+                        "camera": self.cam_id,
+                        "inst_fps": float(inst if 'inst' in locals() else 0.0)
+                    }, ensure_ascii=False))
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -635,13 +832,31 @@ class CameraStream:
             try:
                 decode_for_infer = (self.model_loaded and (self.frame_idx % max(1, self.frame_skip) == 0))
                 if decode_for_infer:
+                    t_dec0 = time.time()
                     arr = np.frombuffer(jpeg, dtype=np.uint8)
                     frame_for_infer = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    try:
+                        dec_ms = (time.time() - t_dec0) * 1000.0
+                        perf_logger.info(json.dumps({
+                            "phase": "live_decode",
+                            "camera": self.cam_id,
+                            "decode_ms": float(dec_ms)
+                        }, ensure_ascii=False))
+                    except Exception:
+                        pass
                     if frame_for_infer is not None:
                         async with self._infer_lock:
                             if self._infer_frame is None:
                                 self._infer_frame = frame_for_infer.copy()
                                 self._infer_frame_seq += 1
+                                try:
+                                    perf_logger.info(json.dumps({
+                                        "phase": "infer_queue",
+                                        "camera": self.cam_id,
+                                        "seq": int(self._infer_frame_seq)
+                                    }, ensure_ascii=False))
+                                except Exception:
+                                    pass
             except Exception:
                 pass
 
@@ -774,22 +989,71 @@ class CameraManager:
 CAMERAS = CameraManager()
 DEFAULT_CAM_ID = "cam1"
 
-def mjpeg_multicast(cam: CameraStream) -> Generator[bytes, None, None]:
-    # sync generator, uses last_jpeg snapshot
-    while True:
-        jpeg = cam.last_jpeg
-        if jpeg is None:
-            time.sleep(0.05)
-            continue
-        yield multipart_chunk(jpeg)
-        time.sleep(max(0.0, (1.0 / max(1.0, TARGET_FPS)) * 0.5))
+# Набор WebSocket-подписчиков на расчёт среднего веса
+WEIGHT_WS = set()
 
-@app.get("/", response_class=HTMLResponse)
-def root():
-    index_path = STATIC_DIR / "index.html"
-    if index_path.exists():
-        return FileResponse(str(index_path))
-    return HTMLResponse("<!doctype html><title>PigWeight</title><h1>static/index.html not found</h1>", status_code=200)
+# Прогрев камеры перед записью
+async def warmup_camera_job():
+    try:
+        CAMERAS.get_or_create(DEFAULT_CAM_ID, CAM_URL)
+        await CAMERAS.start_camera(DEFAULT_CAM_ID)
+        # Небольшая пауза, чтобы декодер прогрелся
+        await asyncio.sleep(2.0)
+    except Exception:
+        # Не ломаем крон-задачу при ошибках
+        pass
+
+async def generate_session_summary(session_file: Path):
+    """Заглушка: формирование сводки по сессии (необязательная функциональность).
+    Возвращает пустой список при отсутствии реализации.
+    """
+    try:
+        return []
+    except Exception:
+        return []
+
+@app.get("/api/count_series")
+async def api_count_series(
+    camera: str = Query(default=DEFAULT_CAM_ID),
+    minutes: int = Query(default=5, ge=1, le=60),
+    win_sec: float = Query(default=float(os.getenv("VISUAL_SPIKE_WIN_SEC", "30"))),
+    k: float = Query(default=float(os.getenv("VISUAL_SPIKE_K", "2.5")))
+):
+    """Возвращает ряд значений avg_count/stat_count за последние minutes минут и статус камеры."""
+    try:
+        cam = CAMERAS.get_or_create(camera, CAM_URL)
+        # Стартуем ненавязчиво
+        try:
+            asyncio.create_task(CAMERAS.start_camera(camera))
+        except Exception:
+            pass
+        horizon = max(1.0, float(minutes) * 60.0)
+        now_ts = time.time()
+        series = [(ts, a, s) for (ts, a, s) in list(cam.ts_buffer) if (now_ts - ts) <= horizon]
+        points = [
+            {"t": float(ts), "avg": float(a), "stat": float(s)}
+            for (ts, a, s) in series
+        ]
+        # простые агрегаты
+        if series:
+            avg_over = sum(a for _, a, _ in series) / max(1, len(series))
+            stat_over = sum(s for _, _, s in series) / max(1, len(series))
+        else:
+            avg_over = 0.0
+            stat_over = 0.0
+        status = {
+            "camera": camera,
+            "window_minutes": int(minutes),
+            "points": points,
+            "count_avg": float(avg_over),
+            "count_stat_avg": float(stat_over),
+            "camera_running": bool(cam.running) if cam else False,
+            "last_frame_age_sec": (time.time() - cam.last_ts) if cam and getattr(cam, 'last_ts', 0) else None,
+            "fps_estimate": cam.fps() if cam else 0.0,
+        }
+        return JSONResponse(status)
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
 
 @app.get("/api/video_feed")
 async def video_feed(mode: str = Query(default="server", pattern="^(server|client)$"),
@@ -809,39 +1073,97 @@ async def api_snapshot(camera: str = Query(default=DEFAULT_CAM_ID)):
     чтобы не создавать на фронте частые пустые ответы и визуальные паузы.
     """
     try:
-        CAMERAS.get_or_create(camera, CAM_URL)
-        # Не зависаем, если камера недоступна: ограничим время запуска
+        cam = CAMERAS.get_or_create(camera, CAM_URL)
         try:
-            await asyncio.wait_for(CAMERAS.start_camera(camera), timeout=0.25)
+            asyncio.create_task(CAMERAS.start_camera(camera))
         except Exception:
             pass
+        # ждём до ~300мс появления кадра
+        t0 = time.time()
+        img = cam.last_jpeg
+        while (img is None) and (time.time() - t0 < 0.3):
+            await asyncio.sleep(0.02)
+            img = cam.last_jpeg
+        if not img:
+            return JSONResponse({"error": "no frame"}, status_code=404)
+        return Response(content=img, media_type="image/jpeg")
     except Exception:
-        pass
-    jpeg = None
-    # подождём немного появления кадра
-    t0 = time.time()
-    deadline = t0 + 0.30
-    while time.time() < deadline and not jpeg:
-        try:
-            existing = CAMERAS.get(camera)
-            if existing is not None:
-                jpeg = existing.last_jpeg
-        except Exception:
-            jpeg = None
-        if jpeg:
-            break
-        await asyncio.sleep(0.02)
-    if not jpeg:
-        return Response(status_code=204, headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        })
-    return Response(content=jpeg, media_type="image/jpeg", headers={
-        "Cache-Control": "no-store, no-cache, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    })
+        return JSONResponse({"error": "unknown"}, status_code=500)
+
+# --- Average weight helpers ---
+def _broadcast_weight_update(payload: dict):
+      """Отправляет обновление расчёта среднего веса всем подписанным WS."""
+      try:
+          import json
+          data = json.dumps({"type": "weight_average", **payload})
+          # отправляем асинхронно, игнорируя ошибки
+          for ws in list(WEIGHT_WS):
+              try:
+                  asyncio.create_task(ws.send_text(data))
+              except Exception:
+                  with contextlib.suppress(Exception):
+                      WEIGHT_WS.discard(ws)
+      except Exception:
+          pass
+
+
+@app.get("/api/average_weight")
+async def api_average_weight(
+    camera: str = Query(default=DEFAULT_CAM_ID),
+    minutes: int = Query(default=5, ge=1, le=60),
+):
+    """Возвращает средний вес за последние minutes минут."""
+    try:
+      cam = CAMERAS.get_or_create(camera, CAM_URL)
+      await CAMERAS.start_camera(camera)
+      horizon = max(1.0, float(minutes) * 60.0)
+      now_ts = time.time()
+      # фильтруем из буфера
+      series = [(ts, a, s) for (ts, a, s) in list(cam.ts_buffer) if (now_ts - ts) <= horizon]
+      avg_weight = sum(max(a, s) for _, a, s in series) / len(series) if series else 0.0
+      return {"camera": camera, "average_weight": avg_weight}
+    except Exception as e:
+      return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/weight/average")
+async def api_weight_average(
+    total_weight_kg: float = Query(..., description="Ручной ввод общего веса (кг) за окно"),
+    minutes: int = Query(default=5, ge=1, le=240),
+    camera: str = Query(default=DEFAULT_CAM_ID),
+):
+      """Считает средний вес как total_weight_kg / avg_count_over_window,
+      где avg_count_over_window = среднее по max(avg_count, stat_count) за последние minutes минут.
+      Логирует результат в records/weight_avg_YYYYMMDD.csv и удаляет старые по ретенции.
+      """
+      try:
+          cam = CAMERAS.get_or_create(camera, CAM_URL)
+          await CAMERAS.start_camera(camera)
+          horizon = max(1.0, float(minutes) * 60.0)
+          now_ts = time.time()
+          series = [(ts, a, s) for (ts, a, s) in list(cam.ts_buffer) if (now_ts - ts) <= horizon]
+          if not series:
+              return JSONResponse({"error": "no data in window"}, status_code=400)
+          count_avg = sum(max(a, s) for _, a, s in series) / max(1, len(series))
+          if count_avg <= 1e-6:
+              return {"camera": camera, "window_minutes": minutes, "total_weight_kg": float(total_weight_kg), "count_avg": 0.0, "avg_weight_kg": None, "note": "count_avg ~ 0"}
+          avg_weight = float(total_weight_kg) / float(count_avg)
+          # Ретенция
+          with contextlib.suppress(Exception):
+              _cleanup_weight_records(int(os.getenv("WEIGHT_RETENTION_DAYS", "7")))
+          # Запись CSV по дню
+          day_name = datetime.now().strftime("%Y%m%d")
+          out_csv = RECORDS_DIR / f"weight_avg_{day_name}.csv"
+          new_file = not out_csv.exists()
+          with open(out_csv, "a", newline="", encoding="utf-8") as f:
+              w = csv.writer(f)
+              if new_file:
+                  w.writerow(["timestamp", "camera_id", "window_minutes", "total_weight_kg", "count_avg", "avg_weight_kg"])
+              w.writerow([datetime.now().isoformat(), camera, int(minutes), f"{float(total_weight_kg):.3f}", f"{float(count_avg):.3f}", f"{float(avg_weight):.3f}"])
+          return {"camera": camera, "window_minutes": minutes, "total_weight_kg": float(total_weight_kg), "count_avg": float(count_avg), "avg_weight_kg": float(avg_weight), "csv": out_csv.name}
+      except Exception as e:
+          return JSONResponse({"error": str(e)}, status_code=500)
+
+# (ws_weight удалён по требованию: избегаем лишних WS)
 
 @app.websocket("/ws/count")
 async def ws_count(ws: WebSocket):
@@ -850,37 +1172,133 @@ async def ws_count(ws: WebSocket):
         q = ws.query_params or {}
         sess_id = q.get('id')
         camera = q.get('camera', DEFAULT_CAM_ID)
-        if sess_id:
-            # файловая сессия: стримим счётчик из _file_sessions[id]
-            while True:
-                await asyncio.sleep(0.2)
-                sess = _file_sessions.get(sess_id)
-                if not sess:
-                    await ws.send_text(json.dumps({
-                        "type": "count_update",
-                        "file_id": sess_id,
-                        "count": 0,
-                        "avg": 0.0
-                    }))
-                    continue
-                await ws.send_text(json.dumps({
-                    "type": "count_update",
-                    "file_id": sess_id,
-                    "count": int(sess.get("last_count", 0) or 0),
-                    "avg": float(sess.get("avg_count", 0.0) or 0.0)
-                }))
-        else:
-            # режим камеры (как раньше)
+        mode = (q.get('mode') or 'auto').lower()  # auto | file | camera
+        
+        # Регистрируем WebSocket в ultra_processor для синхронных обновлений
+        try:
+            from .ultra_fast_endpoints import ultra_processor as _ufp
+        except Exception:
+            try:
+                from api.ultra_fast_endpoints import ultra_processor as _ufp
+            except Exception:
+                _ufp = None
+        
+        if _ufp is not None:
+            _ufp.count_websockets.add(ws)
+            logger.debug(f"[WS_SYNC] Registered WebSocket for count updates: {sess_id}")
+        
+        # Режимы работы источника счётчика
+        if mode == 'camera':
+            # Всегда отдаём камеру, игнорируя файл
             cam = CAMERAS.get_or_create(camera, CAM_URL)
             while True:
                 await asyncio.sleep(0.2)
                 await ws.send_text(json.dumps({
                     "type": "count_update",
+                    "source": "camera",
                     "camera": camera,
                     "count": int(cam.last_count),
+                    "avg": float(getattr(cam, 'avg_count', 0.0)),
+                    "stat": float(getattr(cam, 'stat_count', getattr(cam, 'avg_count', 0.0))),
                     "fps": round(cam.fps(), 2),
-                    "debug": {"avg": cam.avg_count, "classes": getattr(cam, 'last_debug_classes', []), "ids": getattr(cam, 'last_debug_ids', []), "bboxes": getattr(cam, 'last_debug_bboxes', [])}
+                    "debug": {"avg": cam.avg_count, "stat": float(getattr(cam, 'stat_count', getattr(cam, 'avg_count', 0.0))), "classes": getattr(cam, 'last_debug_classes', []), "ids": getattr(cam, 'last_debug_ids', []), "bboxes": getattr(cam, 'last_debug_bboxes', [])}
                 }))
+        elif mode == 'file':
+            # Только файл: не падаем в камеру даже если сессия отсутствует — шлём нули
+            while True:
+                await asyncio.sleep(0.2)
+                count_val = 0
+                avg_val = 0.0
+                if sess_id:
+                    # 1) Локальные файловые сессии
+                    sess = _file_sessions.get(sess_id)
+                    if sess:
+                        count_val = int(sess.get("last_count", 0) or 0)
+                        avg_val = float(sess.get("avg_count", 0.0) or 0.0)
+                    else:
+                        # 2) ultra-fast файловые сессии
+                        try:
+                            from .ultra_fast_endpoints import ultra_processor as _ufp
+                        except Exception:
+                            try:
+                                from api.ultra_fast_endpoints import ultra_processor as _ufp  # runtime import fallback
+                            except Exception:
+                                _ufp = None
+                        if _ufp is not None:
+                            usess = _ufp.file_sessions.get(sess_id)
+                            if usess:
+                                try:
+                                    count_val = int(usess.get("last_count", 0) or 0)
+                                except Exception:
+                                    count_val = 0
+                                try:
+                                    st = usess.get("last_stats") or {}
+                                    avg_val = float(st.get("avg_count", 0.0) or 0.0)
+                                except Exception:
+                                    avg_val = 0.0
+                await ws.send_text(json.dumps({
+                    "type": "count_update",
+                    "source": "file",
+                    "file_id": sess_id,
+                    "count": count_val,
+                    "avg": avg_val
+                }))
+        else:
+            # auto (старое поведение): если есть файловая сессия — она приоритетна, иначе камера
+            if sess_id:
+                while True:
+                    await asyncio.sleep(0.2)
+                    sess = _file_sessions.get(sess_id)
+                    count_val = 0
+                    avg_val = 0.0
+                    stat_val = 0.0
+                    if sess:
+                        count_val = int(sess.get("last_count", 0) or 0)
+                        avg_val = float(sess.get("avg_count", 0.0) or 0.0)
+                        stat_val = float(sess.get("stat_count", avg_val) or avg_val)
+                    else:
+                        try:
+                            from .ultra_fast_endpoints import ultra_processor as _ufp
+                        except Exception:
+                            try:
+                                from api.ultra_fast_endpoints import ultra_processor as _ufp  # runtime import fallback
+                            except Exception:
+                                _ufp = None
+                        if _ufp is not None:
+                            usess = _ufp.file_sessions.get(sess_id)
+                            if usess:
+                                try:
+                                    count_val = int(usess.get("last_count", 0) or 0)
+                                except Exception:
+                                    count_val = 0
+                                try:
+                                    st = usess.get("last_stats") or {}
+                                    avg_val = float(st.get("avg_count", 0.0) or 0.0)
+                                    stat_val = float(st.get("stat_count", avg_val) or avg_val)
+                                except Exception:
+                                    avg_val = 0.0
+                    await ws.send_text(json.dumps({
+                        "type": "count_update",
+                        "source": "auto",
+                        "file_id": sess_id,
+                        "count": count_val,
+                        "avg": avg_val,
+                        "stat": stat_val
+                    }))
+            else:
+                cam = CAMERAS.get_or_create(camera, CAM_URL)
+                while True:
+                    await asyncio.sleep(0.2)
+                    await ws.send_text(json.dumps({
+                        "type": "count_update",
+                        "source": "auto",
+                        "camera": camera,
+                        "count": int(cam.last_count),
+                        "avg": float(getattr(cam, 'avg_count', 0.0)),
+                        "stat": float(getattr(cam, 'stat_count', getattr(cam, 'avg_count', 0.0))),
+                        "fps": round(cam.fps(), 2),
+                        "debug": {"avg": cam.avg_count, "stat": float(getattr(cam, 'stat_count', getattr(cam, 'avg_count', 0.0))), "classes": getattr(cam, 'last_debug_classes', []), "ids": getattr(cam, 'last_debug_ids', []), "bboxes": getattr(cam, 'last_debug_bboxes', [])}
+                    }))
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
     except Exception as e:
@@ -957,7 +1375,7 @@ async def _run_file_play_loop(sess_id: str):
                 await asyncio.sleep(0.02)
                 continue
 
-            fps = max(5.0, float(sess.get("fps", 25.0) or 25.0))
+            fps = max(5.0, float(sess.get("fps", 25.0)))
             t0 = time.time()
 
             # Чтение кадра под сессионным lock, чтобы не конфликтовать с seek из /frame

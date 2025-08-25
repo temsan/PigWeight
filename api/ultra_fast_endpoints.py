@@ -5,14 +5,13 @@ Ultra-Fast Video Processing Endpoints
 
 import asyncio
 import time
-import json
+import math
 import logging
-from typing import Optional, Dict, Any
+import json
+import os
 import numpy as np
 import cv2
 from pathlib import Path
-import math
-
 from fastapi import WebSocket, WebSocketDisconnect, Query, Form, UploadFile, File
 from fastapi.responses import Response, JSONResponse
 
@@ -35,19 +34,18 @@ class UltraFastProcessor:
     """
     
     def __init__(self):
-        self.active_streams = {}
-        self.file_sessions = {}
-        self.model = None
-        self.model_path = ""
-        
-        # Кэш для быстрого доступа к последним кадрам
+        self.file_sessions = {}  # {file_id: {last_count: int, avg_count: float, last_stats: dict}}
+        self.count_ema = {}  # экспоненциальное скользящее среднее для сглаживания
+        self.tracks = {}  # трекинг объектов для стабильных цветов масок
+        self.count_websockets = set()  # активные /ws/count подключения
         self.frame_cache = {}
+        # Модель и путь инициализируем заранее, чтобы избежать AttributeError в init_model/process
+        self.model = None
+        self.model_path = None
         
         # Оптимизированные настройки
         self.target_fps = 30  # Максимальный FPS
         self.frame_skip = 1   # Обрабатываем каждый кадр для максимальной отзывчивости
-        # EMA скользящее среднее количества по сессиям
-        self.count_ema: dict[str, float] = {}
         # Простой трекинг по сессиям: id -> цвет и позиции
         # self.tracks[session_id] = {
         #   'next_id': int,
@@ -55,17 +53,52 @@ class UltraFastProcessor:
         #   'colors': {id: (b,g,r)}
         # }
         self.tracks: dict[str, dict] = {}
+    
+    async def _notify_count_websockets(self, file_id: str, count: int, avg_count: float):
+        """Уведомляем все активные /ws/count подключения о новом счетчике"""
+        if not self.count_websockets:
+            return
+            
+        message = {
+            "type": "count_update", 
+            "file_id": file_id,
+            "count": count,
+            "avg": avg_count
+        }
+        
+        # Отправляем всем активным WebSocket подключениям
+        disconnected = set()
+        for ws in self.count_websockets.copy():
+            try:
+                await ws.send_text(json.dumps(message))
+                logger.debug(f"[WS_SYNC] Sent count update to /ws/count: {message}")
+            except Exception as e:
+                logger.debug(f"[WS_SYNC] WebSocket disconnected: {e}")
+                disconnected.add(ws)
+        
+        # Удаляем отключенные соединения
+        self.count_websockets -= disconnected
         
     async def init_model(self, model_path: str):
         """Ленивая инициализация модели"""
-        if self.model is None or self.model_path != model_path:
+        # Разрешаем переопределять путь через переменную окружения
+        env_path = os.getenv("ULTRA_MODEL")
+        desired_path = env_path or model_path
+        # Если путь файловый и отсутствует — пробуем публичную модель по имени
+        fallback_name = "yolo11n-seg.pt"
+        if self.model is None or self.model_path != desired_path:
             try:
                 from ultralytics import YOLO
-                self.model = YOLO(model_path)
-                self.model_path = model_path
-                logger.info(f"Ultra-fast model loaded: {model_path}")
+                load_path = desired_path
+                if isinstance(load_path, str) and os.path.sep in load_path and not os.path.exists(load_path):
+                    logger.warning(f"Ultra-fast: weights not found at '{load_path}', falling back to '{fallback_name}'")
+                    load_path = fallback_name
+                self.model = YOLO(load_path)
+                self.model_path = load_path
+                logger.info(f"Ultra-fast model loaded: {load_path}")
             except Exception as e:
-                logger.error(f"Failed to load model: {e}")
+                logger.error(f"Ultra-fast: failed to load model '{desired_path}': {e}")
+                # оставить self.model = None, процессинг вернёт кадр без детекций
                 
     def encode_raw_frame(self, frame: np.ndarray) -> bytes:
         """
@@ -561,69 +594,164 @@ async def ws_video_file_ultra_fast(websocket: WebSocket, id: str = Query(...)):
     Ультра-быстрый WebSocket для файлового видео
     """
     await websocket.accept()
-    
+
     try:
         # Получаем сессию файла
         session = ultra_processor.file_sessions.get(id)
         if not session:
             await websocket.close(code=1000, reason="Session not found")
             return
-            
+
         cap = session.get('cap')
         if not cap:
             await websocket.close(code=1000, reason="Video capture not available")
             return
-            
+
         # Инициализируем модель
         model_path = "models/pig_yolo11-seg.pt"
         await ultra_processor.init_model(model_path)
-        
+
         fps = session.get('fps', 25.0)
         frame_delay = 1.0 / max(1e-3, fps)
-        next_send_ts = time.perf_counter()
-        
+
+        # Очереди latest-only (размер = 1)
+        frame_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+        processed_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+
+        # Метрики окна
         frame_counter = 0
         sum_read = sum_proc = sum_enc = sum_send = 0.0
         window_start = time.perf_counter()
-        while True:
+
+        async def latest_put(q: asyncio.Queue, item):
             try:
-                t0 = time.perf_counter()
-                ret, frame = cap.read()
-                t1 = time.perf_counter()
-                if not ret:
-                    # Возврат к началу файла
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                q.put_nowait(item)
+            except asyncio.QueueFull:
+                try:
+                    _ = q.get_nowait()
+                except Exception:
+                    pass
+                try:
+                    q.put_nowait(item)
+                except Exception:
+                    pass
+
+        # Producer: apply seek and read with retries
+        async def producer():
+            consecutive_errors = 0
+            while True:
+                t_read0 = time.perf_counter()
+                try:
+                    lock = session.get('lock')
+                    if lock is None:
+                        session['lock'] = asyncio.Lock()
+                        lock = session['lock']
+                    async with lock:
+                        seek_to = session.pop('seek_to_frame', None)
+                        if isinstance(seek_to, int) and seek_to >= 0:
+                            try:
+                                cap.set(cv2.CAP_PROP_POS_FRAMES, int(seek_to))
+                                logger.debug(f"[WS_SEEK] Applied seek_to_frame={seek_to} for session {id}")
+                            except Exception:
+                                pass
+                        ret, frame = cap.read()
+                        # Прогрев после seek: на некоторых контейнерах первый read пустой
+                        if (not ret or frame is None):
+                            for _ in range(2):
+                                await asyncio.sleep(0)
+                                ret, frame = cap.read()
+                                if ret and frame is not None:
+                                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.debug(f"[WS_READ] error: {e}")
+                    ret, frame = False, None
+
+                t_read1 = time.perf_counter()
+                nonlocal sum_read
+                sum_read += (t_read1 - t_read0)
+
+                if not ret or frame is None:
+                    consecutive_errors += 1
+                    if consecutive_errors > 5:
+                        # попробуем отскочить на начало
+                        try:
+                            async with session.get('lock'):
+                                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        except Exception:
+                            pass
+                        await asyncio.sleep(0.02)
+                    else:
+                        await asyncio.sleep(0.005)
                     continue
-                
-                # Ультра-быстрая обработка
-                processed_frame, stats = await ultra_processor.process_frame_ultra_fast(
-                    frame, id
-                )
-                t2 = time.perf_counter()
-                
-                # Обновляем статистику сессии
+
+                consecutive_errors = 0
+                await latest_put(frame_queue, (time.perf_counter(), frame))
+
+                # Пейсинг продюсера: читаем быстрее FPS, но без захлёба
+                await asyncio.sleep(0)
+
+        # Processor: inference and count notifications
+        async def processor():
+            nonlocal sum_proc
+            while True:
+                ts, frame = await frame_queue.get()
+                t_proc0 = time.perf_counter()
+                try:
+                    processed_frame, stats = await ultra_processor.process_frame_ultra_fast(frame, id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"[WS_PROC] error: {e}")
+                    continue
+                t_proc1 = time.perf_counter()
+                sum_proc += (t_proc1 - t_proc0)
+
+                # Обновление статистики сессии и немедленная нотификация счётчика
                 session['last_stats'] = stats
-                session['last_count'] = stats['count']
-                
-                # Кодирование и отправка
-                frame_data = ultra_processor.encode_raw_frame(processed_frame)
-                t3 = time.perf_counter()
+                session['last_count'] = stats.get('count', 0)
+                try:
+                    session['avg_count'] = float(stats.get('avg_count', 0.0) or 0.0)
+                except Exception:
+                    session['avg_count'] = 0.0
+                logger.debug(f"[WS_COUNT] Updated session {id}: count={session['last_count']}, avg={session['avg_count']}")
+                try:
+                    await ultra_processor._notify_count_websockets(id, session['last_count'], session.get('avg_count', 0.0))
+                except Exception as e:
+                    logger.debug(f"[WS_COUNT] notify error: {e}")
+
+                await latest_put(processed_queue, (time.perf_counter(), processed_frame))
+
+        # Sender: encode and send with pacing
+        async def sender():
+            nonlocal frame_counter, sum_enc, sum_send, window_start
+            next_send_ts = time.perf_counter()
+            while True:
+                ts, processed_frame = await processed_queue.get()
+                t_enc0 = time.perf_counter()
+                frame_data = b''
+                try:
+                    frame_data = ultra_processor.encode_raw_frame(processed_frame)
+                except Exception:
+                    frame_data = b''
+                t_enc1 = time.perf_counter()
+                sum_enc += (t_enc1 - t_enc0)
+
+                t_send0 = time.perf_counter()
                 if frame_data:
                     await websocket.send_bytes(frame_data)
-                t4 = time.perf_counter()
-                
-                # Контроль скорости воспроизведения
+                t_send1 = time.perf_counter()
+                sum_send += (t_send1 - t_send0)
+
+                # Пейсинг под целевой FPS
                 now = time.perf_counter()
                 if now < next_send_ts:
-                    await asyncio.sleep(next_send_ts - now)
+                    await asyncio.sleep(max(0.0, next_send_ts - now))
                 next_send_ts = max(now, next_send_ts) + frame_delay
 
-                # Aggregate perf
+                # Метрики окна
                 frame_counter += 1
-                sum_read += (t1 - t0)
-                sum_proc += (t2 - t1)
-                sum_enc += (t3 - t2)
-                sum_send += (t4 - t3)
                 if frame_counter % 30 == 0:
                     dt = now - window_start
                     eff_fps = (frame_counter / dt) if dt > 0 else 0.0
@@ -637,19 +765,34 @@ async def ws_video_file_ultra_fast(websocket: WebSocket, id: str = Query(...)):
                             f"read={sum_read/frame_counter*1000:.1f}ms proc={sum_proc/frame_counter*1000:.1f}ms "
                             f"enc={sum_enc/frame_counter*1000:.1f}ms send={sum_send/frame_counter*1000:.1f}ms"
                         )
-                    # reset window
                     frame_counter = 0
                     sum_read = sum_proc = sum_enc = sum_send = 0.0
                     window_start = now
-                
-            except WebSocketDisconnect:
-                break
-            except Exception as e:
-                logger.error(f"File WebSocket error: {e}")
-                break
-                
+
+        # Запуск задач конвейера
+        producer_task = asyncio.create_task(producer())
+        processor_task = asyncio.create_task(processor())
+        sender_task = asyncio.create_task(sender())
+
+        # Ожидание завершения по разрыву сокета
+        await sender_task
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"File WebSocket error: {e}")
     finally:
-        await websocket.close()
+        # Отмена задач и закрытие WS
+        try:
+            for t in [locals().get('producer_task'), locals().get('processor_task')]:
+                if t and not t.done():
+                    t.cancel()
+        except Exception:
+            pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 async def api_video_file_seek_ultra_fast(
     id: str = Query("ultra_fast_session"),
@@ -702,13 +845,83 @@ async def api_video_file_frame_ultra_fast(
         if not cap:
             return JSONResponse({"error": "Video capture not available"}, status_code=400)
         fps = session.get('fps', 25.0)
-        frame_number = int(t * fps)
+        # Нормализуем время и кадр в допустимый диапазон
+        try:
+            total_frames = int(session.get('frame_count') or 0)
+        except Exception:
+            total_frames = 0
+        frame_number = int(max(0.0, float(t)) * max(1.0, float(fps)))
+        if total_frames > 0:
+            frame_number = max(0, min(frame_number, max(0, total_frames - 1)))
         seek_start = time.perf_counter()
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-        ret, frame = cap.read()
+        # Безопасный seek+read под сессионным lock
+        lock = session.get('lock')
+        if lock is None:
+            session['lock'] = asyncio.Lock()
+            lock = session['lock']
+        async with lock:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            # На некоторых контейнерах сразу после seek первый read возвращает False
+            if not ret or frame is None:
+                # Короткая задержка и повторные попытки
+                for _ in range(2):
+                    await asyncio.sleep(0)
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        break
         seek_time = (time.perf_counter() - seek_start) * 1000
-        if not ret:
-            return JSONResponse({"error": "Failed to read frame"}, status_code=500)
+        if not ret or frame is None:
+            # 2.1) Альтернативный seek по миллисекундам
+            try:
+                async with lock:
+                    cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(t)) * 1000.0)
+                    ret, frame = cap.read()
+                    if not ret or frame is None:
+                        # иногда нужно «снять» пару кадров после seek
+                        for _ in range(2):
+                            ret, frame = cap.read()
+                            if ret and frame is not None:
+                                break
+            except Exception:
+                pass
+        
+        if not ret or frame is None:
+            # 2.2) Переоткрыть файл и попробовать ещё раз (одна попытка)
+            try:
+                src_path = session.get('file_path')
+                if src_path:
+                    new_cap = cv2.VideoCapture(str(src_path))
+                    if new_cap.isOpened():
+                        # заменить cap в сессии
+                        old = session.get('cap')
+                        session['cap'] = new_cap
+                        try:
+                            if old is not None:
+                                old.release()
+                        except Exception:
+                            pass
+                        cap = new_cap
+                        async with lock:
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+                            ret, frame = cap.read()
+            except Exception:
+                pass
+
+        if not ret or frame is None:
+            # 2.3) Попробуем получить кадр через PyAV напрямую
+            if _PYAV_OK:
+                try:
+                    file_path = session.get('file_path') or ""
+                    q = int(os.getenv("JPEG_QUALITY", "80")) if 'os' in globals() else 80
+                    t0 = time.perf_counter()
+                    jpeg_bytes = pyav_seek_read_jpeg(file_path, float(t), q)
+                    dt_ms = int((time.perf_counter() - t0) * 1000)
+                    if jpeg_bytes:
+                        return Response(jpeg_bytes, media_type="image/jpeg", headers={"X-Fast": "pyav-fallback", "X-Seek-Ms": str(dt_ms)})
+                except Exception as e:
+                    logger.debug(f"PyAV fallback after OpenCV read fail also failed: {e}")
+            return JSONResponse({"error": "Failed to read frame", "details": {"t": t, "frame": frame_number}}, status_code=500)
         # Инициализация модели и обработка как раньше
         model_path = "models/pig_yolo11-seg.pt"
         await ultra_processor.init_model(model_path)
@@ -776,7 +989,9 @@ async def api_video_file_open_ultra_fast(
             'frame_count': frame_count,
             'duration': duration,
             'last_count': 0,
-            'last_stats': {}
+            'last_stats': {},
+            # Сессионный lock для безопасного доступа к cap между WS и HTTP
+            'lock': asyncio.Lock()
         }
         
         logger.info(f"Ultra-fast file opened: {file.filename}, duration: {duration:.1f}s")
