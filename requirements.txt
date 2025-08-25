@@ -5,6 +5,10 @@ python-multipart==0.0.9
 # Разрешаем актуальную установленную версию python-dotenv (снятый пин)
 python-dotenv
 
+# Scheduling / Timezone
+APScheduler==3.10.4
+tzdata>=2023.3
+
 # Video/Imaging
 numpy<2
 opencv-python-headless==4.9.0.80

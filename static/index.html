@@ -32,6 +32,10 @@
     /* Базовые сбросы, чтобы не было лишних отступов/скроллов */
     html, body { margin: 0; padding: 0; }
     #main-container { padding-top: 64px; /* будет переопределено скриптом под фактическую высоту */ }
+
+    /* Обертка видео и оверлеев */
+    .video-wrapper { position: relative; }
+    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
   </style>
 </head>
 <body style="overflow:auto;">
@@ -58,7 +62,7 @@
 
         <!-- Компактные кнопки управления, без налезаний -->
         <!-- Одна универсальная кнопка: в live — управляет MJPEG, в файловом — /play ↔ /frame. Размер кнопки не меняется. -->
-        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Стоп</button>
+        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Старт</button>
 
         <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 220px; min-width:220px; max-width:380px;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
@@ -69,40 +73,22 @@
       </div>
     </div>
 
-    <!-- ДВУХКОЛОНОЧНЫЙ МАКЕТ: слева видео, справа показатели -->
+    <!-- ДВУХКОЛОНОЧНЫЙ МАКЕТ: слева видео (+график), справа панель показателей -->
 <div class="main-flex" style="display:flex; justify-content:center;">
   <div class="container" style="display:flex; gap:16px; width:100%; max-width:1360px; align-items:flex-start;">
-    <!-- Левая колонка — ВИДЕО (кадр слева) -->
-    <div class="right-col" style="flex:1 1 auto; min-width:560px; order:0;">
-      <div class="video-wrapper card rounded-xl" style="width:100%; max-width:960px; overflow:hidden; margin-right:auto; position:relative; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(240,245,252,0.9)); border:1px solid rgba(60,90,140,.12);">
+    <!-- Левая колонка — видео и график -->
+    <div class="left-col" style="flex:1 1 auto; min-width:560px; order:0;">
+      <div class="video-wrapper card rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(240,245,252,0.9)); border:1px solid rgba(60,90,140,.12);">
         <img id="videoStream" style="display:block; width:100%; height:auto; object-fit:contain;" />
         <video id="videoPlayer" style="display:none; width:100%; height:auto; object-fit:contain;" playsinline muted></video>
         <canvas id="overlayCanvas"></canvas>
         <svg id="maskOverlay" xmlns="http://www.w3.org/2000/svg" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></svg>
-        
-        <!-- Пользовательские элементы управления видео -->
-        <div class="video-controls" style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.5); padding:10px; display:none;">
-          <div class="controls-row" style="display:flex; align-items:center; margin-bottom:5px;">
-            <button id="playPauseBtn" class="control-btn" style="background:none; border:none; color:white; cursor:pointer; margin-right:10px;">▶️</button>
-            <button id="fullscreenBtn" class="control-btn" style="background:none; border:none; color:white; cursor:pointer; margin-right:10px;">⛶</button>
-            <div id="currentTime" style="color:white; margin-right:5px;">0:00</div>
-            <span style="color:white;">/</span>
-            <div id="duration" style="color:white; margin-left:5px;">0:00</div>
-            <div class="count-display" style="margin-left:auto; color:white;">
-              <span>Количество: </span>
-              <span id="countValue">0</span>
-            </div>
-          </div>
-          <div id="timeline" style="position:relative; height:10px; background:rgba(255,255,255,0.3); cursor:pointer; border-radius:5px; overflow:hidden;">
-            <div id="progress" style="position:absolute; top:0; left:0; height:100%; background:#4CAF50; width:0;"></div>
-            <div id="timelineHover" style="position:absolute; top:0; left:0; height:100%; background:rgba(255,255,255,0.2); width:0; opacity:0; transition:opacity 0.3s;"></div>
-          </div>
-        </div>
       </div>
+      
     </div>
 
-    <!-- Правая колонка — показатели -->
-    <div class="left-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
+    <!-- Правая колонка — панель показателей -->
+    <div class="right-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
       <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
         <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
           <label for="manualCount" class="stat-title" style="min-width:150px; color:#2f5078;">Количество</label>
@@ -125,6 +111,19 @@
           <span>Encode: <b id="encodeTime">—</b> ms</span>
         </div>
         <div id="weightUpdateTime" style="font-size:14px; font-weight:500; color:#556;"></div>
+        <div class="stat-row" style="display:flex; flex-direction:column; gap:6px;">
+          <canvas id="liveCountChart" height="120" style="width:100%; height:120px; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
+          <div style="display:flex; gap:12px; font-size:12px; color:#567;">
+            <span><span style="display:inline-block; width:10px; height:2px; background:#2c7be5; vertical-align:middle; margin-right:6px;"></span>count</span>
+            <span><span style="display:inline-block; width:10px; height:2px; background:#e83e8c; vertical-align:middle; margin-right:6px;"></span>avg</span>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="chartLiveBtn" class="pill" title="Показ лайв-графика" style="padding:6px 10px;">Лайв</button>
+            <input id="chartCsvInput" type="file" accept=".csv" style="display:none;">
+            <button id="chartCsvBtn" class="pill" title="Загрузить CSV" style="padding:6px 10px;">Загрузить CSV</button>
+            <span id="chartHint" style="font-size:12px; color:#789;">ожидание данных…</span>
+          </div>
+        </div>
         <button id="saveManualBtn" class="pill primary" style="height:48px; font-size:18px;">Сохранить</button>
       </div>
     </div>
@@ -196,8 +195,13 @@
     const seekRange = document.getElementById('seekRange');
     const curTime = document.getElementById('curTime');
     const durTime = document.getElementById('durTime');
+    // Элементы панели сессий (могут отсутствовать в простом шаблоне)
+    const loadSessionBtn = document.getElementById('loadSessionBtn');
+    const backToLiveBtn = document.getElementById('backToLiveBtn');
+    const sessionSelect = document.getElementById('sessionSelect');
+    const sessionDate = document.getElementById('sessionDate');
     let selectedCameraId = null;
-    let isVideoPlaying = true;
+    let isVideoPlaying = false;
     // Стартуем НЕ в файловом режиме: пока файл не выбран, id=null
     let fileSession = { id: null, camera: null, duration: 0 };
     const seekTimeEl = document.getElementById('seekTime');
@@ -208,6 +212,8 @@
     // Клиентский инференс полностью отключён
 
     // Поля правой панели
+    // Буфер для ObjectURL последнего кадра (чтобы корректно освобождать)
+    let lastObjectUrl = null;
 
     // Автовоспроизведение при выборе файла (без alert), одна кнопка "Стоп", перемотка в паузе
     if (fileInput) { /* unified file change handler defined below */ }
@@ -227,23 +233,25 @@
       radio.addEventListener('change', async () => {
         if (radio.checked) {
           selectedCameraId = cam.id;
-          // UI переключение
-          // Не меняем layout: используем visibility вместо display
+          // Останавливаем любой текущий показ (live/file), не автозапускаем MJPEG
+          try { stopLiveSnapshotLoop(); } catch(_){ }
+          try { stopFileVideoWS(); } catch(_){ }
+          try { clearLiveChart(); } catch(_){ }
+          try { chartLiveMode = true; if (chartHint) chartHint.textContent = 'лайв режим'; } catch(_){ }
+          const imgEl = document.getElementById('videoStream');
+          if (imgEl) { try{ imgEl.removeAttribute('src'); }catch(_){ } }
+          isVideoPlaying = false;
+          // Сбрасываем файловую сессию, чтобы WS шёл по камере
+          fileSession = { id: null, camera: null, duration: 0 };
+          // Кнопка в состояние "Старт"
           const liveBtn = document.getElementById('videoPlayPauseBtn');
-          if (liveBtn) {
-            liveBtn.style.visibility = 'visible';
-            liveBtn.textContent = 'Стоп';
-          }
-          // fileStopBtn больше не используется
-          // Не переключаемся на MJPEG сразу: остаёмся в режиме снимков
-          stopLiveSnapshotLoop();
-          startLiveSnapshotLoop();
-          isVideoPlaying = true;
-          videoPlayPauseBtn.textContent = 'Стоп';
+          if (liveBtn) { liveBtn.style.visibility = 'visible'; liveBtn.textContent = 'Старт'; }
+          // UI radio
           Array.from(cameraRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
           label.classList.add('selected');
-          // Всегда сервер: запускаем опрос метрик
+          // Переподключаем WS под выбранную камеру (без автозапуска видео)
           startPollingCount();
+          if (streamStatus) { streamStatus.textContent = 'Камера (остановлено)'; streamStatus.style.color = '#556'; }
         }
       });
       const label = document.createElement('label');
@@ -254,9 +262,30 @@
       cameraRadios.appendChild(label);
     });
     selectedCameraId = (config.cameras[0] && config.cameras[0].id) || 'cam1';
-    const baseLive = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`);
-    // Стартуем со снимков сразу, чтобы избежать долгого ожидания недоступной камеры
-    startPollingCount();
+    // Стартуем WS обновление счётчика сразу после инициализации камер
+    try { startPollingCount(); } catch(_) {}
+    // Автовоспроизведение Live-потока
+    try {
+      const imgEl = document.getElementById('videoStream');
+      if (imgEl && !(fileSession && fileSession.id)){
+        const liveUrl = (((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`)) + `&camera=${encodeURIComponent(selectedCameraId||'cam1')}&ts=${Date.now()}`;
+        imgEl.src = liveUrl;
+        isVideoPlaying = true;
+        const btn = document.getElementById('videoPlayPauseBtn'); if (btn) btn.textContent = 'Стоп';
+        if (streamStatus) { streamStatus.textContent = 'Live'; streamStatus.style.color = '#2a7'; }
+        // Если MJPEG не появился за короткое время — включаем fallback-снимки
+        setTimeout(() => {
+          try{
+            const w = imgEl.naturalWidth || imgEl.clientWidth || 0;
+            const h = imgEl.naturalHeight || imgEl.clientHeight || 0;
+            if (w <= 0 || h <= 0) {
+              setStatus('Нет MJPEG, переключаемся на снимки', '#a66', 1800);
+              startLiveSnapshotLoop();
+            }
+          }catch(_){ }
+        }, 1200);
+      }
+    } catch(_) {}
 
     // --- Fallback: если MJPEG не даёт кадр, включаем автоснимки /api/snapshot ---
     let snapshotRunning = false;
@@ -310,8 +339,7 @@
       })();
     }
     
-    // Запуск после объявления переменных и функций
-    startLiveSnapshotLoop();
+    // Запуск snapshot-цикла отключён (fallback включается вручную при необходимости)
 
     // Автоматический апгрейд до MJPEG отключён: остаёмся в снимках до явного выбора политики
 
@@ -366,6 +394,12 @@
 
     // diag logs
     function logDiag(...args){ try{ console.log('[INF]', ...args); }catch{} }
+
+    // Возвращает активный визуальный источник (IMG), чтобы унифицировать доступ к размерам
+    function getActiveVideo(){
+      const img = document.getElementById('videoStream');
+      return img || { clientWidth: 0, clientHeight: 0, videoWidth: 0, videoHeight: 0, naturalWidth: 0, naturalHeight: 0 };
+    }
 
     // единая проверка готовности кадра для клиентского инференса
     function hasFrameReady(){
@@ -488,6 +522,27 @@
       });
     }
 
+    // Отрисовка оверлея из серверного сообщения (debug.bboxes)
+    function updateOverlayFromServer(bboxes){
+      try{
+        if (!overlayCanvas) return;
+        const boxes = Array.isArray(bboxes) ? bboxes : [];
+        if (!boxes.length){
+          const active = getActiveVideo();
+          const w = active.clientWidth || active.videoWidth || active.naturalWidth || 640;
+          const h = active.clientHeight || active.videoHeight || active.naturalHeight || 480;
+          overlayCanvas.width = w; overlayCanvas.height = h;
+          const ctx = overlayCanvas.getContext('2d');
+          ctx.clearRect(0,0,w,h);
+          const maskOverlay = document.getElementById('maskOverlay');
+          if (maskOverlay){ while (maskOverlay.firstChild) maskOverlay.removeChild(maskOverlay.firstChild); }
+          return;
+        }
+        // Ожидаем формат [{x,y,w,h, confidence?, mask?}, ...]
+        drawOverlay(boxes);
+      }catch(_){ }
+    }
+
     function updateTracksAndCount(boxes){
       // фильтруем класс "cow" если доступен (COCO id = 18), иначе используем все боксы
       const COW_CLASS_ID = 18;
@@ -554,14 +609,9 @@
 
         // Единая функция обновления правых полей
         const updateRightMetrics = () => {
-          // Количество от клиентского трекера
-          manualCount.value = String(clientCount);
-          const total = parseFloat(manualTotalWeight.value);
-          if (isFinite(clientCount) && clientCount > 0 && isFinite(total) && total > 0) {
-            manualAvgWeight.value = (total / clientCount).toFixed(2);
-          } else {
-            manualAvgWeight.value = '';
-          }
+          // Клиентский трекер выключен. Не трогаем manualCount, чтобы не затирать значение с сервера/WS.
+          // Поддерживаем правые поля, пересчитывая из текущих значений.
+          try { recalcFromCountOrTotal(); } catch(_){}
         };
 
         // ждём, пока появится кадр
@@ -609,40 +659,85 @@
     // Объявляем через var, чтобы исключить TDZ и обращения до инициализации.
     var ws = null;
     var seekController = null;
-    function applyServerMetrics(cnt){
-      const n = Number(cnt);
-      if (Number.isFinite(n) && n >= 0){
-        manualCount.value = String(Math.ceil(n));
+    // Последнее применённое значение счётчика (для предотвращения лишних перерисовок)
+    var __lastManualCountStr = '';
+    function setManualCountValue(val){
+      try{
+        // Преобразуем и валидируем значение
+        const n = Number(val);
+        if (!Number.isFinite(n) || n < 0) {
+          return;
+        }
+        const newStr = String(Math.ceil(n));
+        const curStr = String(manualCount.value || '');
+        // Не обновляем, если значение не изменилось
+        if (curStr === newStr || __lastManualCountStr === newStr) {
+          return;
+        }
+        manualCount.value = newStr;
+        __lastManualCountStr = newStr;
+        // Прямой пересчёт зависимых полей без лишних событий
+        try { recalcFromCountOrTotal(); } catch(_){ }
+      }catch(e){ 
+        console.error('[DEBUG] setManualCountValue error:', e);
       }
-      // триггер пересчёта зависимых полей
-      try { recalcFromCountOrTotal(); } catch(_){ }
+    }
+
+    function applyServerMetrics(cnt){
+      setManualCountValue(cnt);
     }
 
     function connectWS(){
       try{
-        if (ws) return;
+        // Всегда пересоздаём WS с актуальными параметрами камеры/файла
+        if (ws){ try{ ws.close(); }catch(_){ } ws = null; }
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-        const url = `${proto}://${location.host}/ws/count`;
+        const qs = new URLSearchParams();
+        if (fileSession && fileSession.id){
+          qs.set('mode', 'file');
+          qs.set('id', String(fileSession.id));
+        } else {
+          qs.set('mode', 'camera');
+          qs.set('camera', String(selectedCameraId||'cam1'));
+        }
+        const url = `${proto}://${location.host}/ws/count?${qs.toString()}`;
         ws = new WebSocket(url);
         ws.onopen = () => setStatus('WS connected', '#2c5', 1200);
-        ws.onclose = () => { setStatus('WS disconnected', '#a66', 1500); ws = null; };
+        ws.onclose = () => {
+          setStatus('WS disconnected', '#a66', 1500);
+          ws = null;
+          // Авто-реконнект через небольшой таймаут
+          setTimeout(() => { try { if (!ws) connectWS(); } catch(_) {} }, 1500);
+        };
         ws.onerror = () => { setStatus('WS error', '#a66', 1500); };
         ws.onmessage = (ev) => {
           if (typeof ev.data === 'string') {
             try{
               const msg = JSON.parse(ev.data);
+              console.debug('[DEBUG] WS message received:', msg);
               if (msg.type === 'error'){
                 setStatus(String(msg.text||'WS error'), '#a66', 1500);
               } else if (msg.type === 'count_update'){
                 const { camera, count, fps, debug } = msg;
-                const avg = (debug && typeof debug.avg === 'number') ? debug.avg : null;
-                const val = Number.isFinite(avg) ? Math.ceil(avg) : Math.ceil(Number(count||0));
+                // Предпочитаем стабильное stat, затем avg
+                const statTop = (typeof msg.stat === 'number') ? msg.stat : null;
+                const avgTop = (typeof msg.avg === 'number') ? msg.avg : null;
+                const statDbg = (debug && typeof debug.stat === 'number') ? debug.stat : null;
+                const avgDbg = (debug && typeof debug.avg === 'number') ? debug.avg : null;
+                const preferred = [statTop, statDbg, avgTop, avgDbg].find(v => (v != null && Number.isFinite(v) && v > 0));
+                const val = (preferred != null) ? Math.ceil(preferred) : Math.ceil(Number(count||0));
+                console.debug('[DEBUG] WS count_update:', { statTop, statDbg, avgTop, avgDbg, count, chosen: val });
                 applyServerMetrics(val);
+                // график: пушим сырые значения в существующий лайв-чарт
+                try { pushLivePoint(Number(count||0), Number(preferred)); } catch(_){ }
+                // Оверлей из сервера (если передаётся)
+                if (debug && Array.isArray(debug.bboxes)) {
+                  updateOverlayFromServer(debug.bboxes);
+                }
                 const ts = new Date().toLocaleTimeString();
                 if (weightUpdateTime) weightUpdateTime.textContent = `Последнее обновление: ${ts} (камера: ${camera||'-'})`;
-                const avgEl = document.getElementById('avgCount'); if (avgEl) avgEl.textContent = String(val);
               }
-            }catch(_){}
+            }catch(_){ }
           }
         };
       }catch(e){
@@ -650,8 +745,7 @@
       }
     }
     function startPollingCount(){
-      // Безопасный вызов до полной загрузки: ставим соединение по готовности DOM
-      if (ws) return;
+      // Подключаем WS с актуальными параметрами
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => connectWS(), { once: true });
       } else {
@@ -667,6 +761,176 @@
     }
 
     // Удалён автозапуск опроса на window.onload — управление только через setInferMode()
+
+    // --- Live Chart (минималистичный) ---
+    const liveChartCanvas = document.getElementById('liveCountChart');
+    let chartSeries = []; // [[ts, avg, count]]
+    const CHART_MINUTES = 2;
+    let chartLiveMode = true; // true=принимать точки от WS, false=режим CSV
+    const chartCsvBtn = document.getElementById('chartCsvBtn');
+    const chartCsvInput = document.getElementById('chartCsvInput');
+    const chartLiveBtn = document.getElementById('chartLiveBtn');
+    const chartHint = document.getElementById('chartHint');
+
+    function pushLivePoint(countVal, avgVal){
+      if (!chartLiveMode) return;
+      const now = Date.now()/1000;
+      const c = Number.isFinite(countVal) ? Number(countVal) : 0;
+      const a = Number.isFinite(avgVal) ? Number(avgVal) : NaN;
+      chartSeries.push([now, a, c]);
+      const thr = now - CHART_MINUTES*60;
+      if (chartSeries.length > 600 || (chartSeries[0] && chartSeries[0][0] < thr)){
+        chartSeries = chartSeries.filter(r => r[0] >= thr);
+      }
+      try { drawLiveChart(); } catch(_){ }
+    }
+    function clearLiveChart(){ chartSeries = []; try{ drawLiveChart(); }catch(_){} }
+    function drawLiveChart(){
+      if (!liveChartCanvas) return;
+      const ctx = liveChartCanvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = liveChartCanvas.clientWidth || liveChartCanvas.width;
+      const cssH = liveChartCanvas.clientHeight || liveChartCanvas.height || 120;
+      if (liveChartCanvas.width !== Math.floor(cssW*dpr)) liveChartCanvas.width = Math.floor(cssW*dpr);
+      if (liveChartCanvas.height !== Math.floor(cssH*dpr)) liveChartCanvas.height = Math.floor(cssH*dpr);
+      const W = liveChartCanvas.width, H = liveChartCanvas.height;
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,W,H);
+      // фон и сетка
+      ctx.fillStyle = 'rgba(240,245,252,0.9)';
+      ctx.fillRect(0,0,W,H);
+      ctx.strokeStyle = 'rgba(60,90,140,0.10)';
+      ctx.lineWidth = 1;
+      const gx = 6, gy = 4;
+      for (let i=1;i<gx;i++){ const x = Math.round(W*i/gx); ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+      for (let j=1;j<gy;j++){ const y = Math.round(H*j/gy); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+      if (!chartSeries || chartSeries.length < 2) return;
+      const now = Date.now()/1000;
+      const horizon = CHART_MINUTES*60;
+      const arr = chartSeries.filter(r => (now - r[0]) <= horizon);
+      if (arr.length < 2) return;
+      const xs = arr.map(r=>r[0]);
+      const avgs = arr.map(r=>Number.isFinite(r[1]) ? r[1] : NaN).filter(n=>Number.isFinite(n));
+      const counts = arr.map(r=>r[2]);
+      const xmin = Math.min(...xs), xmax = Math.max(...xs);
+      const ymin = Math.min(0, Math.min(...counts), (avgs.length?Math.min(...avgs):Infinity));
+      const ymax = Math.max(1, Math.max(...counts), (avgs.length?Math.max(...avgs):0));
+      const padL=6, padR=6, padT=6, padB=6;
+      const UX = (x)=> padL + ( (x - xmin) / Math.max(1e-6, (xmax-xmin)) ) * (W - padL - padR);
+      const UY = (y)=> (H - padB) - ( (y - ymin) / Math.max(1e-6, (ymax-ymin)) ) * (H - padT - padB);
+      // count (blue)
+      ctx.strokeStyle = '#2c7be5'; ctx.lineWidth = Math.max(1, 1.2*dpr);
+      ctx.beginPath(); let st=false; for (const r of arr){ const x=UX(r[0]), y=UY(r[2]); if(!st){ctx.moveTo(x,y);st=true;} else {ctx.lineTo(x,y);} } ctx.stroke();
+      // avg (pink)
+      ctx.strokeStyle = '#e83e8c'; ctx.beginPath(); st=false; for (const r of arr){ if(!Number.isFinite(r[1])) continue; const x=UX(r[0]), y=UY(r[1]); if(!st){ctx.moveTo(x,y);st=true;} else {ctx.lineTo(x,y);} } ctx.stroke();
+    }
+
+    // Кнопки управления графиком
+    if (chartCsvBtn && chartCsvInput){
+      chartCsvBtn.addEventListener('click', ()=> chartCsvInput.click());
+      chartCsvInput.addEventListener('change', async ()=>{
+        const f = chartCsvInput.files && chartCsvInput.files[0]; if (!f) return;
+        chartLiveMode = false; // переходим в режим CSV
+        if (chartHint) chartHint.textContent = 'CSV режим';
+        const text = await f.text();
+        // Простейший парсер CSV: заголовок + строки. Ожидаем колонки count,avg, optional time/ts
+        const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+        if (lines.length === 0) return;
+        const header = lines[0].split(/[,;\t]/).map(s=>s.trim().toLowerCase());
+        const idxCount = header.findIndex(h=> h==='count' || h==='cnt');
+        const idxAvg = header.findIndex(h=> h==='avg' || h==='avg_count' || h==='average');
+        const idxTime = header.findIndex(h=> h==='time' || h==='ts' || h==='t');
+        let t0 = Date.now()/1000; let tstep = 0.2; let cur = t0;
+        chartSeries = [];
+        for (let i=1;i<lines.length;i++){
+          const cols = lines[i].split(/[,;\t]/).map(s=>s.trim());
+          if (!cols.length) continue;
+          const c = idxCount>=0 ? Number(cols[idxCount]) : NaN;
+          const a = idxAvg>=0 ? Number(cols[idxAvg]) : NaN;
+          let t = idxTime>=0 ? Number(cols[idxTime]) : NaN;
+          if (!Number.isFinite(t)) { t = cur; cur += tstep; }
+          chartSeries.push([t, Number.isFinite(a)?a:NaN, Number.isFinite(c)?c:0]);
+        }
+        try { drawLiveChart(); } catch(_){ }
+      });
+    }
+    if (chartLiveBtn){
+      chartLiveBtn.addEventListener('click', ()=>{
+        chartLiveMode = true; clearLiveChart(); if (chartHint) chartHint.textContent = 'лайв режим';
+      });
+    }
+
+    async function refreshCountSeries(){
+      try{
+        // Не обновляем график, если видео остановлено
+        if (!isVideoPlaying) return;
+        const cam = encodeURIComponent(selectedCameraId||'cam1');
+        const resp = await fetch(`/api/count_series?camera=${cam}&minutes=${CHART_MINUTES}&ts=${Date.now()}`, { cache:'no-store' });
+        if (!resp.ok) {
+          console.debug('[DEBUG] count_series fetch failed:', resp.status);
+          return;
+        }
+        const data = await resp.json();
+        if (Array.isArray(data.series)) chartSeries = data.series;
+        if (Array.isArray(data.spikes)) chartSpikes = data.spikes;
+        drawLiveChart();
+      }catch(e){ 
+        console.debug('[DEBUG] refreshCountSeries error:', e.message);
+      }
+    }
+
+    function startLiveChart(){
+      if (chartTimer) return;
+      refreshCountSeries();
+      chartTimer = setInterval(refreshCountSeries, 3000);
+      window.addEventListener('resize', ()=>{ drawLiveChart(); });
+    }
+    function stopLiveChart(){ if (chartTimer){ clearInterval(chartTimer); chartTimer=null; } }
+
+    async function loadSessionList(){
+      try{
+        let dateParam = '';
+        if (sessionDate && sessionDate.value){
+          // sessionDate.value формата YYYY-MM-DD -> YYYYMMDD
+          dateParam = sessionDate.value.replaceAll('-', '');
+        }
+        const resp = await fetch(`/api/list_sessions?${dateParam?('date='+encodeURIComponent(dateParam)+'&'):''}ts=${Date.now()}`, { cache:'no-store' });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!sessionSelect) return;
+        const cur = sessionSelect.value || '';
+        sessionSelect.innerHTML = '<option value="">— выберите сессию (CSV) —</option>';
+        (data.sessions||[]).forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name; opt.textContent = name; if (name===cur) opt.selected = true; sessionSelect.appendChild(opt);
+        });
+      }catch(_){ }
+    }
+
+    if (loadSessionBtn){
+      loadSessionBtn.addEventListener('click', async ()=>{
+        const f = sessionSelect && sessionSelect.value ? sessionSelect.value : '';
+        if (!f) return;
+        sessionMode = true;
+        sessionFile = f;
+        await refreshCountSeries();
+        setStatus('Загружена сессия: ' + f, '#3a558c', 2000);
+      });
+    }
+    if (backToLiveBtn){
+      backToLiveBtn.addEventListener('click', async ()=>{
+        sessionMode = false;
+        sessionFile = null;
+        await refreshCountSeries();
+        setStatus('Режим Live', '#3a558c', 1200);
+      });
+    }
+
+    // стартуем только список сессий, график запускается с видео
+    loadSessionList();
+    // периодически обновляем список сессий
+    setInterval(loadSessionList, 20000);
+    if (sessionDate){ sessionDate.addEventListener('change', loadSessionList); }
 
     async function toggleBalanced(frontDesired=null){
       try{
@@ -854,7 +1118,6 @@
      * Blob-подход уменьшает фликер и гонки загрузки IMG.
      */
     let seekDebounceTimer = null;
-    let lastObjectUrl = null;
     
     async function fetchFrameBlobUrl(id, camera, tSec){
       try{
@@ -876,36 +1139,13 @@
 
     // Поддержка WS для file sessions
     let fileWs = null;
-    function connectFileWS(id){
-      try{
-        if (!id) return;
-        if (fileWs) { try{ fileWs.close(); }catch(_){} fileWs = null; }
-        // Закрыть глобальный WS камеры, чтобы не перетирать поле количеством из камеры
-        stopPollingCount();
-        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-        const url = `${proto}://${location.host}/ws/count?id=${encodeURIComponent(id)}`;
-        fileWs = new WebSocket(url);
-        fileWs.onmessage = (ev)=>{
-          try{
-            const m = JSON.parse(ev.data||'{}');
-            if (m && m.type === 'count_update' && String(m.file_id||'') === String(id)){
-              const c = Number(m.count||0);
-              const a = Number(m.avg||0);
-              const val = Number.isFinite(a) && a > 0 ? Math.ceil(a) : Math.ceil(c||0);
-              manualCount.value = String(val);
-              // триггер пересчёта зависимых полей
-              try { recalcFromCountOrTotal(); } catch(_){ }
-              const avgEl = document.getElementById('avgCount'); if (avgEl) avgEl.textContent = String(val);
-            }
-          }catch(_){}
-        };
-        fileWs.onclose = ()=>{ fileWs = null; };
-        fileWs.onerror = ()=>{};
-      }catch(_){ }
-    }
+    function stopFileWS(){ try{ if (fileWs) fileWs.close(); }catch(_){ } fileWs = null; }
 
     // Обработчик выбора файла: после первого кадра переключаемся на WS-видео
     fileInput.addEventListener('change', async (e) => {
+      try { clearLiveChart(); } catch(_){ }
+      try { chartLiveMode = true; if (chartHint) chartHint.textContent = 'лайв режим'; } catch(_){ }
+      stopFileWS();
       const f = fileInput.files && fileInput.files[0];
       if (!f){ return; }
       const fid = 'file1';
@@ -934,12 +1174,12 @@
         if (imgEl) {
           // Переходим в файловый режим: отключаем live-снимки
           try { stopLiveSnapshotLoop(); } catch(_){}
-          // Запустить WS сразу, не дожидаясь первого кадра
+          // Запустить WS-счётчик (единый /ws/count с mode=file)
           startFileVideoWS(fid);
           isVideoPlaying = true;
           const btn = document.getElementById('videoPlayPauseBtn'); if (btn) btn.textContent = 'Стоп';
-          connectFileWS(fid);
-          stopFilePolling();
+          stopFileWS();
+          startPollingCount();
 
           imgEl.onload = () => {
             // кадр загрузился — всё ок
@@ -948,8 +1188,9 @@
             // Даже если первый кадр не пришёл, WS уже запущен
             try { setStatus('Не удалось загрузить первый кадр, пробуем WS', '#a66', 1600); } catch(_){}
           };
-          // на входе закрыть глобальный WS камеры
-          stopPollingCount();
+          // на входе убедимся, что старые WS закрыты и открыт единый с mode=file
+          stopFileWS();
+          startPollingCount();
           imgEl.src = firstFrameUrl;
         }
     });
@@ -981,6 +1222,7 @@
             const buf = ev.data;
             if (buf && buf.byteLength > 0){
               if (lastObjectUrl) { try{ URL.revokeObjectURL(lastObjectUrl); }catch(_){} lastObjectUrl = null; }
+              // backend отправляет BMP через encode_raw_frame -> устанавливаем корректный MIME
               const blob = new Blob([buf], { type: 'image/bmp' });
               lastObjectUrl = URL.createObjectURL(blob);
               imgEl.src = lastObjectUrl;
@@ -1005,14 +1247,11 @@
       curTime.textContent = t.toFixed(1);
       if (!fileSession.id) return;
       if (isVideoPlaying) {
-        // Во время воспроизведения — только даём подсказку бэкенду сделать seek без остановки
-        if (seekDebounceTimer) { clearTimeout(seekDebounceTimer); seekDebounceTimer = null; }
-        seekDebounceTimer = setTimeout(() => {
-          const id = fileSession.id; const tNow = parseFloat(seekRange.value || '0') || 0;
-          const url = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(id)}&t=${tNow}&ts=${Date.now()}`;
-          // fire-and-forget
-          fetch(url, { cache: 'no-store' }).catch(()=>{});
-        }, 80);
+        // Во время воспроизведения — мгновенный seek без ожидания ответа
+        const id = fileSession.id; const tNow = parseFloat(seekRange.value || '0') || 0;
+        const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(id)}&t=${tNow}&ts=${Date.now()}`;
+        // fire-and-forget для мгновенного перескока
+        fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
         return;
       }
       // В паузе — показываем превью кадра с дебаунсом
@@ -1036,32 +1275,119 @@
       }, 120);
     });
 
-    // Старт/Стоп: управляем WS-видео
+    // Старт/Стоп: live MJPEG или файл (WS)
     videoPlayPauseBtn.addEventListener('click', async () => {
-      if (!fileSession.id) return;
-      const { id, camera } = fileSession;
-      const video = document.getElementById('videoStream');
-      if (!video) return;
-      const duration = fileSession.duration || 0;
-
-      const t = Math.max(0, Math.min(duration || 0, parseFloat(seekRange.value || '0') || 0));
+      const imgEl = document.getElementById('videoStream');
+      if (!imgEl) return;
+      // Файловый режим
+      if (fileSession && fileSession.id) {
+        const { id } = fileSession;
+        const duration = fileSession.duration || 0;
+        const t = Math.max(0, Math.min(duration || 0, parseFloat(seekRange.value || '0') || 0));
+        if (isVideoPlaying) {
+          const frameUrl = `/api/video_file/frame_ultra_fast?id=${encodeURIComponent(id)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
+          stopFileVideoWS();
+          imgEl.src = frameUrl;
+          isVideoPlaying = false;
+          curTime.textContent = t.toFixed(1);
+          videoPlayPauseBtn.textContent = 'Старт';
+        } else {
+          // Старт: возобновляем WS-видео latest-only
+          startFileVideoWS(id);
+          isVideoPlaying = true;
+          videoPlayPauseBtn.textContent = 'Стоп';
+          stopFilePolling();
+        }
+        return;
+      }
+      // Live режим (MJPEG)
       if (isVideoPlaying) {
-        const frameUrl = `/api/video_file/frame_ultra_fast?id=${encodeURIComponent(id)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
-        stopFileVideoWS();
-        video.src = frameUrl;
+        // Остановка: очищаем src, выключаем fallback-циклы и график
+        try { stopLiveSnapshotLoop(); } catch(_){}
+        imgEl.removeAttribute('src');
         isVideoPlaying = false;
-        curTime.textContent = t.toFixed(1);
         videoPlayPauseBtn.textContent = 'Старт';
+        if (streamStatus) { streamStatus.textContent = 'Остановлено'; streamStatus.style.color = '#a66'; }
       } else {
-        // Старт: возобновляем WS-видео latest-only
-        startFileVideoWS(id);
+        // Старт: включаем MJPEG поток
+        const liveUrl = (((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`)) + `&camera=${encodeURIComponent(selectedCameraId||'cam1')}&ts=${Date.now()}`;
+        imgEl.src = liveUrl;
         isVideoPlaying = true;
         videoPlayPauseBtn.textContent = 'Стоп';
-        connectFileWS(id);
-        stopFilePolling();
+        if (streamStatus) { streamStatus.textContent = 'Live'; streamStatus.style.color = '#2a7'; }
+        // При старте live подключаем WS-подписку на счётчик
+        try { startPollingCount(); } catch(_) {}
       }
     });
 
+    // --- Горячие клавиши плеера ---
+    // Space: Play/Pause
+    // Left/Right: -1s/+1s (только для файлового режима)
+    // Home/End: 0s/конец файла
+    document.addEventListener('keydown', (ev) => {
+      // Игнорируем, если фокус в инпутах/текстовых полях
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      const isTyping = /INPUT|TEXTAREA|SELECT/.test(tag);
+      if (isTyping) return;
+      // Пространство: старт/стоп
+      if (ev.code === 'Space') {
+        ev.preventDefault();
+        try { videoPlayPauseBtn.click(); } catch(_) {}
+        return;
+      }
+      if (!fileSession || !fileSession.id) return; // ниже — только для файлового режима
+      const duration = fileSession.duration || 0;
+      const step = 1.0;
+      const cur = parseFloat(seekRange.value || '0') || 0;
+      const clamp = (x) => Math.max(0, Math.min(duration, x));
+      if (ev.code === 'ArrowLeft') {
+        ev.preventDefault();
+        const t = clamp(cur - step);
+        seekRange.value = String(t);
+        curTime.textContent = t.toFixed(1);
+        // При проигрывании отправляем быстрый seek, иначе покажем превью
+        if (isVideoPlaying) {
+          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=${t}&ts=${Date.now()}`;
+          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
+        } else {
+          // Триггерим обработчик дебаунса
+          seekRange.dispatchEvent(new Event('input'));
+        }
+      } else if (ev.code === 'ArrowRight') {
+        ev.preventDefault();
+        const t = clamp(cur + step);
+        seekRange.value = String(t);
+        curTime.textContent = t.toFixed(1);
+        if (isVideoPlaying) {
+          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=${t}&ts=${Date.now()}`;
+          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
+        } else {
+          seekRange.dispatchEvent(new Event('input'));
+        }
+      } else if (ev.code === 'Home') {
+        ev.preventDefault();
+        seekRange.value = '0';
+        curTime.textContent = '0.0';
+        if (isVideoPlaying) {
+          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=0&ts=${Date.now()}`;
+          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
+        } else {
+          seekRange.dispatchEvent(new Event('input'));
+        }
+      } else if (ev.code === 'End') {
+        ev.preventDefault();
+        const t = duration || 0;
+        seekRange.value = String(t);
+        curTime.textContent = (t||0).toFixed(1);
+        if (isVideoPlaying) {
+          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=${t}&ts=${Date.now()}`;
+          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
+        } else {
+          seekRange.dispatchEvent(new Event('input'));
+        }
+      }
+    });
+  
     // Sync overlay canvas with image size on load/resize
     function syncOverlaySize(){
       const img = document.getElementById('videoStream');
@@ -1087,7 +1413,18 @@
     // Слушаем именно IMG загрузку, чтобы при первом кадре холст подстроился
     const img0 = document.getElementById('videoStream');
     if (img0) {
-      // отключаем слушатели ресайза/лоада канваса для снижения нагрузки
+      img0.addEventListener('error', () => {
+        try {
+          setStatus('Ошибка MJPEG, переключаемся на снимки', '#a66', 1800);
+          startLiveSnapshotLoop();
+        } catch(_){}
+      });
+      img0.addEventListener('load', () => {
+        try {
+          if (snapshotRunning) stopLiveSnapshotLoop();
+          if (typeof syncOverlaySize === 'function') syncOverlaySize();
+        } catch(_){}
+      });
     }
     // window.addEventListener('resize', syncOverlaySize);
 
