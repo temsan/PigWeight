@@ -4,36 +4,13 @@
   <meta charset="UTF-8">
   <title>PigWeight MVP</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-  <!-- Клиентский инференс отключен: оставляем только серверный путь -->
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
-    /* Закрепляем верхнюю панель */
-    .top-toolbar {
-      position: fixed !important;
-      top: 0; left: 0; right: 0;
-      z-index: 1000;
-      background: rgba(255, 255, 255, 0.9);
-      backdrop-filter: blur(8px);
-      box-shadow: 0 2px 12px rgba(40,60,90,0.12);
-      overflow: visible !important;
-      height: auto !important;
-      max-height: none !important;
-    }
-    .top-toolbar .container {
-      overflow: visible !important;
-      height: auto !important;
-      max-height: none !important;
-      flex-wrap: wrap !important;
-      align-items: center !important;
-    }
+    .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(8px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
+    .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: wrap !important; align-items: center !important; }
     .top-toolbar .pill, .top-toolbar .file-input-btn { height: 32px; line-height: 20px; }
-    .seek-wrap { overflow: visible; }
-
-    /* Базовые сбросы, чтобы не было лишних отступов/скроллов */
     html, body { margin: 0; padding: 0; }
-    #main-container { padding-top: 64px; /* будет переопределено скриптом под фактическую высоту */ }
-
-    /* Обертка видео и оверлеев */
+    #main-container { padding-top: 64px; }
     .video-wrapper { position: relative; }
     #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
   </style>
@@ -43,1467 +20,208 @@
     <div class="top-toolbar minimal glass sticky-top" id="topToolbar">
       <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight Monitor</h2>
-
-        <div class="toolbar-group" id="cameraGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
-          <div id="cameraRadios" class="toggle-group compact"></div>
+        <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
+          <div id="streamRadios" class="toggle-group compact"></div>
         </div>
-
-        <!-- Убраны кнопки выбора моделей -->
-        <div class="toolbar-group" id="modelGroup" style="display:none;">
-          <div id="modelRadios" class="toggle-group compact"></div>
-        </div>
-
-        <!-- Переключатель режимов удалён: всегда серверный инференс -->
-
         <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:6px 10px; min-width:auto; text-align:center;">
           Файл
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
-
-        <!-- Компактные кнопки управления, без налезаний -->
-        <!-- Одна универсальная кнопка: в live — управляет MJPEG, в файловом — /play ↔ /frame. Размер кнопки не меняется. -->
         <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Старт</button>
-
-        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 220px; min-width:220px; max-width:380px;">
-          <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
-          <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
-        </div>
-
         <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto;"></span>
       </div>
     </div>
-
-    <!-- ДВУХКОЛОНОЧНЫЙ МАКЕТ: слева видео (+график), справа панель показателей -->
-<div class="main-flex" style="display:flex; justify-content:center;">
-  <div class="container" style="display:flex; gap:16px; width:100%; max-width:1360px; align-items:flex-start;">
-    <!-- Левая колонка — видео и график -->
-    <div class="left-col" style="flex:1 1 auto; min-width:560px; order:0;">
-      <div class="video-wrapper card rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(240,245,252,0.9)); border:1px solid rgba(60,90,140,.12);">
-        <img id="videoStream" style="display:block; width:100%; height:auto; object-fit:contain;" />
-        <video id="videoPlayer" style="display:none; width:100%; height:auto; object-fit:contain;" playsinline muted></video>
-        <canvas id="overlayCanvas"></canvas>
-        <svg id="maskOverlay" xmlns="http://www.w3.org/2000/svg" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></svg>
-      </div>
-      
-    </div>
-
-    <!-- Правая колонка — панель показателей -->
-    <div class="right-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
-      <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
-        <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
-          <label for="manualCount" class="stat-title" style="min-width:150px; color:#2f5078;">Количество</label>
-          <input type="number" id="manualCount" min="0" style="flex:1 1 auto; min-width:0; font-size:32px; padding:12px 14px; font-weight:600;">
-          <span class="unit-label" style="color:#2f5078;">шт.</span>
-        </div>
-        <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
-          <label for="manualTotalWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Общий вес</label>
-          <input type="number" id="manualTotalWeight" min="0" step="0.1" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
-          <span class="unit-label" style="color:#2f5078;">кг</span>
-        </div>
-        <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
-          <label for="manualAvgWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Средний вес</label>
-          <input type="number" id="manualAvgWeight" min="0" step="0.01" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
-          <span class="unit-label" style="color:#2f5078;">кг</span>
-        </div>
-        <div id="stageTimes" style="margin-top:2px; display:flex; gap:14px; flex-wrap:wrap; color:#2f5078; font-size:16px;">
-          <span>Seek: <b id="seekTime">—</b> ms</span>
-          <span>Infer: <b id="inferTime">—</b> ms</span>
-          <span>Encode: <b id="encodeTime">—</b> ms</span>
-        </div>
-        <div id="weightUpdateTime" style="font-size:14px; font-weight:500; color:#556;"></div>
-        <div class="stat-row" style="display:flex; flex-direction:column; gap:6px;">
-          <canvas id="liveCountChart" height="120" style="width:100%; height:120px; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
-          <div style="display:flex; gap:12px; font-size:12px; color:#567;">
-            <span><span style="display:inline-block; width:10px; height:2px; background:#2c7be5; vertical-align:middle; margin-right:6px;"></span>count</span>
-            <span><span style="display:inline-block; width:10px; height:2px; background:#e83e8c; vertical-align:middle; margin-right:6px;"></span>avg</span>
-          </div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <button id="chartLiveBtn" class="pill" title="Показ лайв-графика" style="padding:6px 10px;">Лайв</button>
-            <input id="chartCsvInput" type="file" accept=".csv" style="display:none;">
-            <button id="chartCsvBtn" class="pill" title="Загрузить CSV" style="padding:6px 10px;">Загрузить CSV</button>
-            <span id="chartHint" style="font-size:12px; color:#789;">ожидание данных…</span>
+    <div class="main-flex" style="display:flex; justify-content:center;">
+      <div class="container" style="display:flex; gap:16px; width:100%; max-width:1360px; align-items:flex-start;">
+        <div class="left-col" style="flex:1 1 auto; min-width:560px; order:0;">
+          <div class="video-wrapper card rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(240,245,252,0.9)); border:1px solid rgba(60,90,140,.12);">
+            <img id="videoStream" style="display:block; width:100%; height:auto; object-fit:contain;" />
+            <canvas id="overlayCanvas"></canvas>
           </div>
         </div>
-        <button id="saveManualBtn" class="pill primary" style="height:48px; font-size:18px;">Сохранить</button>
+        <div class="right-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
+          <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
+            <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
+              <label for="manualCount" class="stat-title" style="min-width:150px; color:#2f5078;">Количество</label>
+              <input type="number" id="manualCount" min="0" style="flex:1 1 auto; min-width:0; font-size:32px; padding:12px 14px; font-weight:600;">
+              <span class="unit-label" style="color:#2f5078;">шт.</span>
+            </div>
+            <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
+              <label for="manualTotalWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Общий вес</label>
+              <input type="number" id="manualTotalWeight" min="0" step="0.1" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
+              <span class="unit-label" style="color:#2f5078;">кг</span>
+            </div>
+            <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
+              <label for="manualAvgWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Средний вес</label>
+              <input type="number" id="manualAvgWeight" min="0" step="0.01" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
+              <span class="unit-label" style="color:#2f5078;">кг</span>
+            </div>
+            <button id="saveManualBtn" class="pill primary" style="height:48px; font-size:18px;">Сохранить</button>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-</div>
-    <div id="modelStatus" class="container" style="margin-top:8px; max-width:1360px; display:none;"></div>
-    <div id="debugModels" style="margin:1em 0; color:#555;"></div>
-    <table id="history">
-      <thead>
-        <tr><th>Дата</th><th>Камера</th><th>Кол-во</th><th>Общий вес</th><th>Средний вес</th></tr>
-      </thead>
-      <tbody></tbody>
-    </table>
   </div>
   <script>
-    // Конфигурация: только серверная обработка
-    const config = {
-      cameras: [
-        { id: 'cam1', name: 'Камера 1', url: '/api/video_feed?mode=server' }
-      ]
-    };
-    let lastAppliedModel = '';
-    function updateModelStatus(){
-      const ms = document.getElementById('modelStatus');
-      if (!ms) return;
-      // Убираем лишнюю подпись статуса режима/модели
-      ms.textContent = '';
-    }
-
-    // --- UI ---
-    const video = document.getElementById('videoStream');
-    // Гарантируем видимость IMG и корректный object-fit сразу
-    if (video) {
-      video.style.display = 'block';
-      video.style.width = '100%';
-      video.style.height = 'auto';
-      video.style.objectFit = 'contain';
-      // Поставим начальный плейсхолдер до загрузки любого источника
-      if (!video.src) {
-        video.src = `data:image/svg+xml;utf8,` + encodeURIComponent(
-          `<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360'>
-             <defs>
-               <linearGradient id='g' x1='0' x2='0' y1='0' y2='1'>
-                 <stop offset='0%' stop-color='#e9f1fb'/>
-                 <stop offset='100%' stop-color='#dde7f5'/>
-               </linearGradient>
-             </defs>
-             <rect width='100%' height='100%' fill='url(#g)'/>
-             <rect x='0' y='0' width='100%' height='100%' fill='rgba(40,60,90,0.08)'/>
-             <text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#2f5078' font-size='22' font-family='Segoe UI, Roboto, Arial'>Ожидание источника…</text>
-           </svg>`
-        );
-      }
-    }
-    // Переключатель режимов удалён: всегда серверный инференс
+    const videoStream = document.getElementById('videoStream');
     const overlayCanvas = document.getElementById('overlayCanvas');
-    const streamStatus = document.getElementById('streamStatus');
     const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
-    const balanceBtn = document.getElementById('balanceBtn');
-    const manualCount = document.getElementById('manualCount');
-    const manualTotalWeight = document.getElementById('manualTotalWeight');
-    const manualAvgWeight = document.getElementById('manualAvgWeight');
-    const historyTable = document.getElementById('history').querySelector('tbody');
-    const cameraRadios = document.getElementById('cameraRadios');
-    const modelRadios = document.getElementById('modelRadios');
     const fileInput = document.getElementById('videoFileInput');
-    // Удалена отдельная кнопка файлового режима: используется единая videoPlayPauseBtn
-    const fileStopBtn = null;
-    const seekRange = document.getElementById('seekRange');
-    const curTime = document.getElementById('curTime');
-    const durTime = document.getElementById('durTime');
-    // Элементы панели сессий (могут отсутствовать в простом шаблоне)
-    const loadSessionBtn = document.getElementById('loadSessionBtn');
-    const backToLiveBtn = document.getElementById('backToLiveBtn');
-    const sessionSelect = document.getElementById('sessionSelect');
-    const sessionDate = document.getElementById('sessionDate');
-    let selectedCameraId = null;
+    const streamStatus = document.getElementById('streamStatus');
+    const streamRadios = document.getElementById('streamRadios');
+
+    let activeStreamId = null;
     let isVideoPlaying = false;
-    // Стартуем НЕ в файловом режиме: пока файл не выбран, id=null
-    let fileSession = { id: null, camera: null, duration: 0 };
-    const seekTimeEl = document.getElementById('seekTime');
-    const inferTimeEl = document.getElementById('inferTime');
-    const encodeTimeEl = document.getElementById('encodeTime');
-    const weightUpdateTime = document.getElementById('weightUpdateTime');
+    let ws = null;
 
-    // Клиентский инференс полностью отключён
-
-    // Поля правой панели
-    // Буфер для ObjectURL последнего кадра (чтобы корректно освобождать)
-    let lastObjectUrl = null;
-
-    // Автовоспроизведение при выборе файла (без alert), одна кнопка "Стоп", перемотка в паузе
-    if (fileInput) { /* unified file change handler defined below */ }
-    // Убрана отдельная кнопка файлового режима: используется единая videoPlayPauseBtn
-
-    // --- Радиокнопки для камер ---
-    cameraRadios.innerHTML = '';
-    config.cameras.forEach((cam, idx) => {
-      const id = 'cam_radio_' + cam.id;
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'cameraRadio';
-      radio.value = cam.id;
-      radio.id = id;
-      if (idx === 0) radio.checked = true;
-      radio.style.display = 'none';
-      radio.addEventListener('change', async () => {
-        if (radio.checked) {
-          selectedCameraId = cam.id;
-          // Останавливаем любой текущий показ (live/file), не автозапускаем MJPEG
-          try { stopLiveSnapshotLoop(); } catch(_){ }
-          try { stopFileVideoWS(); } catch(_){ }
-          try { clearLiveChart(); } catch(_){ }
-          try { chartLiveMode = true; if (chartHint) chartHint.textContent = 'лайв режим'; } catch(_){ }
-          const imgEl = document.getElementById('videoStream');
-          if (imgEl) { try{ imgEl.removeAttribute('src'); }catch(_){ } }
-          isVideoPlaying = false;
-          // Сбрасываем файловую сессию, чтобы WS шёл по камере
-          fileSession = { id: null, camera: null, duration: 0 };
-          // Кнопка в состояние "Старт"
-          const liveBtn = document.getElementById('videoPlayPauseBtn');
-          if (liveBtn) { liveBtn.style.visibility = 'visible'; liveBtn.textContent = 'Старт'; }
-          // UI radio
-          Array.from(cameraRadios.querySelectorAll('.toggle-btn')).forEach(btn => btn.classList.remove('selected'));
-          label.classList.add('selected');
-          // Переподключаем WS под выбранную камеру (без автозапуска видео)
-          startPollingCount();
-          if (streamStatus) { streamStatus.textContent = 'Камера (остановлено)'; streamStatus.style.color = '#556'; }
-        }
-      });
-      const label = document.createElement('label');
-      label.htmlFor = id;
-      label.textContent = cam.name;
-      label.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
-      cameraRadios.appendChild(radio);
-      cameraRadios.appendChild(label);
-    });
-    selectedCameraId = (config.cameras[0] && config.cameras[0].id) || 'cam1';
-    // Стартуем WS обновление счётчика сразу после инициализации камер
-    try { startPollingCount(); } catch(_) {}
-    // Автовоспроизведение Live-потока
-    try {
-      const imgEl = document.getElementById('videoStream');
-      if (imgEl && !(fileSession && fileSession.id)){
-        const liveUrl = (((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`)) + `&camera=${encodeURIComponent(selectedCameraId||'cam1')}&ts=${Date.now()}`;
-        imgEl.src = liveUrl;
-        isVideoPlaying = true;
-        const btn = document.getElementById('videoPlayPauseBtn'); if (btn) btn.textContent = 'Стоп';
-        if (streamStatus) { streamStatus.textContent = 'Live'; streamStatus.style.color = '#2a7'; }
-        // Если MJPEG не появился за короткое время — включаем fallback-снимки
-        setTimeout(() => {
-          try{
-            const w = imgEl.naturalWidth || imgEl.clientWidth || 0;
-            const h = imgEl.naturalHeight || imgEl.clientHeight || 0;
-            if (w <= 0 || h <= 0) {
-              setStatus('Нет MJPEG, переключаемся на снимки', '#a66', 1800);
-              startLiveSnapshotLoop();
-            }
-          }catch(_){ }
-        }, 1200);
-      }
-    } catch(_) {}
-
-    // --- Fallback: если MJPEG не даёт кадр, включаем автоснимки /api/snapshot ---
-    let snapshotRunning = false;
-    let snapshotController = null;
-    function stopLiveSnapshotLoop(){
-      snapshotRunning = false;
-      if (snapshotController) { try { snapshotController.abort(); } catch(_){} snapshotController = null; }
-    }
-    function startLiveSnapshotLoop(){
-      if (snapshotRunning) return;
-      snapshotRunning = true;
-      let noFrameCount = 0;
-      (async function loop(){
-        while (snapshotRunning){
-          // Если мы в файловом режиме — не мешаем, просто ждём и продолжаем
-          try{
-            if (fileSession && fileSession.id){
-              if (streamStatus) { streamStatus.textContent = 'Файл'; streamStatus.style.color = '#556'; }
-              await new Promise(r => setTimeout(r, 1000));
-              continue;
-            }
-          }catch(_){ }
-          try {
-            snapshotController = new AbortController();
-            const url = `/api/snapshot?camera=${encodeURIComponent(selectedCameraId||'cam1')}&ts=${Date.now()}`;
-            const resp = await fetch(url, { cache: 'no-store', signal: snapshotController.signal });
-            if (resp.ok) {
-              const blob = await resp.blob();
-              if (blob && blob.size > 0) {
-                const objUrl = URL.createObjectURL(blob);
-                video.src = objUrl;
-                setTimeout(()=> { try{ URL.revokeObjectURL(objUrl); }catch(_){} }, 5000);
-                if (streamStatus) { streamStatus.textContent = 'Снимки'; streamStatus.style.color = '#556'; }
-                noFrameCount = 0;
-              } else {
-                noFrameCount++;
-              }
-            } else if (resp.status === 204) {
-              noFrameCount++;
-            }
-          } catch(_) { /* aborted or network error */ }
-          finally { snapshotController = null; }
-          // если долго нет кадров — показываем "Нет сигнала" и снижаем частоту опроса
-          if (noFrameCount >= 6) { // ~1.5 сек без кадров
-            if (streamStatus) { streamStatus.textContent = 'Нет сигнала'; streamStatus.style.color = '#a66'; }
-            await new Promise(r => setTimeout(r, 2000));
-          } else {
-            await new Promise(r => setTimeout(r, 250));
-          }
-        }
-      })();
-    }
-    
-    // Запуск snapshot-цикла отключён (fallback включается вручную при необходимости)
-
-    // Автоматический апгрейд до MJPEG отключён: остаёмся в снимках до явного выбора политики
-
-    // --- Модели: выключены кнопки выбора. Если модель одна — используем дефолт с бэка. ---
-    async function loadModels() {
-      // Полный no-op: не трогаем /api/models и /api/video_config, чтобы не блокировать старт
-      return;
-    }
-
-    async function applyModel(modelFilePt) {
-      try {
-        const cam = selectedCameraId || 'cam1';
-        // применяем строго .pt из каталога models
-        const path = `models/${modelFilePt}`;
-        const resp = await fetch(`/api/video_config?camera=${encodeURIComponent(cam)}&seg_model_path=${encodeURIComponent(path)}`, { method:'GET', cache:'no-store' });
-
-        // Обработка статуса/ошибок
-        if (!resp.ok) {
-          const msg = await resp.text().catch(()=> '');
-          console.warn('Model apply failed', resp.status, msg);
-          const ms = document.getElementById('modelStatus');
-          if (ms) {
-            ms.textContent = `Ошибка применения модели (${resp.status}). Проверьте наличие файла: ${path}`;
-            ms.style.color = '#a66';
-          }
-          return;
-        }
-
-        // Перезагрузим источник
-        if (video.src.includes('/api/video_file/')) {
-          if (isVideoPlaying && fileSession.id) {
-            video.src = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
-          } else if (fileSession.id) {
-            const t = parseFloat(seekRange.value || '0') || 0;
-            video.src = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
-          }
-        } else {
-          const liveUrl = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`) + `&ts=${Date.now()}`;
-          video.src = liveUrl;
-        }
-        startPollingCount();
-
-        // статус
-        // Не показываем всплывающий статус модели по требованию
-        lastAppliedModel = modelFilePt;
-        updateModelStatus();
-      } catch(e) {
-        console.warn('Model switch failed', e);
-      }
-    }
-    // отключено: загрузка моделей на старте не нужна
-
-    // diag logs
-    function logDiag(...args){ try{ console.log('[INF]', ...args); }catch{} }
-
-    // Возвращает активный визуальный источник (IMG), чтобы унифицировать доступ к размерам
-    function getActiveVideo(){
-      const img = document.getElementById('videoStream');
-      return img || { clientWidth: 0, clientHeight: 0, videoWidth: 0, videoHeight: 0, naturalWidth: 0, naturalHeight: 0 };
-    }
-
-    // единая проверка готовности кадра для клиентского инференса
-    function hasFrameReady(){
-      const active = getActiveVideo();
-      const iw = active.videoWidth || active.naturalWidth || 0;
-      const ih = active.videoHeight || active.naturalHeight || 0;
-      return iw > 0 && ih > 0;
-    }
-
-    // Управление серверным опросом
-    // Удалено: дублирующаяся версия stopPollingCount на таймере опроса
-
-    // Удалён вспомогательный клиентский код transform/tensor/NMS — он не используется в серверном режиме.
-
-    // удалён toTensorCHWFloat
-
-    function nms(boxes, iouTh=0.45){
-      boxes.sort((a,b)=>b.score - a.score);
-      const res=[];
-      const used = new Array(boxes.length).fill(false);
-      function iou(a,b){
-        const x1 = Math.max(a.x, b.x);
-        const y1 = Math.max(a.y, b.y);
-        const x2 = Math.min(a.x+a.w, b.x+b.w);
-        const y2 = Math.min(a.y+a.h, b.y+b.h);
-        const inter = Math.max(0, x2-x1) * Math.max(0, y2-y1);
-        const ua = a.w*a.h + b.w*b.h - inter;
-        return ua>0 ? inter/ua : 0;
-      }
-      for (let i=0;i<boxes.length;i++){
-        if (used[i]) continue;
-        res.push(boxes[i]);
-        for (let j=i+1;j<boxes.length;j++){
-          if (used[j]) continue;
-          if (iou(boxes[i], boxes[j]) > iouTh) used[j] = true;
-        }
-      }
-      return res;
-    }
-
-    // удалён postprocessYOLO
-
-    function drawOverlay(boxes){
-      // Выравниваем канвас по активному источнику (videoEl при клиентском файле, иначе img)
-      const active = getActiveVideo();
-      const w = active.clientWidth || active.videoWidth || active.naturalWidth || 640;
-      const h = active.clientHeight || active.videoHeight || active.naturalHeight || 480;
-      if (w <= 0 || h <= 0) return;
-
-      // Жёсткая подгонка размеров, чтобы оверлей совпадал с видимым элементом
-      overlayCanvas.width = w;
-      overlayCanvas.height = h;
-      overlayCanvas.style.width = w + 'px';
-      overlayCanvas.style.height = h + 'px';
-
-      // Позиционирование поверх видео/картинки
-      overlayCanvas.style.position = 'absolute';
-      overlayCanvas.style.left = '0';
-      overlayCanvas.style.top = '0';
-      overlayCanvas.style.pointerEvents = 'none';
-
-      // Синхронизация размеров SVG-оверлея масок
-      const maskOverlay = document.getElementById('maskOverlay');
-      if (maskOverlay) {
-        maskOverlay.setAttribute('width', String(w));
-        maskOverlay.setAttribute('height', String(h));
-        // очистить предыдущие маски
-        while (maskOverlay.firstChild) maskOverlay.removeChild(maskOverlay.firstChild);
-      }
-
-      const ctx = overlayCanvas.getContext('2d');
-      ctx.clearRect(0,0,w,h);
-
-      // Рисование линии отключено по требованию.
-      // HUD счётчика отключён по умолчанию.
-
-      // Отрисовка масок (если присутствуют в объектах)
-      if (maskOverlay) {
-        boxes.forEach(b => {
-          if (b && b.mask && b.mask.points) {
-            const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
-            poly.setAttribute('points', String(b.mask.points));
-            poly.setAttribute('fill', '#00ff88');
-            poly.setAttribute('fill-opacity', '0.3');
-            poly.setAttribute('stroke', '#00ff88');
-            poly.setAttribute('stroke-width', '1');
-            poly.setAttribute('vector-effect', 'non-scaling-stroke');
-            maskOverlay.appendChild(poly);
-            // при необходимости — подпись
-            if (b.confidence != null) {
-              const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
-              const lx = (b.x || 0) + 10;
-              const ly = (b.y || 0) + 20;
-              lbl.setAttribute('x', String(lx));
-              lbl.setAttribute('y', String(ly));
-              lbl.setAttribute('font-size', '12');
-              lbl.setAttribute('fill', '#ffffff');
-              lbl.textContent = `${Math.round(b.confidence*100)}%`;
-              maskOverlay.appendChild(lbl);
-            }
-          }
-        });
-      }
-
-      // Отрисовка боксов
-      boxes.forEach(b=>{
-        const x = Math.max(0, Math.min(w - 1, b.x));
-        const y = Math.max(0, Math.min(h - 1, b.y));
-        const ww = Math.max(1, Math.min(w - x, b.w));
-        const hh = Math.max(1, Math.min(h - y, b.h));
-        ctx.strokeStyle = '#00ff88';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, ww, hh);
-        ctx.fillStyle = 'rgba(0,255,136,0.2)';
-        ctx.fillRect(x, y, ww, hh);
-        const cx = x + ww/2;
-        const cy = y + hh/2;
-        ctx.fillStyle = '#0ff';
-        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2); ctx.fill();
-      });
-    }
-
-    // Отрисовка оверлея из серверного сообщения (debug.bboxes)
-    function updateOverlayFromServer(bboxes){
-      try{
-        if (!overlayCanvas) return;
-        const boxes = Array.isArray(bboxes) ? bboxes : [];
-        if (!boxes.length){
-          const active = getActiveVideo();
-          const w = active.clientWidth || active.videoWidth || active.naturalWidth || 640;
-          const h = active.clientHeight || active.videoHeight || active.naturalHeight || 480;
-          overlayCanvas.width = w; overlayCanvas.height = h;
-          const ctx = overlayCanvas.getContext('2d');
-          ctx.clearRect(0,0,w,h);
-          const maskOverlay = document.getElementById('maskOverlay');
-          if (maskOverlay){ while (maskOverlay.firstChild) maskOverlay.removeChild(maskOverlay.firstChild); }
-          return;
-        }
-        // Ожидаем формат [{x,y,w,h, confidence?, mask?}, ...]
-        drawOverlay(boxes);
-      }catch(_){ }
-    }
-
-    function updateTracksAndCount(boxes){
-      // фильтруем класс "cow" если доступен (COCO id = 18), иначе используем все боксы
-      const COW_CLASS_ID = 18;
-      const filtered = boxes.filter(b => b.class === COW_CLASS_ID || (typeof b.class === 'string' && b.class.toLowerCase() === 'cow'));
-      const used = new Set();
-      const newTracks = new Map();
-      (filtered.length ? filtered : boxes).forEach(b=>{
-        const cx = b.x + b.w/2, cy = b.y + b.h/2;
-        let bestId = -1, bestD = 1e9;
-        tracks.forEach((t, id)=>{
-          const dx = t.cx - cx, dy = t.cy - cy;
-          const d = dx*dx + dy*dy;
-          if (d < bestD && !used.has(id)) { bestD = d; bestId = id; }
-        });
-        // уменьшили радиус привязки
-        if (bestId === -1 || bestD > 80*80){
-          const id = nextTrackId++;
-          newTracks.set(id, {cx, cy, lastY: cy});
-        } else {
-          const t = tracks.get(bestId);
-          const yLine = overlayCanvas.height * lineY;
-          // считаем пересечение сверху вниз через коридор +/- lineOffset
-          const crossedDown = (t.lastY <= (yLine - lineOffset) && cy >= (yLine + lineOffset));
-          if (crossedDown) clientCount += 1;
-          newTracks.set(bestId, {cx, cy, lastY: cy});
-          used.add(bestId);
-        }
-      });
-      tracks = newTracks;
-    }
-
-    async function clientInferOnce(){
-      const active = getActiveVideo();
-      const iw = active.videoWidth || active.naturalWidth || 0;
-      const ih = active.videoHeight || active.naturalHeight || 0;
-      if (!iw || !ih) return null;
-
-      const lb = letterboxToSquare(getActiveVideo(), CLIENT_TARGET);
-      const tensor = toTensorCHWFloat(lb.canvas);
-      const session = await ensureOrtSession();
-      const feeds = {};
-      // безопасное имя входа
-      const inputName = (session.inputNames && session.inputNames.length ? session.inputNames[0] : 'images');
-      feeds[inputName] = tensor;
-      const t0 = performance.now();
-      const results = await session.run(feeds);
-      const t1 = performance.now();
-      lastInferTime = t1 - t0;
-
-      const outKey = Object.keys(results)[0];
-      const out = results[outKey];
-      // чуть выше порог уверенности для стабильности
-      const boxes = postprocessYOLO(out, iw, ih, lb.dx, lb.dy, lb.scale, 0.40);
-      updateTracksAndCount(boxes);
-      drawOverlay(boxes);
-      return boxes;
-    }
-
-    function startClientLoop(){
-      if (clientLoopActive) return;
-      clientLoopActive = true;
-      (async function loop(){
-        if (!clientLoopActive) return;
-
-        // Единая функция обновления правых полей
-        const updateRightMetrics = () => {
-          // Клиентский трекер выключен. Не трогаем manualCount, чтобы не затирать значение с сервера/WS.
-          // Поддерживаем правые поля, пересчитывая из текущих значений.
-          try { recalcFromCountOrTotal(); } catch(_){}
+    async function getStreams() {
+        // In a real application, you would fetch this from the backend
+        return {
+            'cam1': 'rtsp://admin:Qwerty.123@10.15.6.24/1/1'
         };
-
-        // ждём, пока появится кадр
-        if (!hasFrameReady()){
-          // ожидание первого кадра
-          drawOverlay([]);
-          updateRightMetrics();
-          // пробуем синхронизацию размеров, чтобы избежать "ноль" размеров при первом кадре
-          if (typeof syncOverlaySize === 'function') syncOverlaySize();
-          return setTimeout(loop, 150);
-        }
-
-        const tStart = performance.now();
-        try{ await clientInferOnce(); }catch(e){}
-        const took = performance.now() - tStart;
-        const target = 1000/CLIENT_FPS;
-        const delay = Math.max(0, target - took);
-        
-        // перерисовываем оверлей последним рассчитанным набором боксов
-        // drawOverlay([]) убираем, чтобы не затирать визуализацию
-        if (typeof updateRightMetrics === 'function') updateRightMetrics();
-        setTimeout(loop, delay);
-      })();
-    }
-    function stopClientLoop(){
-      if (!clientLoopActive) return;
-      clientLoopActive = false;
-      logDiag('stopClientLoop');
-      if (overlayCanvas){
-        const ctx = overlayCanvas.getContext('2d');
-        ctx.clearRect(0,0,overlayCanvas.width, overlayCanvas.height);
-      }
-    }
-    // Видимый статус (без переключателя)
-    function setStatus(msg, color='#3a558c', ttl=3000){
-      if (!streamStatus) return;
-      streamStatus.textContent = msg;
-      streamStatus.style.color = color;
-      if (ttl > 0){
-        setTimeout(()=>{ streamStatus.textContent=''; streamStatus.style.color=''; }, ttl);
-      }
     }
 
-    // --- WebSocket: единый источник без дублей (/ws/count) ---
-    // Объявляем через var, чтобы исключить TDZ и обращения до инициализации.
-    var ws = null;
-    var seekController = null;
-    // Последнее применённое значение счётчика (для предотвращения лишних перерисовок)
-    var __lastManualCountStr = '';
-    function setManualCountValue(val){
-      try{
-        // Преобразуем и валидируем значение
-        const n = Number(val);
-        if (!Number.isFinite(n) || n < 0) {
-          return;
-        }
-        const newStr = String(Math.ceil(n));
-        const curStr = String(manualCount.value || '');
-        // Не обновляем, если значение не изменилось
-        if (curStr === newStr || __lastManualCountStr === newStr) {
-          return;
-        }
-        manualCount.value = newStr;
-        __lastManualCountStr = newStr;
-        // Прямой пересчёт зависимых полей без лишних событий
-        try { recalcFromCountOrTotal(); } catch(_){ }
-      }catch(e){ 
-        console.error('[DEBUG] setManualCountValue error:', e);
-      }
-    }
-
-    function applyServerMetrics(cnt){
-      setManualCountValue(cnt);
-    }
-
-    function connectWS(){
-      try{
-        // Всегда пересоздаём WS с актуальными параметрами камеры/файла
-        if (ws){ try{ ws.close(); }catch(_){ } ws = null; }
-        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-        const qs = new URLSearchParams();
-        if (fileSession && fileSession.id){
-          qs.set('mode', 'file');
-          qs.set('id', String(fileSession.id));
-        } else {
-          qs.set('mode', 'camera');
-          qs.set('camera', String(selectedCameraId||'cam1'));
-        }
-        const url = `${proto}://${location.host}/ws/count?${qs.toString()}`;
-        ws = new WebSocket(url);
-        ws.onopen = () => setStatus('WS connected', '#2c5', 1200);
-        ws.onclose = () => {
-          setStatus('WS disconnected', '#a66', 1500);
-          ws = null;
-          // Авто-реконнект через небольшой таймаут
-          setTimeout(() => { try { if (!ws) connectWS(); } catch(_) {} }, 1500);
-        };
-        ws.onerror = () => { setStatus('WS error', '#a66', 1500); };
-        ws.onmessage = (ev) => {
-          if (typeof ev.data === 'string') {
-            try{
-              const msg = JSON.parse(ev.data);
-              console.debug('[DEBUG] WS message received:', msg);
-              if (msg.type === 'error'){
-                setStatus(String(msg.text||'WS error'), '#a66', 1500);
-              } else if (msg.type === 'count_update'){
-                const { camera, count, fps, debug } = msg;
-                // Предпочитаем стабильное stat, затем avg
-                const statTop = (typeof msg.stat === 'number') ? msg.stat : null;
-                const avgTop = (typeof msg.avg === 'number') ? msg.avg : null;
-                const statDbg = (debug && typeof debug.stat === 'number') ? debug.stat : null;
-                const avgDbg = (debug && typeof debug.avg === 'number') ? debug.avg : null;
-                const preferred = [statTop, statDbg, avgTop, avgDbg].find(v => (v != null && Number.isFinite(v) && v > 0));
-                const val = (preferred != null) ? Math.ceil(preferred) : Math.ceil(Number(count||0));
-                console.debug('[DEBUG] WS count_update:', { statTop, statDbg, avgTop, avgDbg, count, chosen: val });
-                applyServerMetrics(val);
-                // график: пушим сырые значения в существующий лайв-чарт
-                try { pushLivePoint(Number(count||0), Number(preferred)); } catch(_){ }
-                // Оверлей из сервера (если передаётся)
-                if (debug && Array.isArray(debug.bboxes)) {
-                  updateOverlayFromServer(debug.bboxes);
+    async function populateStreams() {
+        const streams = await getStreams();
+        streamRadios.innerHTML = '';
+        Object.keys(streams).forEach((id, idx) => {
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'streamRadio';
+            radio.value = id;
+            radio.id = 'stream_' + id;
+            if (idx === 0) {
+                radio.checked = true;
+                activeStreamId = id;
+            }
+            radio.style.display = 'none';
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    activeStreamId = id;
+                    stopStream();
                 }
-                const ts = new Date().toLocaleTimeString();
-                if (weightUpdateTime) weightUpdateTime.textContent = `Последнее обновление: ${ts} (камера: ${camera||'-'})`;
-              }
-            }catch(_){ }
-          }
-        };
-      }catch(e){
-        setStatus('WS init failed', '#a66', 1500);
-      }
-    }
-    function startPollingCount(){
-      // Подключаем WS с актуальными параметрами
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => connectWS(), { once: true });
-      } else {
-        connectWS();
-      }
-    }
-    async function requestWsFrame(){
-      // В версии /ws/count кадры не передаются — только метаданные
-    }
-    function stopPollingCount(){
-      // Единственная корректная остановка: закрываем WS и очищаем ссылку
-      if (ws){ try{ ws.close(); }catch(_){ } ws = null; }
-    }
+            });
 
-    // Удалён автозапуск опроса на window.onload — управление только через setInferMode()
+            const label = document.createElement('label');
+            label.htmlFor = radio.id;
+            label.textContent = id;
+            label.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
 
-    // --- Live Chart (минималистичный) ---
-    const liveChartCanvas = document.getElementById('liveCountChart');
-    let chartSeries = []; // [[ts, avg, count]]
-    const CHART_MINUTES = 2;
-    let chartLiveMode = true; // true=принимать точки от WS, false=режим CSV
-    const chartCsvBtn = document.getElementById('chartCsvBtn');
-    const chartCsvInput = document.getElementById('chartCsvInput');
-    const chartLiveBtn = document.getElementById('chartLiveBtn');
-    const chartHint = document.getElementById('chartHint');
-
-    function pushLivePoint(countVal, avgVal){
-      if (!chartLiveMode) return;
-      const now = Date.now()/1000;
-      const c = Number.isFinite(countVal) ? Number(countVal) : 0;
-      const a = Number.isFinite(avgVal) ? Number(avgVal) : NaN;
-      chartSeries.push([now, a, c]);
-      const thr = now - CHART_MINUTES*60;
-      if (chartSeries.length > 600 || (chartSeries[0] && chartSeries[0][0] < thr)){
-        chartSeries = chartSeries.filter(r => r[0] >= thr);
-      }
-      try { drawLiveChart(); } catch(_){ }
-    }
-    function clearLiveChart(){ chartSeries = []; try{ drawLiveChart(); }catch(_){} }
-    function drawLiveChart(){
-      if (!liveChartCanvas) return;
-      const ctx = liveChartCanvas.getContext('2d');
-      const dpr = window.devicePixelRatio || 1;
-      const cssW = liveChartCanvas.clientWidth || liveChartCanvas.width;
-      const cssH = liveChartCanvas.clientHeight || liveChartCanvas.height || 120;
-      if (liveChartCanvas.width !== Math.floor(cssW*dpr)) liveChartCanvas.width = Math.floor(cssW*dpr);
-      if (liveChartCanvas.height !== Math.floor(cssH*dpr)) liveChartCanvas.height = Math.floor(cssH*dpr);
-      const W = liveChartCanvas.width, H = liveChartCanvas.height;
-      ctx.setTransform(1,0,0,1,0,0);
-      ctx.clearRect(0,0,W,H);
-      // фон и сетка
-      ctx.fillStyle = 'rgba(240,245,252,0.9)';
-      ctx.fillRect(0,0,W,H);
-      ctx.strokeStyle = 'rgba(60,90,140,0.10)';
-      ctx.lineWidth = 1;
-      const gx = 6, gy = 4;
-      for (let i=1;i<gx;i++){ const x = Math.round(W*i/gx); ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
-      for (let j=1;j<gy;j++){ const y = Math.round(H*j/gy); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
-      if (!chartSeries || chartSeries.length < 2) return;
-      const now = Date.now()/1000;
-      const horizon = CHART_MINUTES*60;
-      const arr = chartSeries.filter(r => (now - r[0]) <= horizon);
-      if (arr.length < 2) return;
-      const xs = arr.map(r=>r[0]);
-      const avgs = arr.map(r=>Number.isFinite(r[1]) ? r[1] : NaN).filter(n=>Number.isFinite(n));
-      const counts = arr.map(r=>r[2]);
-      const xmin = Math.min(...xs), xmax = Math.max(...xs);
-      const ymin = Math.min(0, Math.min(...counts), (avgs.length?Math.min(...avgs):Infinity));
-      const ymax = Math.max(1, Math.max(...counts), (avgs.length?Math.max(...avgs):0));
-      const padL=6, padR=6, padT=6, padB=6;
-      const UX = (x)=> padL + ( (x - xmin) / Math.max(1e-6, (xmax-xmin)) ) * (W - padL - padR);
-      const UY = (y)=> (H - padB) - ( (y - ymin) / Math.max(1e-6, (ymax-ymin)) ) * (H - padT - padB);
-      // count (blue)
-      ctx.strokeStyle = '#2c7be5'; ctx.lineWidth = Math.max(1, 1.2*dpr);
-      ctx.beginPath(); let st=false; for (const r of arr){ const x=UX(r[0]), y=UY(r[2]); if(!st){ctx.moveTo(x,y);st=true;} else {ctx.lineTo(x,y);} } ctx.stroke();
-      // avg (pink)
-      ctx.strokeStyle = '#e83e8c'; ctx.beginPath(); st=false; for (const r of arr){ if(!Number.isFinite(r[1])) continue; const x=UX(r[0]), y=UY(r[1]); if(!st){ctx.moveTo(x,y);st=true;} else {ctx.lineTo(x,y);} } ctx.stroke();
-    }
-
-    // Кнопки управления графиком
-    if (chartCsvBtn && chartCsvInput){
-      chartCsvBtn.addEventListener('click', ()=> chartCsvInput.click());
-      chartCsvInput.addEventListener('change', async ()=>{
-        const f = chartCsvInput.files && chartCsvInput.files[0]; if (!f) return;
-        chartLiveMode = false; // переходим в режим CSV
-        if (chartHint) chartHint.textContent = 'CSV режим';
-        const text = await f.text();
-        // Простейший парсер CSV: заголовок + строки. Ожидаем колонки count,avg, optional time/ts
-        const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
-        if (lines.length === 0) return;
-        const header = lines[0].split(/[,;\t]/).map(s=>s.trim().toLowerCase());
-        const idxCount = header.findIndex(h=> h==='count' || h==='cnt');
-        const idxAvg = header.findIndex(h=> h==='avg' || h==='avg_count' || h==='average');
-        const idxTime = header.findIndex(h=> h==='time' || h==='ts' || h==='t');
-        let t0 = Date.now()/1000; let tstep = 0.2; let cur = t0;
-        chartSeries = [];
-        for (let i=1;i<lines.length;i++){
-          const cols = lines[i].split(/[,;\t]/).map(s=>s.trim());
-          if (!cols.length) continue;
-          const c = idxCount>=0 ? Number(cols[idxCount]) : NaN;
-          const a = idxAvg>=0 ? Number(cols[idxAvg]) : NaN;
-          let t = idxTime>=0 ? Number(cols[idxTime]) : NaN;
-          if (!Number.isFinite(t)) { t = cur; cur += tstep; }
-          chartSeries.push([t, Number.isFinite(a)?a:NaN, Number.isFinite(c)?c:0]);
-        }
-        try { drawLiveChart(); } catch(_){ }
-      });
-    }
-    if (chartLiveBtn){
-      chartLiveBtn.addEventListener('click', ()=>{
-        chartLiveMode = true; clearLiveChart(); if (chartHint) chartHint.textContent = 'лайв режим';
-      });
-    }
-
-    async function refreshCountSeries(){
-      try{
-        // Не обновляем график, если видео остановлено
-        if (!isVideoPlaying) return;
-        const cam = encodeURIComponent(selectedCameraId||'cam1');
-        const resp = await fetch(`/api/count_series?camera=${cam}&minutes=${CHART_MINUTES}&ts=${Date.now()}`, { cache:'no-store' });
-        if (!resp.ok) {
-          console.debug('[DEBUG] count_series fetch failed:', resp.status);
-          return;
-        }
-        const data = await resp.json();
-        if (Array.isArray(data.series)) chartSeries = data.series;
-        if (Array.isArray(data.spikes)) chartSpikes = data.spikes;
-        drawLiveChart();
-      }catch(e){ 
-        console.debug('[DEBUG] refreshCountSeries error:', e.message);
-      }
-    }
-
-    function startLiveChart(){
-      if (chartTimer) return;
-      refreshCountSeries();
-      chartTimer = setInterval(refreshCountSeries, 3000);
-      window.addEventListener('resize', ()=>{ drawLiveChart(); });
-    }
-    function stopLiveChart(){ if (chartTimer){ clearInterval(chartTimer); chartTimer=null; } }
-
-    async function loadSessionList(){
-      try{
-        let dateParam = '';
-        if (sessionDate && sessionDate.value){
-          // sessionDate.value формата YYYY-MM-DD -> YYYYMMDD
-          dateParam = sessionDate.value.replaceAll('-', '');
-        }
-        const resp = await fetch(`/api/list_sessions?${dateParam?('date='+encodeURIComponent(dateParam)+'&'):''}ts=${Date.now()}`, { cache:'no-store' });
-        if (!resp.ok) return;
-        const data = await resp.json();
-        if (!sessionSelect) return;
-        const cur = sessionSelect.value || '';
-        sessionSelect.innerHTML = '<option value="">— выберите сессию (CSV) —</option>';
-        (data.sessions||[]).forEach(name => {
-          const opt = document.createElement('option');
-          opt.value = name; opt.textContent = name; if (name===cur) opt.selected = true; sessionSelect.appendChild(opt);
+            streamRadios.appendChild(radio);
+            streamRadios.appendChild(label);
         });
-      }catch(_){ }
     }
 
-    if (loadSessionBtn){
-      loadSessionBtn.addEventListener('click', async ()=>{
-        const f = sessionSelect && sessionSelect.value ? sessionSelect.value : '';
-        if (!f) return;
-        sessionMode = true;
-        sessionFile = f;
-        await refreshCountSeries();
-        setStatus('Загружена сессия: ' + f, '#3a558c', 2000);
-      });
-    }
-    if (backToLiveBtn){
-      backToLiveBtn.addEventListener('click', async ()=>{
-        sessionMode = false;
-        sessionFile = null;
-        await refreshCountSeries();
-        setStatus('Режим Live', '#3a558c', 1200);
-      });
-    }
-
-    // стартуем только список сессий, график запускается с видео
-    loadSessionList();
-    // периодически обновляем список сессий
-    setInterval(loadSessionList, 20000);
-    if (sessionDate){ sessionDate.addEventListener('change', loadSessionList); }
-
-    async function toggleBalanced(frontDesired=null){
-      try{
-        // если в файловом режиме — меняем для file session, иначе для live камеры
-        const src = String(video.src || '');
-        const isFileMode = src.includes('/api/video_file/');
-        if (isFileMode && fileSession.id){
-          // узнать текущее
-          const getResp = await fetch(`/api/video_file/balance_mode?id=${encodeURIComponent(fileSession.id)}&ts=${Date.now()}`, { cache: 'no-store' });
-          let cur = false;
-          if (getResp.ok){
-            const d = await getResp.json();
-            cur = !!d.balanced;
-          }
-          const next = (frontDesired==null) ? !cur : !!frontDesired;
-          const setResp = await fetch(`/api/video_file/balance_mode?id=${encodeURIComponent(fileSession.id)}&balanced=${String(next)}&ts=${Date.now()}`, { method: 'POST' });
-          if (setResp.ok){
-            setStatus(next ? 'Баланс включён' : 'Баланс выключен', next ? '#2c5' : '#3a558c', 1200);
-            // перезапросить источник чтобы сразу увидеть эффект
-            if (isVideoPlaying){
-              video.src = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
-            }else{
-              const t = parseFloat(seekRange.value||'0')||0;
-              video.src = `/api/video_file/frame?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
-            }
-          }else{
-            setStatus('Не удалось изменить режим баланса (файл)', '#a66', 1800);
-          }
-        }else{
-          const cam = selectedCameraId || 'cam1';
-          const getResp = await fetch(`/api/balance_mode?camera=${encodeURIComponent(cam)}&ts=${Date.now()}`, { cache: 'no-store' });
-          let cur = false;
-          if (getResp.ok){
-            const d = await getResp.json();
-            cur = !!d.balanced;
-          }
-          const next = (frontDesired==null) ? !cur : !!frontDesired;
-          const setResp = await fetch(`/api/balance_mode?camera=${encodeURIComponent(cam)}&balanced=${String(next)}&ts=${Date.now()}`, { method: 'POST' });
-          if (setResp.ok){
-            setStatus(next ? 'Баланс включён' : 'Баланс выключен', next ? '#2c5' : '#3a558c', 1200);
-            // перезагрузим live поток
-            const liveUrl = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`) + `&ts=${Date.now()}`;
-            video.src = liveUrl;
-          }else{
-            setStatus('Не удалось изменить режим баланса (live)', '#a66', 1800);
-          }
-        }
-      }catch(e){
-        setStatus('Ошибка режима баланса', '#a66', 1800);
-      }
-    }
-    
-    if (balanceBtn) balanceBtn.addEventListener('click', async () => {
-      // включаем/выключаем баланс и обнуляем калибровку чтобы начать адаптацию заново
-      const src = String(video.src || '');
-      const isFileMode = src.includes('/api/video_file/');
-      if (isFileMode && fileSession.id){
-        await fetch(`/api/video_file/balance_mode?id=${encodeURIComponent(fileSession.id)}&balanced=true&reset_calibration=true&ts=${Date.now()}`, { method: 'POST' }).catch(()=>{});
-        setStatus('Баланс включён (калибровка сброшена)', '#2c5', 1200);
-        const playUrl = `/api/video_file/play?id=${encodeURIComponent(fileSession.id)}&camera=${encodeURIComponent(fileSession.camera)}&rate=1.0&ts=${Date.now()}`;
-        video.src = playUrl;
-        isVideoPlaying = true;
-        const btn = document.getElementById('videoPlayPauseBtn'); if (btn) btn.textContent = 'Стоп';
-      }else{
-        const cam = selectedCameraId || 'cam1';
-        await fetch(`/api/balance_mode?camera=${encodeURIComponent(cam)}&balanced=true&reset_calibration=true&ts=${Date.now()}`, { method: 'POST' }).catch(()=>{});
-        setStatus('Баланс включён (калибровка сброшена)', '#2c5', 1200);
-        const liveUrl = ((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`) + `&ts=${Date.now()}`;
-        video.src = liveUrl;
-      }
-    });
-
-    /**
-     * Единая строгая логика пересчёта:
-     * - Если меняется Количество (count): обновляем Средний = Total / Count (если Total задан), иначе чистим.
-     * - Если меняется Общий вес (total): обновляем Средний = Total / Count (если Count задан), иначе чистим.
-     * - Если меняется Средний (avg): обновляем Общий вес = Count * Avg (если Count задан), иначе чистим.
-     * Всюду защищаемся от NaN и неположительных значений.
-     */
-    function toNum(v){ const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : NaN; }
-    function fmt2(n){ return Number.isFinite(n) ? (Math.round(n * 100) / 100).toFixed(2) : ''; }
-
-    function clampNonNegative(n){ return Number.isFinite(n) ? Math.max(0, n) : NaN; }
-
-    function setLiveTop(count, total, avg){
-      const liveTotalEl = document.getElementById('liveTotalWeightValue');
-      const liveAvgEl = document.getElementById('liveAvgWeightValue');
-      const liveCountEl = document.getElementById('liveCountValue');
-      if (liveCountEl) {
-        if (Number.isFinite(count) && count >= 0) {
-          liveCountEl.textContent = String(Math.trunc(count));
-        } else if (liveCountEl.textContent === '' || liveCountEl.textContent === '—') {
-          liveCountEl.textContent = '—';
-        }
-      }
-      if (liveTotalEl) {
-        liveTotalEl.textContent = (Number.isFinite(total) && total >= 0) ? fmt2(total) : '—';
-      }
-      if (liveAvgEl) {
-        liveAvgEl.textContent = (Number.isFinite(avg) && avg >= 0) ? fmt2(avg) : '—';
-      }
-    }
-
-    function recalcFromCountOrTotal(){
-      const count = clampNonNegative(toNum(manualCount.value));
-      const total = clampNonNegative(toNum(manualTotalWeight.value));
-      const hasCount = Number.isFinite(count) && count > 0;
-      const hasTotal = Number.isFinite(total) && total >= 0;
-
-      if (hasCount && hasTotal){
-        const rawAvg = total / count;
-        const avg = Number.isFinite(rawAvg) && rawAvg >= 0 ? rawAvg : NaN;
-        manualAvgWeight.value = Number.isFinite(avg) ? fmt2(avg) : '';
-        setLiveTop(count, total, avg);
-      } else if (hasCount && !hasTotal) {
-        // total пустой — чистим средний, но оставляем count в топе
-        manualAvgWeight.value = '';
-        setLiveTop(count, NaN, NaN);
-      } else if (!hasCount && hasTotal) {
-        // count отсутствует/0 — средний не определён
-        manualAvgWeight.value = '';
-        setLiveTop(NaN, total, NaN);
-      } else {
-        manualAvgWeight.value = '';
-        setLiveTop(NaN, NaN, NaN);
-      }
-    }
-
-    function recalcFromAvg(){
-      const count = clampNonNegative(toNum(manualCount.value));
-      const avg = clampNonNegative(toNum(manualAvgWeight.value));
-      const hasCount = Number.isFinite(count) && count > 0;
-      const hasAvg = Number.isFinite(avg) && avg >= 0;
-
-      if (hasCount && hasAvg){
-        const total = count * avg;
-        manualTotalWeight.value = fmt2(total);
-        setLiveTop(count, total, avg);
-      } else {
-        manualTotalWeight.value = '';
-        setLiveTop(count, NaN, hasAvg ? avg : NaN);
-      }
-    }
-
-    // Снимем потенциальные старые inline-обработчики и нормализуем input событие для wheel/step кнопок
-    ['oninput','onchange','onkeyup'].forEach(p => {
-      manualCount[p] = null;
-      manualTotalWeight[p] = null;
-      manualAvgWeight[p] = null;
-    });
-
-    // Привязки: реагируем и на input, и на change (для num step/стрелок), и на keyup (запятая)
-    ['input','change','keyup'].forEach(ev => {
-      manualCount.addEventListener(ev, recalcFromCountOrTotal);
-      manualTotalWeight.addEventListener(ev, recalcFromCountOrTotal);
-      manualAvgWeight.addEventListener(ev, recalcFromAvg);
-    });
-    // Инициализирующий пересчёт после загрузки DOM — чтобы поля сразу синхронизировались
-    setTimeout(() => {
-      try { recalcFromCountOrTotal(); } catch(_) {}
-    }, 0);
-
-    // Перемотка/таймлайн и +/-10с убраны для MJPEG live
-
-    // Сохранение ручного ввода обрабатывается единым обработчиком ниже (saveManualBtnEl.onclick). Дубликат удалён.
-
-    // --- Автоматический пересчёт среднего веса (удалена дубляция) ---
-    // Функции и подписки перенесены ниже в единую секцию
-
-    // Статус модели скрыт (требование: не отображать строку "Режим/Модель")
-    modelStatus.textContent = '';
-
-    // Удалены старые контролы выбора локального видеофайла и распознавания с него — используется только RTSP/MJPEG
-
-    // --- Кнопка Стоп/Старт для live (MJPEG) ---
-    // Кнопка "Кадр" удалена по требованию — запрос кадров управляется автоматически через WS
-
-    const mjpegUrl = (config.cameras[0] && config.cameras[0].url) || '/api/video_feed?mode=server';
-    // Единый обработчик Старт/Стоп для файлового WS ниже (1076+). Эта версия удалена.
-
-    /**
-     * Перемотка файла на клиенте:
-     * - В паузе: показываем статический кадр (через Blob URL из /api/video_file/frame), чтобы не рвать текущий поток src лишний раз.
-     * - В воспроизведении: показываем статический кадр во время движения бегунка и через debounce возвращаемся к /play.
-     * Blob-подход уменьшает фликер и гонки загрузки IMG.
-     */
-    let seekDebounceTimer = null;
-    
-    async function fetchFrameBlobUrl(id, camera, tSec){
-      try{
-        const url = `/api/video_file/frame_ultra_fast?id=${encodeURIComponent(id)}&t=${encodeURIComponent(tSec)}&ts=${Date.now()}`;
-        const resp = await fetch(url, { cache: 'no-store' });
-        if (!resp.ok) return null;
-        const blob = await resp.blob();
-        if (lastObjectUrl) { URL.revokeObjectURL(lastObjectUrl); lastObjectUrl = null; }
-        lastObjectUrl = URL.createObjectURL(blob);
-        return lastObjectUrl;
-      }catch(e){
-        return null;
-      }
-    }
-    
-    // refreshFileCounts удалён: обновление идёт через WS файла
-
-    // Управление запросами при перемотке обрабатывается единым обработчиком ниже (1048+). Дубликат удалён.
-
-    // Поддержка WS для file sessions
-    let fileWs = null;
-    function stopFileWS(){ try{ if (fileWs) fileWs.close(); }catch(_){ } fileWs = null; }
-
-    // Обработчик выбора файла: после первого кадра переключаемся на WS-видео
-    fileInput.addEventListener('change', async (e) => {
-      try { clearLiveChart(); } catch(_){ }
-      try { chartLiveMode = true; if (chartHint) chartHint.textContent = 'лайв режим'; } catch(_){ }
-      stopFileWS();
-      const f = fileInput.files && fileInput.files[0];
-      if (!f){ return; }
-      const fid = 'file1';
-      const cam = 'cam_file1';
-
-      const form = new FormData();
-      form.append('camera', cam);
-      form.append('id', fid);
-      form.append('file', f, f.name);
-
-      const resp = await fetch('/api/video_file/open_ultra_fast', { method: 'POST', body: form });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'open failed');
-
-      fileSession = { id: fid, camera: cam, duration: data.duration || 0 };
-      const duration = data.duration || 0;
-      seekRange.max = String(Math.max(0.1, duration));
-      seekRange.value = '0';
-      curTime.textContent = '0.0';
-      durTime.textContent = (duration || 0).toFixed(1);
-
-      const firstFrameUrl = `/api/video_file/frame_ultra_fast?id=${encodeURIComponent(fid)}&t=0&ts=${Date.now()}`;
-        const imgEl = document.getElementById('videoStream');
-        const videoEl = document.getElementById('videoPlayer');
-        
-        if (imgEl) {
-          // Переходим в файловый режим: отключаем live-снимки
-          try { stopLiveSnapshotLoop(); } catch(_){}
-          // Запустить WS-счётчик (единый /ws/count с mode=file)
-          startFileVideoWS(fid);
-          isVideoPlaying = true;
-          const btn = document.getElementById('videoPlayPauseBtn'); if (btn) btn.textContent = 'Стоп';
-          stopFileWS();
-          startPollingCount();
-
-          imgEl.onload = () => {
-            // кадр загрузился — всё ок
-          };
-          imgEl.onerror = () => {
-            // Даже если первый кадр не пришёл, WS уже запущен
-            try { setStatus('Не удалось загрузить первый кадр, пробуем WS', '#a66', 1600); } catch(_){}
-          };
-          // на входе убедимся, что старые WS закрыты и открыт единый с mode=file
-          stopFileWS();
-          startPollingCount();
-          imgEl.src = firstFrameUrl;
-        }
-    });
-
-    // Отключить polling при наличии WS
-    function stopFilePolling(){ if (window.__filePollTimer) { clearInterval(window.__filePollTimer); window.__filePollTimer = null; } }
-
-    // --- Воспроизведение файла через WebSocket ultra-fast ---
-    let fileVideoWS = null;
-    let fileWSActive = false;
-    function startFileVideoWS(id){
-      try{
-        if (!id) return;
-        // Уже активен для того же id
-        if (fileWSActive && fileVideoWS && fileVideoWS.__id === id) return;
-        stopFileVideoWS();
-        const imgEl = document.getElementById('videoStream'); if (!imgEl) return;
-        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-        const url = `${proto}://${location.host}/ws/video_file_ultra_fast?id=${encodeURIComponent(id)}`;
-        const ws = new WebSocket(url);
-        ws.binaryType = 'arraybuffer';
-        ws.__id = id;
-        fileVideoWS = ws;
-        fileWSActive = true;
-        // UI: статус — подключаемся к файлу
-        if (streamStatus) { streamStatus.textContent = 'Подключаемся к файлу'; streamStatus.style.color = '#2a7'; }
-        ws.onmessage = (ev)=>{
-          try{
-            const buf = ev.data;
-            if (buf && buf.byteLength > 0){
-              if (lastObjectUrl) { try{ URL.revokeObjectURL(lastObjectUrl); }catch(_){} lastObjectUrl = null; }
-              // backend отправляет BMP через encode_raw_frame -> устанавливаем корректный MIME
-              const blob = new Blob([buf], { type: 'image/bmp' });
-              lastObjectUrl = URL.createObjectURL(blob);
-              imgEl.src = lastObjectUrl;
-              if (streamStatus) { streamStatus.textContent = 'Воспроизведение файла'; streamStatus.style.color = '#2a7'; }
-            }
-          }catch(_){ }
-        };
-        ws.onclose = ()=>{ fileVideoWS = null; fileWSActive = false; if (streamStatus) { streamStatus.textContent = 'Остановлено'; streamStatus.style.color = '#a66'; } };
-        ws.onerror = ()=>{};
-      }catch(_){ }
-    }
-
-    function stopFileVideoWS(){ 
-      try{ if (fileVideoWS) fileVideoWS.close(); }catch(_){ }
-      fileVideoWS = null; fileWSActive = false;
-      if (lastObjectUrl) { try{ URL.revokeObjectURL(lastObjectUrl); }catch(_){} lastObjectUrl = null; }
-    }
-
-    // Перемотка: не останавливаем воспроизведение. Если пауза — показываем статический кадр.
-    seekRange.addEventListener('input', () => {
-      const t = parseFloat(seekRange.value || '0') || 0;
-      curTime.textContent = t.toFixed(1);
-      if (!fileSession.id) return;
-      if (isVideoPlaying) {
-        // Во время воспроизведения — мгновенный seek без ожидания ответа
-        const id = fileSession.id; const tNow = parseFloat(seekRange.value || '0') || 0;
-        const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(id)}&t=${tNow}&ts=${Date.now()}`;
-        // fire-and-forget для мгновенного перескока
-        fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
-        return;
-      }
-      // В паузе — показываем превью кадра с дебаунсом
-      if (seekDebounceTimer) { clearTimeout(seekDebounceTimer); seekDebounceTimer = null; }
-      seekDebounceTimer = setTimeout(async () => {
-        const id = fileSession.id; const tNow = parseFloat(seekRange.value || '0') || 0;
-        if (seekController) { try { seekController.abort(); } catch(_){} }
-        seekController = new AbortController();
-        const imgEl = document.getElementById('videoStream'); if (!imgEl) return;
-        const t0 = performance.now();
-        const url = `/api/video_file/frame_ultra_fast?id=${encodeURIComponent(id)}&t=${tNow}&ts=${Date.now()}`;
-        try {
-          const resp = await fetch(url, { signal: seekController.signal, cache: 'no-store' });
-          if (!resp.ok) return;
-          const blob = await resp.blob();
-          if (lastObjectUrl) { try { URL.revokeObjectURL(lastObjectUrl); } catch(_){} }
-          lastObjectUrl = URL.createObjectURL(blob);
-          imgEl.src = lastObjectUrl;
-          const dt = performance.now() - t0; if (encodeTimeEl) encodeTimeEl.textContent = dt.toFixed(0);
-        } catch(_) { /* aborted or error */ }
-      }, 120);
-    });
-
-    // Старт/Стоп: live MJPEG или файл (WS)
-    videoPlayPauseBtn.addEventListener('click', async () => {
-      const imgEl = document.getElementById('videoStream');
-      if (!imgEl) return;
-      // Файловый режим
-      if (fileSession && fileSession.id) {
-        const { id } = fileSession;
-        const duration = fileSession.duration || 0;
-        const t = Math.max(0, Math.min(duration || 0, parseFloat(seekRange.value || '0') || 0));
-        if (isVideoPlaying) {
-          const frameUrl = `/api/video_file/frame_ultra_fast?id=${encodeURIComponent(id)}&t=${encodeURIComponent(t)}&ts=${Date.now()}`;
-          stopFileVideoWS();
-          imgEl.src = frameUrl;
-          isVideoPlaying = false;
-          curTime.textContent = t.toFixed(1);
-          videoPlayPauseBtn.textContent = 'Старт';
-        } else {
-          // Старт: возобновляем WS-видео latest-only
-          startFileVideoWS(id);
-          isVideoPlaying = true;
-          videoPlayPauseBtn.textContent = 'Стоп';
-          stopFilePolling();
-        }
-        return;
-      }
-      // Live режим (MJPEG)
-      if (isVideoPlaying) {
-        // Остановка: очищаем src, выключаем fallback-циклы и график
-        try { stopLiveSnapshotLoop(); } catch(_){}
-        imgEl.removeAttribute('src');
-        isVideoPlaying = false;
-        videoPlayPauseBtn.textContent = 'Старт';
-        if (streamStatus) { streamStatus.textContent = 'Остановлено'; streamStatus.style.color = '#a66'; }
-      } else {
-        // Старт: включаем MJPEG поток
-        const liveUrl = (((config.cameras[0] && config.cameras[0].url) || `/api/video_feed?mode=server`)) + `&camera=${encodeURIComponent(selectedCameraId||'cam1')}&ts=${Date.now()}`;
-        imgEl.src = liveUrl;
+    async function startStream(streamId, sourceUri) {
+        await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
+        videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
         isVideoPlaying = true;
         videoPlayPauseBtn.textContent = 'Стоп';
-        if (streamStatus) { streamStatus.textContent = 'Live'; streamStatus.style.color = '#2a7'; }
-        // При старте live подключаем WS-подписку на счётчик
-        try { startPollingCount(); } catch(_) {}
-      }
-    });
-
-    // --- Горячие клавиши плеера ---
-    // Space: Play/Pause
-    // Left/Right: -1s/+1s (только для файлового режима)
-    // Home/End: 0s/конец файла
-    document.addEventListener('keydown', (ev) => {
-      // Игнорируем, если фокус в инпутах/текстовых полях
-      const tag = (document.activeElement && document.activeElement.tagName) || '';
-      const isTyping = /INPUT|TEXTAREA|SELECT/.test(tag);
-      if (isTyping) return;
-      // Пространство: старт/стоп
-      if (ev.code === 'Space') {
-        ev.preventDefault();
-        try { videoPlayPauseBtn.click(); } catch(_) {}
-        return;
-      }
-      if (!fileSession || !fileSession.id) return; // ниже — только для файлового режима
-      const duration = fileSession.duration || 0;
-      const step = 1.0;
-      const cur = parseFloat(seekRange.value || '0') || 0;
-      const clamp = (x) => Math.max(0, Math.min(duration, x));
-      if (ev.code === 'ArrowLeft') {
-        ev.preventDefault();
-        const t = clamp(cur - step);
-        seekRange.value = String(t);
-        curTime.textContent = t.toFixed(1);
-        // При проигрывании отправляем быстрый seek, иначе покажем превью
-        if (isVideoPlaying) {
-          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=${t}&ts=${Date.now()}`;
-          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
-        } else {
-          // Триггерим обработчик дебаунса
-          seekRange.dispatchEvent(new Event('input'));
-        }
-      } else if (ev.code === 'ArrowRight') {
-        ev.preventDefault();
-        const t = clamp(cur + step);
-        seekRange.value = String(t);
-        curTime.textContent = t.toFixed(1);
-        if (isVideoPlaying) {
-          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=${t}&ts=${Date.now()}`;
-          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
-        } else {
-          seekRange.dispatchEvent(new Event('input'));
-        }
-      } else if (ev.code === 'Home') {
-        ev.preventDefault();
-        seekRange.value = '0';
-        curTime.textContent = '0.0';
-        if (isVideoPlaying) {
-          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=0&ts=${Date.now()}`;
-          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
-        } else {
-          seekRange.dispatchEvent(new Event('input'));
-        }
-      } else if (ev.code === 'End') {
-        ev.preventDefault();
-        const t = duration || 0;
-        seekRange.value = String(t);
-        curTime.textContent = (t||0).toFixed(1);
-        if (isVideoPlaying) {
-          const seekUrl = `/api/video_file/seek_ultra_fast?id=${encodeURIComponent(fileSession.id)}&t=${t}&ts=${Date.now()}`;
-          fetch(seekUrl, { cache: 'no-store' }).catch(()=>{});
-        } else {
-          seekRange.dispatchEvent(new Event('input'));
-        }
-      }
-    });
-  
-    // Sync overlay canvas with image size on load/resize
-    function syncOverlaySize(){
-      const img = document.getElementById('videoStream');
-      if (!img) return;
-      const rect = img.getBoundingClientRect();
-      const w = img.clientWidth || rect.width || 640;
-      const h = img.clientHeight || rect.height || 480;
-      if (w <= 0 || h <= 0) return;
-      overlayCanvas.width = w;
-      overlayCanvas.height = h;
-      overlayCanvas.style.width = w + 'px';
-      overlayCanvas.style.height = h + 'px';
-      overlayCanvas.style.position = 'absolute';
-      overlayCanvas.style.left = '0';
-      overlayCanvas.style.top = '0';
-      overlayCanvas.style.pointerEvents = 'none';
-      const maskOverlay = document.getElementById('maskOverlay');
-      if (maskOverlay) {
-        maskOverlay.setAttribute('width', String(w));
-        maskOverlay.setAttribute('height', String(h));
-      }
+        streamStatus.textContent = 'Live';
+        connectWebSocket(streamId);
     }
-    // Слушаем именно IMG загрузку, чтобы при первом кадре холст подстроился
-    const img0 = document.getElementById('videoStream');
-    if (img0) {
-      img0.addEventListener('error', () => {
-        try {
-          setStatus('Ошибка MJPEG, переключаемся на снимки', '#a66', 1800);
-          startLiveSnapshotLoop();
-        } catch(_){}
-      });
-      img0.addEventListener('load', () => {
-        try {
-          if (snapshotRunning) stopLiveSnapshotLoop();
-          if (typeof syncOverlaySize === 'function') syncOverlaySize();
-        } catch(_){}
-      });
-    }
-    // window.addEventListener('resize', syncOverlaySize);
 
-    // --- История ---
-    function updateHistory() {
-      const history = JSON.parse(localStorage.getItem('history') || '[]');
-      historyTable.innerHTML = history.map(r => `<tr>
-        <td>${r.date}</td>
-        <td>${r.camera}</td>
-        <td>${r.count}</td>
-        <td>${r.total_weight}</td>
-        <td>${r.avg_weight}</td>
-      </tr>`).join('');
-    }
-    updateHistory();
-
-    /* Дублирующаяся старая версия автопересчёта удалена — используется единая строгая логика выше. */
-
-    // --- Сохранение ручного ввода (привязка безопасно по id) ---
-    const saveManualBtnEl = document.getElementById('saveManualBtn');
-    if (saveManualBtnEl) {
-      saveManualBtnEl.onclick = () => {
-        const count = parseInt(manualCount.value);
-        const totalWeight = parseFloat(manualTotalWeight.value);
-        let avgWeight = parseFloat(manualAvgWeight.value);
-
-        const invalidCount = !isFinite(count) || count <= 0;
-        const invalidTotal = !isFinite(totalWeight) || totalWeight <= 0;
-
-        manualCount.style.borderColor = invalidCount ? '#e14a4a' : '#b6c6e6';
-        manualTotalWeight.style.borderColor = invalidTotal ? '#e14a4a' : '#b6c6e6';
-
-        if (invalidCount || invalidTotal) {
-          console.warn('Некорректные значения: заполните количество и общий вес.');
-          return;
+    async function stopStream() {
+        if (activeStreamId) {
+            await fetch(`/api/stream/${activeStreamId}/stop`);
         }
-
-        if (!isFinite(avgWeight)) avgWeight = Number((totalWeight / count).toFixed(2));
-
-        let cameraName = '';
-        const camRadio = document.querySelector('input[name="cameraRadio"]:checked');
-        if (camRadio) {
-          const cam = config.cameras.find(c => c.id === camRadio.value);
-          if (cam) cameraName = cam.name;
+        if (ws) {
+            ws.close();
+            ws = null;
         }
-        const history = JSON.parse(localStorage.getItem('history') || '[]');
-        history.unshift({
-          date: new Date().toLocaleString(),
-          camera: cameraName,
-          count,
-          total_weight: Number(totalWeight.toFixed(2)),
-          avg_weight: Number(avgWeight.toFixed ? avgWeight.toFixed(2) : avgWeight)
+        videoStream.removeAttribute('src');
+        isVideoPlaying = false;
+        videoPlayPauseBtn.textContent = 'Старт';
+        streamStatus.textContent = 'Остановлено';
+    }
+
+    function connectWebSocket(streamId) {
+        if (ws) {
+            ws.close();
+        }
+        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+        ws = new WebSocket(`${proto}://${location.host}/ws/count?id=${streamId}`);
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'count_update') {
+                document.getElementById('manualCount').value = data.count;
+                if (data.debug && data.debug.masks) {
+                    drawOverlay(data.debug.masks);
+                }
+            }
+        };
+    }
+
+    function drawOverlay(masks) {
+        const ctx = overlayCanvas.getContext('2d');
+        const w = videoStream.clientWidth;
+        const h = videoStream.clientHeight;
+        overlayCanvas.width = w;
+        overlayCanvas.height = h;
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = 'rgba(0, 255, 136, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.fillStyle = 'rgba(0, 255, 136, 0.3)';
+
+        masks.forEach(polygon => {
+            ctx.beginPath();
+            polygon.forEach((point, index) => {
+                const x = point[0] * w;
+                const y = point[1] * h;
+                if (index === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
         });
-        localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
-        updateHistory();
-      };
     }
-  </script>
-  <script>
-    // Динамически компенсируем высоту фиксированной панели, чтобы контент не прятался под ней
-    (function(){
-      const toolbar = document.getElementById('topToolbar');
-      const main = document.getElementById('main-container');
-      if (!toolbar || !main) return;
-      const adjust = () => {
-        const h = toolbar.getBoundingClientRect().height || 0;
-        main.style.paddingTop = (Math.ceil(h)) + 'px';
-      };
-      const ro = new ResizeObserver(adjust);
-      try { ro.observe(toolbar); } catch(_) {}
-      window.addEventListener('load', adjust);
-      window.addEventListener('resize', adjust);
-      document.addEventListener('DOMContentLoaded', adjust);
-      // Первичный вызов
-      setTimeout(adjust, 0);
-    })();
-  </script>
-  <script>
-    // Удалены любые динамические биндинги, чтобы исключить дубли. Используем прямые ссылки, заданные выше.
+
+    videoPlayPauseBtn.addEventListener('click', async () => {
+        if (isVideoPlaying) {
+            await stopStream();
+        } else {
+            const streams = await getStreams();
+            const sourceUri = streams[activeStreamId];
+            if (activeStreamId && sourceUri) {
+                await startStream(activeStreamId, sourceUri);
+            }
+        }
+    });
+
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const uploadResponse = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const uploadData = await uploadResponse.json();
+
+        if (uploadResponse.ok) {
+            const streamId = 'file_' + Date.now();
+            const sourceUri = uploadData.file_path;
+            
+            await stopStream();
+            activeStreamId = streamId;
+            await startStream(streamId, sourceUri);
+        } else {
+            streamStatus.textContent = `Error uploading file: ${uploadData.error}`;
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        populateStreams();
+    });
+
   </script>
 </body>
 </html>
