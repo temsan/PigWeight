@@ -6,13 +6,14 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
-    .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(8px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
+    .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.56); backdrop-filter: blur(12px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
     .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: wrap !important; align-items: center !important; }
     .top-toolbar .pill, .top-toolbar .file-input-btn { height: 32px; line-height: 20px; }
     html, body { margin: 0; padding: 0; }
     #main-container { padding-top: 64px; }
     .video-wrapper { position: relative; }
-    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 10; background-color: transparent; }
+    #videoStream { position:absolute; top:0; left:0; width:100%; height:100%; z-index: 1; }
   </style>
 </head>
 <body style="overflow:auto;">
@@ -28,6 +29,10 @@
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
         <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Старт</button>
+        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 220px; min-width:220px; max-width:380px;">
+          <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
+          <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
+        </div>
         <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto;"></span>
       </div>
     </div>
@@ -38,6 +43,7 @@
             <img id="videoStream" style="display:block; width:100%; height:auto; object-fit:contain;" />
             <canvas id="overlayCanvas"></canvas>
           </div>
+          <canvas id="liveCountChart" height="120" style="width:100%; height:120px; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
         </div>
         <div class="right-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
           <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
@@ -61,6 +67,12 @@
         </div>
       </div>
     </div>
+    <table id="history">
+      <thead>
+        <tr><th>Дата</th><th>Камера</th><th>Кол-во</th><th>Общий вес</th><th>Средний вес</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </div>
   <script>
     const videoStream = document.getElementById('videoStream');
@@ -69,10 +81,16 @@
     const fileInput = document.getElementById('videoFileInput');
     const streamStatus = document.getElementById('streamStatus');
     const streamRadios = document.getElementById('streamRadios');
+    const seekRange = document.getElementById('seekRange');
+    const curTime = document.getElementById('curTime');
+    const durTime = document.getElementById('durTime');
+    const liveCountChart = document.getElementById('liveCountChart');
+    const historyTable = document.getElementById('history').querySelector('tbody');
 
     let activeStreamId = null;
     let isVideoPlaying = false;
     let ws = null;
+    let chart = null;
 
     async function getStreams() {
         // In a real application, you would fetch this from the backend
@@ -119,6 +137,7 @@
         videoPlayPauseBtn.textContent = 'Стоп';
         streamStatus.textContent = 'Live';
         connectWebSocket(streamId);
+        initChart();
     }
 
     async function stopStream() {
@@ -133,6 +152,11 @@
         isVideoPlaying = false;
         videoPlayPauseBtn.textContent = 'Старт';
         streamStatus.textContent = 'Остановлено';
+        const defaultStream = document.querySelector('input[name=streamRadio]');
+        if (defaultStream) {
+            defaultStream.checked = true;
+            activeStreamId = defaultStream.value;
+        }
     }
 
     function connectWebSocket(streamId) {
@@ -147,6 +171,15 @@
                 document.getElementById('manualCount').value = data.count;
                 if (data.debug && data.debug.masks) {
                     drawOverlay(data.debug.masks);
+                }
+                if (chart) {
+                    chart.data.labels.push(new Date().toLocaleTimeString());
+                    chart.data.datasets[0].data.push(data.count);
+                    if (chart.data.labels.length > 20) {
+                        chart.data.labels.shift();
+                        chart.data.datasets[0].data.shift();
+                    }
+                    chart.update();
                 }
             }
         };
@@ -177,6 +210,30 @@
             ctx.closePath();
             ctx.fill();
             ctx.stroke();
+        });
+    }
+
+    function initChart() {
+        const ctx = liveCountChart.getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Количество',
+                    data: [],
+                    borderColor: '#2c7be5',
+                    backgroundColor: 'rgba(44, 123, 229, 0.1)',
+                    fill: true
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
         });
     }
 
@@ -220,8 +277,55 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         populateStreams();
+        // Load and display history from localStorage
+        const history = JSON.parse(localStorage.getItem('history') || '[]');
+        history.forEach(item => {
+            const row = historyTable.insertRow();
+            row.insertCell().textContent = item.date;
+            row.insertCell().textContent = item.camera;
+            row.insertCell().textContent = item.count;
+            row.insertCell().textContent = item.total_weight;
+            row.insertCell().textContent = item.avg_weight;
+        });
+
+        // Save button logic
+        document.getElementById('saveManualBtn').addEventListener('click', () => {
+            const history = JSON.parse(localStorage.getItem('history') || '[]');
+            const newEntry = {
+                date: new Date().toLocaleString(),
+                camera: activeStreamId,
+                count: document.getElementById('manualCount').value,
+                total_weight: document.getElementById('manualTotalWeight').value,
+                avg_weight: document.getElementById('manualAvgWeight').value
+            };
+            history.unshift(newEntry);
+            localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+            updateHistory();
+        });
+
+        // Autostart the default stream
+        const streams = getStreams();
+        const defaultStreamId = Object.keys(streams)[0];
+        const defaultSourceUri = streams[defaultStreamId];
+        if (defaultStreamId && defaultSourceUri) {
+            startStream(defaultStreamId, defaultSourceUri);
+        }
     });
 
+    function updateHistory() {
+        historyTable.innerHTML = '';
+        const history = JSON.parse(localStorage.getItem('history') || '[]');
+        history.forEach(item => {
+            const row = historyTable.insertRow();
+            row.insertCell().textContent = item.date;
+            row.insertCell().textContent = item.camera;
+            row.insertCell().textContent = item.count;
+            row.insertCell().textContent = item.total_weight;
+            row.insertCell().textContent = item.avg_weight;
+        });
+    }
+
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>

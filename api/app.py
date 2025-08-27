@@ -1,9 +1,9 @@
 import os
+import logging
 import cv2
 import json
 import time
 import asyncio
-import logging
 from pathlib import Path
 from typing import Dict, Optional, Generator, Any, List
 import colorsys
@@ -51,12 +51,35 @@ except Exception:
     except Exception:
         from opencv_worker import OpenCVIsolate   # запуск как файл: python api/app.py
 
+from logging.handlers import RotatingFileHandler
+
 # --- Bootstrap ---
 BASE_DIR = Path(__file__).parent.parent
 if load_dotenv:
     load_dotenv(BASE_DIR / ".env")
 
-logging.basicConfig(level=logging.INFO)
+# --- Logging Configuration ---
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+log_file = LOG_DIR / "api.log"
+
+# Configure root logger for file logging and rotation
+log_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+# Rotating file handler
+file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5) # 10MB per file, 5 backups
+file_handler.setFormatter(log_formatter)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+
+# Get root logger and add handlers
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
 logger = logging.getLogger("api")
 
 # --- Config from environment ---
@@ -88,6 +111,7 @@ RECORDS_DIR = BASE_DIR / "records"
 RECORDS_DIR.mkdir(parents=True, exist_ok=True)
 
 MODELS_DIR = BASE_DIR / "models"
+STATIC_DIR = BASE_DIR / "static"
 
 # --- Helper Functions ---
 
@@ -289,11 +313,70 @@ class StreamManager:
 
 STREAM_MANAGER = StreamManager()
 
-app = FastAPI(title="PigWeight API (FastAPI)")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown
+    for stream in list(STREAM_MANAGER.streams.values()):
+        await stream.stop()
+
+app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     return FileResponse(STATIC_DIR / "index.html")
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    try:
+        safe_name = "".join(c for c in file.filename if c.isalnum() or c in "._-")
+        dst = UPLOAD_DIR / safe_name
+        with open(dst, "wb") as buffer:
+            buffer.write(await file.read())
+        return {"file_path": str(dst)}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.post("/api/stream/start")
+async def api_stream_start(stream_id: str, source_uri: str):
+    stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
+    await stream.start()
+    return {"status": "started", "stream_id": stream_id}
+
+@app.get("/api/stream/{stream_id}/stop")
+async def api_stream_stop(stream_id: str):
+    await STREAM_MANAGER.stop_stream(stream_id)
+    return {"status": "stopped", "stream_id": stream_id}
+
+@app.get("/api/stream/{stream_id}/snapshot")
+async def api_stream_snapshot(stream_id: str):
+    stream = STREAM_MANAGER.streams.get(stream_id)
+    if not stream or not stream.running:
+        return JSONResponse({"error": "stream not found or not running"}, status_code=404)
+    
+    jpeg = await stream.get_jpeg()
+    if not jpeg:
+        return JSONResponse({"error": "no frame"}, status_code=404)
+    
+    return Response(content=jpeg, media_type="image/jpeg")
+
+async def mjpeg_generator(stream: VideoStream):
+    while stream.running:
+        jpeg = await stream.get_jpeg()
+        if jpeg:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
+        await asyncio.sleep(1.0 / TARGET_FPS)
+
+@app.get("/api/stream/{stream_id}/feed")
+async def api_stream_feed(stream_id: str):
+    stream = STREAM_MANAGER.streams.get(stream_id)
+    if not stream or not stream.running:
+        return JSONResponse({"error": "stream not found or not running"}, status_code=404)
+    return StreamingResponse(mjpeg_generator(stream), media_type="multipart/x-mixed-replace; boundary=frame")
 
 @app.websocket("/ws/count")
 async def ws_count(ws: WebSocket, id: str):
@@ -304,5 +387,3 @@ async def ws_count(ws: WebSocket, id: str):
             await ws.receive_text()
     except WebSocketDisconnect:
         STREAM_MANAGER.unregister_websocket(id, ws)
-
-# ... (the rest of the API endpoints)
