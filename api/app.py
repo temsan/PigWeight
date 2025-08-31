@@ -153,6 +153,49 @@ def _open_file_cap_local(path: str):
             continue
     return None, {"error": last_err or "all backends failed"}
 
+OCV: Optional[OpenCVIsolate] = None
+def get_ocv() -> OpenCVIsolate:
+    global OCV
+    if OCV is None:
+        OCV = OpenCVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+    return OCV
+
+def _ocv_safe_call(method_name: str, *args, **kwargs):
+    try:
+        ocv = get_ocv()
+        method = getattr(ocv, method_name, None)
+        if not method:
+            raise AttributeError(f"OpenCVIsolate lacks {method_name}")
+        return method(*args, **kwargs)
+    except Exception:
+        try:
+            global OCV
+            OCV = OpenCVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+            method = getattr(OCV, method_name, None)
+            if not method:
+                raise AttributeError(f"OpenCVIsolate lacks {method_name}")
+            return method(*args, **kwargs)
+        except Exception as e2:
+            raise e2
+
+def ocv_open_rtsp(stream_id: str, url: str) -> Dict[str, Any]:
+    return _ocv_safe_call('open_rtsp', stream_id, url, timeout=8.0)
+
+def ocv_open_file(stream_id: str, path: str) -> Dict[str, Any]:
+    return _ocv_safe_call('open_file', stream_id, path, timeout=3.0)
+
+def ocv_close(stream_id: str) -> None:
+    try:
+        _ocv_safe_call('close', stream_id)
+    except Exception:
+        pass
+
+def ocv_read_jpeg(stream_id: str, timeout: float = 1.0) -> Optional[bytes]:
+    return _ocv_safe_call('read_jpeg', stream_id, timeout=timeout)
+
+def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Optional[bytes]:
+    return _ocv_safe_call('seek_read_jpeg', stream_id, t, timeout=timeout)
+
 class SimpleTracker:
     def __init__(self, iou_threshold=0.5, max_age=30):
         self.iou_threshold = iou_threshold
@@ -184,6 +227,58 @@ class VideoStream(abc.ABC):
         self._infer_task: Optional[asyncio.Task] = None
         self._stream_task: Optional[asyncio.Task] = None
 
+    @staticmethod
+    def _detect_black_bars_top_bottom(frame: np.ndarray) -> tuple[int, int]:
+        """Detect top/bottom black bars and return crop indices [y0:y1].
+        Only crops vertical bars (letterbox). Returns (0, H) if nothing significant.
+        """
+        try:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        except Exception:
+            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        H, W = gray.shape[:2]
+        if H < 10 or W < 10:
+            return 0, H
+
+        # Row brightness and threshold
+        row_mean = gray.mean(axis=1)
+        # Dynamic threshold: low brightness + margin
+        thr = max(8.0, row_mean.mean() * 0.15)
+        min_run = 4  # consecutive non-black rows to consider start of content
+
+        # Find y0 from top
+        y0 = 0
+        run = 0
+        for i, val in enumerate(row_mean):
+            if val > thr:
+                run += 1
+                if run >= min_run:
+                    y0 = max(0, i - (min_run - 1))
+                    break
+            else:
+                run = 0
+
+        # Find y1 from bottom
+        y1 = H
+        run = 0
+        for off, val in enumerate(reversed(row_mean)):
+            if val > thr:
+                run += 1
+                if run >= min_run:
+                    y1 = H - max(0, off - (min_run - 1))
+                    break
+            else:
+                run = 0
+
+        # Sanity: ensure meaningful crop (at least 1% trimmed each side combined)
+        min_trim = int(0.01 * H)
+        if y0 <= min_trim and (H - y1) <= min_trim:
+            return 0, H
+        if y1 - y0 < int(0.5 * H):
+            # Avoid over-cropping when detection fails
+            return 0, H
+        return max(0, y0), min(H, y1)
+
     async def _infer_loop(self):
         from ultralytics import YOLO
         self.model = YOLO(MODEL_PATH)
@@ -194,13 +289,25 @@ class VideoStream(abc.ABC):
                 arr = np.frombuffer(jpeg, dtype=np.uint8)
                 frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if frame is not None:
-                    results = self.model.predict(frame, imgsz=640, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
+                    H0, W0, _ = frame.shape
+                    y0, y1 = self._detect_black_bars_top_bottom(frame)
+                    proc = frame[y0:y1, :, :] if (0 <= y0 < y1 <= H0) else frame
+                    results = self.model.predict(proc, imgsz=640, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
                     r = results[0] if results else None
                     if r and hasattr(r, "masks") and r.masks is not None:
                         self.last_count = len(r.masks.xy)
-                        # Normalize masks to 0-1 range
-                        h, w, _ = frame.shape
-                        self.last_masks = [[(p[0]/w, p[1]/h) for p in m] for m in r.masks.xy]
+                        # Normalize masks to original full frame 0-1 range, accounting for vertical crop offset
+                        hc, wc = proc.shape[:2]
+                        # Map each polygon point (x,y) from cropped coords to original normalized coords
+                        mapped: list[list[tuple[float, float]]] = []
+                        for m in r.masks.xy:
+                            pts = []
+                            for p in m:
+                                x = float(p[0])
+                                y = float(p[1]) + float(y0)
+                                pts.append((x / float(W0), y / float(H0)))
+                            mapped.append(pts)
+                        self.last_masks = mapped
                     else:
                         self.last_count = 0
                         self.last_masks = []
@@ -260,24 +367,45 @@ class FileStream(VideoStream):
     def __init__(self, stream_id: str, file_path: str):
         super().__init__(stream_id)
         self.file_path = file_path
-        self.cap: Optional[cv2.VideoCapture] = None
         self.duration = 0.0
         self.fps = 0.0
+        self._seek_event = asyncio.Event()
+        self._seek_time: Optional[float] = None
+        self.current_time = 0.0
 
     async def _stream_loop(self):
-        self.cap, meta = _open_file_cap_local(self.file_path)
-        if self.cap:
+        try:
+            meta = ocv_open_file(self.stream_id, self.file_path)
             self.duration = meta.get("duration", 0.0)
             self.fps = meta.get("fps", 25.0)
-            while self.running and self.cap:
-                ok, frame = self.cap.read()
-                if not ok:
-                    break
-                jpeg = encode_jpeg(frame)
-                async with self.lock:
-                    self.last_jpeg = jpeg
+            while self.running:
+                if self._seek_event.is_set():
+                    await self._perform_seek()
+                
+                jpeg = ocv_read_jpeg(self.stream_id, timeout=1.0)
+                if jpeg:
+                    async with self.lock:
+                        self.last_jpeg = jpeg
+                    self.current_time += (1.0 / self.fps)
                 await asyncio.sleep(1.0 / self.fps)
-        self.running = False
+        except Exception as e:
+            logger.error(f"File stream {self.stream_id} error: {e}")
+        finally:
+            ocv_close(self.stream_id)
+            self.running = False
+
+    async def seek(self, t: float):
+        self._seek_time = t
+        self._seek_event.set()
+
+    async def _perform_seek(self):
+        self._seek_event.clear()
+        if self._seek_time is not None:
+            jpeg = ocv_seek_read_jpeg(self.stream_id, self._seek_time)
+            async with self.lock:
+                self.last_jpeg = jpeg
+            self.current_time = self._seek_time
+            self._seek_time = None
 
 class StreamManager:
     def __init__(self):
@@ -377,6 +505,33 @@ async def api_stream_feed(stream_id: str):
     if not stream or not stream.running:
         return JSONResponse({"error": "stream not found or not running"}, status_code=404)
     return StreamingResponse(mjpeg_generator(stream), media_type="multipart/x-mixed-replace; boundary=frame")
+
+@app.get("/api/stream/{stream_id}/info")
+async def api_stream_info(stream_id: str):
+    stream = STREAM_MANAGER.streams.get(stream_id)
+    if not stream:
+        return JSONResponse({"error": "stream not found"}, status_code=404)
+    if isinstance(stream, FileStream):
+        return {
+            "type": "file",
+            "duration": float(stream.duration or 0.0),
+            "current_time": float(stream.current_time or 0.0),
+            "fps": float(stream.fps or 0.0),
+        }
+    else:
+        return {"type": "rtsp", "duration": None}
+
+@app.get("/api/stream/{stream_id}/seek")
+async def api_stream_seek(stream_id: str, t: float = Query(...)):
+    stream = STREAM_MANAGER.streams.get(stream_id)
+    if not stream:
+        return JSONResponse({"error": "stream not found"}, status_code=404)
+    if not isinstance(stream, FileStream):
+        return JSONResponse({"error": "seek supported only for file streams"}, status_code=400)
+    await stream.seek(max(0.0, float(t)))
+    return {"status": "ok", "current_time": float(stream.current_time)}
+
+
 
 @app.websocket("/ws/count")
 async def ws_count(ws: WebSocket, id: str):

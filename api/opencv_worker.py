@@ -48,9 +48,25 @@ class _Worker(mp.Process):
                 except Exception:
                     pass
                 return False, {"error": "open failed"}
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
             duration = (frame_count / fps) if (fps > 0 and frame_count > 0) else 0.0
+            if duration <= 0.0:
+                # Fallback: try to use POS_AVI_RATIO and POS_MSEC to estimate duration
+                try:
+                    self._safe_set(cap, cv2.CAP_PROP_POS_AVI_RATIO, 1)
+                    ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+                    if ms > 0:
+                        duration = ms / 1000.0
+                except Exception:
+                    pass
+                finally:
+                    # Reset back to start
+                    try:
+                        self._safe_set(cap, cv2.CAP_PROP_POS_AVI_RATIO, 0)
+                        self._safe_set(cap, cv2.CAP_PROP_POS_FRAMES, 0)
+                    except Exception:
+                        pass
             self.sessions[sid] = {
                 "type": kind,
                 "src": src,

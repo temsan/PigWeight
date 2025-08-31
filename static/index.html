@@ -13,7 +13,9 @@
     #main-container { padding-top: 64px; }
     .video-wrapper { position: relative; }
     #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 10; background-color: transparent; }
-    #videoStream { position:absolute; top:0; left:0; width:100%; height:100%; z-index: 1; }
+    #videoStream { display: block; width: 100%; height: auto; object-fit: contain; z-index: 1; }
+    /* Align numeric inputs on the weights panel to the right */
+    .panel-body input[type="number"] { text-align: right; }
   </style>
 </head>
 <body style="overflow:auto;">
@@ -24,8 +26,8 @@
         <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
           <div id="streamRadios" class="toggle-group compact"></div>
         </div>
-        <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:6px 10px; min-width:auto; text-align:center;">
-          Файл
+        <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:6px 10px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          <span id="fileInputName">Файл</span>
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
         <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Старт</button>
@@ -37,13 +39,12 @@
       </div>
     </div>
     <div class="main-flex" style="display:flex; justify-content:center;">
-      <div class="container" style="display:flex; gap:16px; width:100%; max-width:1360px; align-items:flex-start;">
+      <div class="container" style="display:flex; gap:16px; width:100%; max-width:100%; align-items:flex-start;">
         <div class="left-col" style="flex:1 1 auto; min-width:560px; order:0;">
-          <div class="video-wrapper card rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(240,245,252,0.9)); border:1px solid rgba(60,90,140,.12);">
-            <img id="videoStream" style="display:block; width:100%; height:auto; object-fit:contain;" />
+          <div id="videoWrapper" class="video-wrapper card rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(240,245,252,0.9)); border:1px solid rgba(60,90,140,.12);">
+            <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
             <canvas id="overlayCanvas"></canvas>
           </div>
-          <canvas id="liveCountChart" height="120" style="width:100%; height:120px; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
         </div>
         <div class="right-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
           <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
@@ -63,6 +64,7 @@
               <span class="unit-label" style="color:#2f5078;">кг</span>
             </div>
             <button id="saveManualBtn" class="pill primary" style="height:48px; font-size:18px;">Сохранить</button>
+            <canvas id="liveCountChart" height="160" style="width:100%; height:160px; flex:0 0 auto; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
           </div>
         </div>
       </div>
@@ -79,6 +81,8 @@
     const overlayCanvas = document.getElementById('overlayCanvas');
     const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
     const fileInput = document.getElementById('videoFileInput');
+    const fileInputLabel = document.getElementById('fileInputLabel');
+    const fileInputName = document.getElementById('fileInputName');
     const streamStatus = document.getElementById('streamStatus');
     const streamRadios = document.getElementById('streamRadios');
     const seekRange = document.getElementById('seekRange');
@@ -91,6 +95,21 @@
     let isVideoPlaying = false;
     let ws = null;
     let chart = null;
+    const countHistory = [];
+    const avgWindow = 10;
+    const streamSources = {}; // id -> sourceUri (predefined + uploads)
+    let seekTimer = null;
+
+    function updateVideoLayout() {
+        const top = document.getElementById('topToolbar');
+        const wrapper = document.getElementById('videoWrapper');
+        if (!wrapper || !top) return;
+        const toolbarH = top.offsetHeight || 64;
+        const padding = 24; // bottom spacing
+        const avail = Math.max(320, window.innerHeight - toolbarH - padding);
+        wrapper.style.height = avail + 'px';
+        syncOverlaySize();
+    }
 
     async function getStreams() {
         // In a real application, you would fetch this from the backend
@@ -103,6 +122,7 @@
         const streams = await getStreams();
         streamRadios.innerHTML = '';
         Object.keys(streams).forEach((id, idx) => {
+            streamSources[id] = streams[id];
             const radio = document.createElement('input');
             radio.type = 'radio';
             radio.name = 'streamRadio';
@@ -113,10 +133,13 @@
                 activeStreamId = id;
             }
             radio.style.display = 'none';
-            radio.addEventListener('change', () => {
+            radio.addEventListener('change', async () => {
                 if (radio.checked) {
+                    const prev = activeStreamId;
+                    if (prev && prev !== id) {
+                        await stopStream(prev);
+                    }
                     activeStreamId = id;
-                    stopStream();
                 }
             });
 
@@ -131,6 +154,7 @@
     }
 
     async function startStream(streamId, sourceUri) {
+        streamSources[streamId] = sourceUri;
         await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
         videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
         isVideoPlaying = true;
@@ -138,25 +162,40 @@
         streamStatus.textContent = 'Live';
         connectWebSocket(streamId);
         initChart();
+        
+        // Configure seek UI (robust): drive state from /info on every poll
+        if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
+        const poll = async () => {
+            try {
+                const resp = await fetch(`/api/stream/${streamId}/info`);
+                if (!resp.ok) return; // don't flip UI on transient errors
+                const info = await resp.json();
+                if (info && info.type === 'file') {
+                    const dur = Number(info.duration || 0);
+                    const t = Number(info.current_time || 0);
+                    if (!Number.isNaN(dur)) { seekRange.max = dur; durTime.textContent = dur.toFixed(1); }
+                    if (!Number.isNaN(t)) { seekRange.value = t; curTime.textContent = t.toFixed(1); }
+                }
+            } catch (e) {}
+        };
+        await poll();
+        seekTimer = setInterval(poll, 500);
     }
 
-    async function stopStream() {
-        if (activeStreamId) {
-            await fetch(`/api/stream/${activeStreamId}/stop`);
+    async function stopStream(id = activeStreamId) {
+        if (id) {
+            await fetch(`/api/stream/${id}/stop`);
         }
         if (ws) {
             ws.close();
             ws = null;
         }
-        videoStream.removeAttribute('src');
+        if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
+        setPlaceholder();
         isVideoPlaying = false;
         videoPlayPauseBtn.textContent = 'Старт';
         streamStatus.textContent = 'Остановлено';
-        const defaultStream = document.querySelector('input[name=streamRadio]');
-        if (defaultStream) {
-            defaultStream.checked = true;
-            activeStreamId = defaultStream.value;
-        }
+        // Не меняем activeStreamId, чтобы повторный Старт запускал тот же источник
     }
 
     function connectWebSocket(streamId) {
@@ -169,69 +208,183 @@
             const data = JSON.parse(event.data);
             if (data.type === 'count_update') {
                 document.getElementById('manualCount').value = data.count;
+                // Recalculate average weight if total is set
+                if (typeof recalcAvgWeight === 'function') {
+                    recalcAvgWeight();
+                }
                 if (data.debug && data.debug.masks) {
                     drawOverlay(data.debug.masks);
                 }
+                // Update chart with low overhead
                 if (chart) {
-                    chart.data.labels.push(new Date().toLocaleTimeString());
+                    const now = new Date().toLocaleTimeString();
+                    countHistory.push(data.count);
+                    if (countHistory.length > 60) countHistory.shift();
+                    const start = Math.max(0, countHistory.length - avgWindow);
+                    const slice = countHistory.slice(start);
+                    const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+
+                    chart.data.labels.push(now);
                     chart.data.datasets[0].data.push(data.count);
-                    if (chart.data.labels.length > 20) {
+                    chart.data.datasets[1].data.push(Number(avg.toFixed(2)));
+                    const maxPoints = 60;
+                    if (chart.data.labels.length > maxPoints) {
                         chart.data.labels.shift();
-                        chart.data.datasets[0].data.shift();
+                        chart.data.datasets.forEach(ds => ds.data.shift());
                     }
-                    chart.update();
+                    chart.update('none');
                 }
             }
         };
     }
 
-    function drawOverlay(masks) {
-        const ctx = overlayCanvas.getContext('2d');
-        const w = videoStream.clientWidth;
-        const h = videoStream.clientHeight;
-        overlayCanvas.width = w;
-        overlayCanvas.height = h;
-        ctx.clearRect(0, 0, w, h);
-        ctx.strokeStyle = 'rgba(0, 255, 136, 0.7)';
-        ctx.lineWidth = 2;
-        ctx.fillStyle = 'rgba(0, 255, 136, 0.3)';
+    function setPlaceholder() {
+        // SVG-заглушка в пастельных тонах, заполняет контейнер
+        const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720' preserveAspectRatio='xMidYMid meet'>
+  <defs>
+    <linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='#eef3fb'/>
+      <stop offset='100%' stop-color='#e6effa'/>
+    </linearGradient>
+  </defs>
+  <rect width='1280' height='720' fill='url(#g)'/>
+  <g fill='none' stroke='rgba(60,90,140,0.25)'>
+    <rect x='80' y='60' width='1120' height='600' rx='16'/> 
+  </g>
+  <g font-family='Inter,Segoe UI,Arial' text-anchor='middle'>
+    <text x='640' y='360' font-size='42' fill='#2f5078' opacity='0.7'>Нет активного потока</text>
+    <text x='640' y='408' font-size='20' fill='#2f5078' opacity='0.6'>Нажмите «Старт» или выберите камеру/файл</text>
+  </g>
+  <circle cx='640' cy='280' r='56' fill='none' stroke='rgba(44,123,229,0.35)' stroke-width='8'/>
+  <rect x='600' y='260' width='80' height='40' rx='6' fill='rgba(44,123,229,0.2)'/>
+  <polygon points='618,268 618,292 642,280' fill='#2c7be5'/>
+</svg>`;
+        const encoded = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        videoStream.src = encoded;
+    }
 
-        masks.forEach(polygon => {
+    function syncOverlaySize() {
+        const wrapper = document.getElementById('videoWrapper');
+        const w = wrapper ? wrapper.clientWidth : videoStream.clientWidth;
+        const h = wrapper ? wrapper.clientHeight : videoStream.clientHeight;
+        if (w && h && (overlayCanvas.width !== w || overlayCanvas.height !== h)) {
+            overlayCanvas.width = w;
+            overlayCanvas.height = h;
+        }
+    }
+
+    function getRenderedImageRect() {
+        // Compute the actual displayed image rectangle inside the canvas,
+        // accounting for object-fit: contain letterboxing.
+        const cw = overlayCanvas.width;
+        const ch = overlayCanvas.height;
+        const iw = videoStream.naturalWidth || cw;
+        const ih = videoStream.naturalHeight || ch;
+        if (!iw || !ih) return { x: 0, y: 0, w: cw, h: ch };
+        const scale = Math.min(cw / iw, ch / ih);
+        const w = Math.round(iw * scale);
+        const h = Math.round(ih * scale);
+        const x = Math.floor((cw - w) / 2);
+        const y = Math.floor((ch - h) / 2);
+        return { x, y, w, h };
+    }
+
+    function drawOverlay(masks) {
+        syncOverlaySize();
+        const ctx = overlayCanvas.getContext('2d');
+        const cw = overlayCanvas.width;
+        const ch = overlayCanvas.height;
+        ctx.clearRect(0, 0, cw, ch);
+        if (!masks || !masks.length) return;
+
+        const rect = getRenderedImageRect();
+
+        // Pastel filled polygons with high-contrast crisp outlines
+        masks.forEach((poly, idx) => {
+            if (!Array.isArray(poly) || poly.length < 3) return;
+            const hue = (idx * 47) % 360; // spread hues
+            const fill = `hsla(${hue}, 65%, 75%, 0.25)`;
+            const stroke = `hsla(${hue}, 75%, 40%, 1)`;
             ctx.beginPath();
-            polygon.forEach((point, index) => {
-                const x = point[0] * w;
-                const y = point[1] * h;
-                if (index === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
+            poly.forEach(([nx, ny], i) => {
+                const x = rect.x + nx * rect.w;
+                const y = rect.y + ny * rect.h;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             });
             ctx.closePath();
+            ctx.fillStyle = fill;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
             ctx.fill();
+            // Outer halo for edge contrast
+            ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+            ctx.lineWidth = 4;
             ctx.stroke();
+            // Inner colored outline
+            ctx.strokeStyle = stroke;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Numbering: draw index (1-based) at polygon centroid (in rendered space)
+            let cx = 0, cy = 0;
+            poly.forEach(([nx, ny]) => { cx += rect.x + nx * rect.w; cy += rect.y + ny * rect.h; });
+            cx /= poly.length; cy /= poly.length;
+            const label = String(idx + 1);
+            ctx.font = '600 16px system-ui, Segoe UI, Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            // text halo for contrast
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+            ctx.strokeText(label, cx, cy);
+            ctx.fillStyle = 'rgba(30,50,80,0.95)';
+            ctx.fillText(label, cx, cy);
         });
     }
 
     function initChart() {
         const ctx = liveCountChart.getContext('2d');
+        const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+        gradient.addColorStop(0, 'rgba(44, 123, 229, 0.35)');
+        gradient.addColorStop(1, 'rgba(44, 123, 229, 0)');
+
         chart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: [],
-                datasets: [{
-                    label: 'Количество',
-                    data: [],
-                    borderColor: '#2c7be5',
-                    backgroundColor: 'rgba(44, 123, 229, 0.1)',
-                    fill: true
-                }]
+                datasets: [
+                    {
+                        label: 'Count',
+                        data: [],
+                        borderColor: '#2c7be5',
+                        backgroundColor: gradient,
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'Avg',
+                        data: [],
+                        borderColor: '#51cf66',
+                        borderDash: [6, 4],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.2
+                    }
+                ]
             },
             options: {
+                responsive: false,
+                maintainAspectRatio: true,
+                animation: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
                 scales: {
-                    y: {
-                        beginAtZero: true
-                    }
+                    y: { beginAtZero: true }
                 }
             }
         });
@@ -241,17 +394,35 @@
         if (isVideoPlaying) {
             await stopStream();
         } else {
-            const streams = await getStreams();
-            const sourceUri = streams[activeStreamId];
+            const sourceUri = streamSources[activeStreamId];
             if (activeStreamId && sourceUri) {
                 await startStream(activeStreamId, sourceUri);
             }
         }
     });
 
+    function shortenFileName(name, max = 28) {
+        if (!name) return '';
+        if (name.length <= max) return name;
+        const extIdx = name.lastIndexOf('.');
+        const ext = extIdx > 0 ? name.slice(extIdx) : '';
+        const keep = Math.max(4, max - ext.length - 3);
+        const head = name.slice(0, Math.ceil(keep/2));
+        const tail = name.slice(ext ? -Math.floor(keep/2) - ext.length : -Math.floor(keep/2));
+        return `${head}…${tail}${ext}`;
+    }
+
     fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file) {
+            fileInputName.textContent = 'Файл';
+            fileInputLabel.title = 'Открыть видеофайл';
+            return;
+        }
+
+        // Reflect selected filename on the button
+        fileInputName.textContent = shortenFileName(file.name);
+        fileInputLabel.title = file.name;
 
         const formData = new FormData();
         formData.append('file', file);
@@ -269,14 +440,38 @@
             
             await stopStream();
             activeStreamId = streamId;
+            streamSources[streamId] = sourceUri;
             await startStream(streamId, sourceUri);
+            const response = await fetch(`/api/stream/${streamId}/info`);
+            const info = await response.json();
+            const dur = Number(info.duration || 0);
+            seekRange.max = dur;
+            durTime.textContent = dur.toFixed(1);
+            // keep slider always enabled; just update values
         } else {
             streamStatus.textContent = `Error uploading file: ${uploadData.error}`;
         }
     });
 
-    document.addEventListener('DOMContentLoaded', () => {
+    // Seek handlers
+    seekRange.addEventListener('input', (e) => {
+        const t = Number(e.target.value || 0);
+        curTime.textContent = t.toFixed(1);
+    });
+    seekRange.addEventListener('change', async (e) => {
+        const t = Number(e.target.value || 0);
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        if (!/^rtsp:\/\//i.test(src)) {
+            try { await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`); } catch (err) {}
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
         populateStreams();
+        updateVideoLayout();
+        window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
+        setPlaceholder();
         // Load and display history from localStorage
         const history = JSON.parse(localStorage.getItem('history') || '[]');
         history.forEach(item => {
@@ -304,11 +499,11 @@
         });
 
         // Autostart the default stream
-        const streams = getStreams();
+        const streams = await getStreams();
         const defaultStreamId = Object.keys(streams)[0];
         const defaultSourceUri = streams[defaultStreamId];
         if (defaultStreamId && defaultSourceUri) {
-            startStream(defaultStreamId, defaultSourceUri);
+            await startStream(defaultStreamId, defaultSourceUri);
         }
     });
 
@@ -324,6 +519,20 @@
             row.insertCell().textContent = item.avg_weight;
         });
     }
+
+    function recalcAvgWeight() {
+        const count = parseInt(document.getElementById('manualCount').value);
+        const totalWeight = parseFloat(document.getElementById('manualTotalWeight').value);
+        if (count > 0 && totalWeight > 0) {
+            const avgWeight = totalWeight / count;
+            document.getElementById('manualAvgWeight').value = avgWeight.toFixed(2);
+        } else {
+            document.getElementById('manualAvgWeight').value = '';
+        }
+    }
+
+    document.getElementById('manualCount').addEventListener('input', recalcAvgWeight);
+    document.getElementById('manualTotalWeight').addEventListener('input', recalcAvgWeight);
 
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
