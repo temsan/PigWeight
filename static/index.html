@@ -635,12 +635,13 @@
         }
     });
 
-    // Seek handlers
+    // Seek handlers (single-request logic)
+    let isSeeking = false;
     seekRange.addEventListener('input', (e) => {
         e.stopPropagation();
         const t = Number(e.target.value || 0);
         curTime.textContent = t.toFixed(1);
-        // Debounced seek on input for browsers where 'change' may not fire reliably
+        // Debounce requests during slider movement
         const id = activeStreamId;
         const src = streamSources[id] || '';
         if (!/^rtsp:\/\//i.test(src)) {
@@ -650,37 +651,29 @@
                     overlayBlockUntil = performance.now() + 120;
                     await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
                 } catch (_) {}
-            }, 120);
+            }, 150);
         }
     });
-    seekRange.addEventListener('change', async (e) => {
+    // Manage pointer drag to avoid duplicate change/pointerup seeks
+    seekRange.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
-        const t = Number(e.target.value || 0);
-        const id = activeStreamId;
-        const src = streamSources[id] || '';
-        if (!/^rtsp:\/\//i.test(src)) {
-            try {
-                overlayBlockUntil = performance.now() + 200; // briefly pause overlay draws
-                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
-            } catch (err) {}
-        }
+        isSeeking = true;
+        if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
     });
     seekRange.addEventListener('pointerup', async (e) => {
         e.stopPropagation();
-        const t = Number(seekRange.value || 0);
         const id = activeStreamId;
         const src = streamSources[id] || '';
+        const t = Number(seekRange.value || 0);
+        isSeeking = false;
         if (!/^rtsp:\/\//i.test(src)) {
             try {
-                overlayBlockUntil = performance.now() + 150;
+                if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
+                overlayBlockUntil = performance.now() + 180;
                 await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
             } catch (_) {}
         }
     });
-
-    // Prevent accidental blur/propagation on pointer interactions
-    seekRange.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
-    seekRange.addEventListener('pointerup', (e) => { e.stopPropagation(); });
 
     document.addEventListener('DOMContentLoaded', async () => {
         populateStreams();
