@@ -225,26 +225,30 @@
                 if (data.debug && data.debug.masks) {
                     lastMasks = data.debug.masks;
                     lastIds = data.debug.ids || null;
-                    drawOverlay(lastMasks, lastIds);
+                    scheduleOverlay(lastMasks, lastIds);
                 }
                 // Update chart with low overhead
                 if (chart) {
-                    const now = new Date().toLocaleTimeString();
-                    countHistory.push(data.count);
-                    if (countHistory.length > 60) countHistory.shift();
-                    const start = Math.max(0, countHistory.length - avgWindow);
-                    const slice = countHistory.slice(start);
-                    const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+                    const now = performance.now();
+                    if (!window.__lastChartTs || now - window.__lastChartTs > 400) {
+                        window.__lastChartTs = now;
+                        const tsLabel = new Date().toLocaleTimeString();
+                        countHistory.push(data.count);
+                        if (countHistory.length > 60) countHistory.shift();
+                        const start = Math.max(0, countHistory.length - avgWindow);
+                        const slice = countHistory.slice(start);
+                        const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
 
-                    chart.data.labels.push(now);
-                    chart.data.datasets[0].data.push(data.count);
-                    chart.data.datasets[1].data.push(Number(avg.toFixed(2)));
-                    const maxPoints = 60;
-                    if (chart.data.labels.length > maxPoints) {
-                        chart.data.labels.shift();
-                        chart.data.datasets.forEach(ds => ds.data.shift());
+                        chart.data.labels.push(tsLabel);
+                        chart.data.datasets[0].data.push(data.count);
+                        chart.data.datasets[1].data.push(Number(avg.toFixed(2)));
+                        const maxPoints = 60;
+                        if (chart.data.labels.length > maxPoints) {
+                            chart.data.labels.shift();
+                            chart.data.datasets.forEach(ds => ds.data.shift());
+                        }
+                        chart.update('none');
                     }
-                    chart.update('none');
                 }
             }
         };
@@ -318,16 +322,19 @@
             const hue = (idx * 47) % 360; // spread hues
             const fill = `hsla(${hue}, 65%, 70%, 0.22)`;
             ctx.beginPath();
-            poly.forEach(([nx, ny], i) => {
+            // Decimate polygon points adaptively to reduce path complexity
+            const plen = poly.length;
+            const step = Math.max(1, Math.floor(plen / 200));
+            for (let i = 0; i < plen; i += step) {
+                const nx = poly[i][0], ny = poly[i][1];
                 const x = rect.x + nx * rect.w;
                 const y = rect.y + ny * rect.h;
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            });
+            }
             ctx.closePath();
-            // Soft fill with slight blur to avoid hard edges
+            // Fill without expensive filters (avoid canvas blur to prevent jank)
             ctx.save();
             ctx.fillStyle = fill;
-            ctx.filter = 'blur(0.6px)';
             ctx.globalAlpha = 1.0;
             ctx.fill();
             ctx.restore();
@@ -370,6 +377,19 @@
             ctx.fillText(label, bx + bw / 2, by + bh / 2);
             ctx.restore();
         });
+    }
+
+    // Schedule overlay draws on rAF to avoid blocking ws callback
+    let overlayPending = null;
+    let overlayRaf = 0;
+    function scheduleOverlay(masks, ids) {
+        overlayPending = { masks, ids };
+        if (!overlayRaf) {
+            overlayRaf = requestAnimationFrame(() => {
+                const job = overlayPending; overlayPending = null; overlayRaf = 0;
+                if (job) drawOverlay(job.masks, job.ids);
+            });
+        }
     }
 
     function pointInPoly(px, py, poly, rect) {
