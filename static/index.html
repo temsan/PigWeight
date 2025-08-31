@@ -103,6 +103,7 @@
     let idAliases = {}; // instanceId -> user-defined label
     let lastIds = null; // last ids from WS
     let lastMasks = null; // last masks from WS
+    let overlayBlockUntil = 0;
 
     function aliasesKey(streamId) { return `aliases:${streamId}`; }
     function loadAliases(streamId) { try { return JSON.parse(localStorage.getItem(aliasesKey(streamId)) || '{}'); } catch { return {}; } }
@@ -284,7 +285,8 @@
         const wrapper = document.getElementById('videoWrapper');
         const w = wrapper ? wrapper.clientWidth : videoStream.clientWidth;
         const h = wrapper ? wrapper.clientHeight : videoStream.clientHeight;
-        if (w && h && (overlayCanvas.width !== w || overlayCanvas.height !== h)) {
+        if (!w || !h) return;
+        if (overlayCanvas.width !== w || overlayCanvas.height !== h) {
             overlayCanvas.width = w;
             overlayCanvas.height = h;
         }
@@ -293,8 +295,9 @@
     function getRenderedImageRect() {
         // Compute the actual displayed image rectangle inside the canvas,
         // accounting for object-fit: contain letterboxing.
-        const cw = overlayCanvas.width;
-        const ch = overlayCanvas.height;
+        const wrapper = document.getElementById('videoWrapper');
+        const cw = wrapper ? wrapper.clientWidth : overlayCanvas.width;
+        const ch = wrapper ? wrapper.clientHeight : overlayCanvas.height;
         const iw = videoStream.naturalWidth || cw;
         const ih = videoStream.naturalHeight || ch;
         if (!iw || !ih) return { x: 0, y: 0, w: cw, h: ch };
@@ -304,6 +307,11 @@
         const x = Math.floor((cw - w) / 2);
         const y = Math.floor((ch - h) / 2);
         return { x, y, w, h };
+    }
+
+    function colorForInstance(instId) {
+        const hue = (Number(instId) * 57) % 360;
+        return `hsla(${hue}, 65%, 70%, 0.22)`;
     }
 
     function drawOverlay(masks, ids = null) {
@@ -319,8 +327,8 @@
         // Soft pastel segmentation overlays, optional instance ids (from backend)
         masks.forEach((poly, idx) => {
             if (!Array.isArray(poly) || poly.length < 3) return;
-            const hue = (idx * 47) % 360; // spread hues
-            const fill = `hsla(${hue}, 65%, 70%, 0.22)`;
+            const instId = (ids && ids[idx]) ? ids[idx] : (idx + 1);
+            const fill = colorForInstance(instId);
             ctx.beginPath();
             // Decimate polygon points adaptively to reduce path complexity
             const plen = poly.length;
@@ -347,7 +355,7 @@
                 if (x < minx) minx = x;
                 if (y < miny) miny = y;
             });
-            const instId = (ids && ids[idx]) ? ids[idx] : (idx + 1);
+            // instId already computed above for color; reuse it for label
             const label = String(idAliases[instId] ?? instId);
             const padX = 6, padY = 3, radius = 6;
             ctx.font = '600 13px system-ui, Segoe UI, Arial';
@@ -379,10 +387,11 @@
         });
     }
 
-    // Schedule overlay draws on rAF to avoid blocking ws callback
+    // Schedule overlay draws on rAF (kept on main thread for stability)
     let overlayPending = null;
     let overlayRaf = 0;
     function scheduleOverlay(masks, ids) {
+        if (performance.now() < overlayBlockUntil) return;
         overlayPending = { masks, ids };
         if (!overlayRaf) {
             overlayRaf = requestAnimationFrame(() => {
@@ -572,7 +581,10 @@
         const id = activeStreamId;
         const src = streamSources[id] || '';
         if (!/^rtsp:\/\//i.test(src)) {
-            try { await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`); } catch (err) {}
+            try {
+                overlayBlockUntil = performance.now() + 200; // briefly pause overlay draws
+                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
+            } catch (err) {}
         }
     });
 
@@ -585,6 +597,7 @@
         updateVideoLayout();
         window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
         setPlaceholder();
+        // Worker disabled for now to avoid seek freezes
         // Load and display history from localStorage
         const history = JSON.parse(localStorage.getItem('history') || '[]');
         history.forEach(item => {

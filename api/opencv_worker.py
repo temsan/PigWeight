@@ -155,10 +155,15 @@ class _Worker(mp.Process):
         fps = float(sess.get("fps") or 25.0)
         frame_idx = int(max(0, t_sec) * fps)
         try:
-            # Быстрый seek без лишних настроек
+            # Seek to frame
             self._safe_set(cap, cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            # Одно чтение без warm-up
-            ok, frame = cap.read()
+            # Warm-up a few frames to stabilize decoder/keyframe
+            frame = None
+            ok = False
+            for _ in range(3):
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    break
             if not ok or frame is None:
                 return False, None
             img = _encode_jpeg(frame, self.jpeg_quality)
