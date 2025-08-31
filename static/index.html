@@ -100,6 +100,7 @@
     const avgWindow = 10;
     const streamSources = {}; // id -> sourceUri (predefined + uploads)
     let seekTimer = null;
+    let seekDebounce = null;
     let idAliases = {}; // instanceId -> user-defined label
     let lastIds = null; // last ids from WS
     let lastMasks = null; // last masks from WS
@@ -175,6 +176,7 @@
         
         // Configure seek UI (robust): drive state from /info on every poll
         if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
+        let seekStepSet = false;
         const poll = async () => {
             try {
                 const resp = await fetch(`/api/stream/${streamId}/info`);
@@ -185,6 +187,11 @@
                     const t = Number(info.current_time || 0);
                     if (!Number.isNaN(dur)) { seekRange.max = dur; durTime.textContent = dur.toFixed(1); }
                     if (!Number.isNaN(t)) { seekRange.value = t; curTime.textContent = t.toFixed(1); }
+                    const fps = Number(info.fps || 0);
+                    if (!seekStepSet && fps > 0) {
+                        seekRange.step = (1/Math.min(60, Math.max(1, fps))).toFixed(2);
+                        seekStepSet = true;
+                    }
                 }
             } catch (e) {}
         };
@@ -574,6 +581,18 @@
         e.stopPropagation();
         const t = Number(e.target.value || 0);
         curTime.textContent = t.toFixed(1);
+        // Debounced seek on input for browsers where 'change' may not fire reliably
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        if (!/^rtsp:\/\//i.test(src)) {
+            if (seekDebounce) clearTimeout(seekDebounce);
+            seekDebounce = setTimeout(async () => {
+                try {
+                    overlayBlockUntil = performance.now() + 120;
+                    await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
+                } catch (_) {}
+            }, 120);
+        }
     });
     seekRange.addEventListener('change', async (e) => {
         e.stopPropagation();
@@ -585,6 +604,18 @@
                 overlayBlockUntil = performance.now() + 200; // briefly pause overlay draws
                 await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
             } catch (err) {}
+        }
+    });
+    seekRange.addEventListener('pointerup', async (e) => {
+        e.stopPropagation();
+        const t = Number(seekRange.value || 0);
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        if (!/^rtsp:\/\//i.test(src)) {
+            try {
+                overlayBlockUntil = performance.now() + 150;
+                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
+            } catch (_) {}
         }
     });
 

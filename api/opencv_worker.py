@@ -59,9 +59,10 @@ class _Worker(mp.Process):
                 return fps, frame_count, duration
 
             if kind == "file":
+                # Prefer FFMPEG for better seek accuracy on most containers, then fallback
                 backends = [
-                    getattr(cv2, 'CAP_MSMF', 0),
                     getattr(cv2, 'CAP_FFMPEG', 0),
+                    getattr(cv2, 'CAP_MSMF', 0),
                     getattr(cv2, 'CAP_DSHOW', 0),
                     getattr(cv2, 'CAP_ANY', 0)
                 ]

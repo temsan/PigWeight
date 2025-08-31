@@ -496,7 +496,7 @@ class VideoStream(abc.ABC):
                     if self.last_count:
                         payload["debug"]["ids"] = ids if 'ids' in locals() else []
                     await STREAM_MANAGER.broadcast(self.stream_id, payload)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.3)
 
     async def start(self):
         if not self.running:
