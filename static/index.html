@@ -42,12 +42,12 @@
     <div class="main-flex" style="display:flex; justify-content:center;">
       <div class="container" style="display:flex; gap:16px; width:100%; max-width:100%; align-items:flex-start;">
         <div class="left-col" style="flex:1 1 auto; min-width:560px; order:0;">
-          <div id="videoWrapper" class="video-wrapper card rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(240,245,252,0.9)); border:1px solid rgba(60,90,140,.12);">
+          <div id="videoWrapper" class="video-wrapper card glass video-surface rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto;">
             <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
             <canvas id="overlayCanvas"></canvas>
           </div>
         </div>
-        <div class="right-col card rounded-xl" style="flex:0 0 420px; max-width:420px; background:var(--card-bg, #eef3fb); border:1px solid rgba(60,90,140,.12); order:1;">
+        <div class="right-col card glass rounded-xl" style="flex:0 0 420px; max-width:420px; order:1;">
           <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
             <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
               <label for="manualCount" class="stat-title" style="min-width:150px; color:#2f5078;">Количество</label>
@@ -101,6 +101,7 @@
     const streamSources = {}; // id -> sourceUri (predefined + uploads)
     let seekTimer = null;
     let seekDebounce = null;
+    let overlayEnabled = false;
     let idAliases = {}; // instanceId -> user-defined label
     let lastIds = null; // last ids from WS
     let lastMasks = null; // last masks from WS
@@ -170,6 +171,13 @@
         isVideoPlaying = true;
         videoPlayPauseBtn.textContent = 'Стоп';
         streamStatus.textContent = 'Live';
+        // enable overlay interactions while playing
+        overlayEnabled = true;
+        try {
+            overlayCanvas.style.pointerEvents = 'auto';
+            overlayCanvas.style.cursor = 'crosshair';
+            overlayCanvas.style.opacity = '1';
+        } catch (e) {}
         connectWebSocket(streamId);
         initChart();
         idAliases = loadAliases(streamId);
@@ -207,8 +215,19 @@
             ws.close();
             ws = null;
         }
-        if (activeStreamId) { saveAliases(activeStreamId); }
+        if (activeStreamId) { try { saveAliases(activeStreamId); } catch (e) {} try { if (typeof saveColors==='function') saveColors(activeStreamId); } catch(e){} }
         if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
+        // disable overlay so it doesn't intercept interactions
+        overlayEnabled = false;
+        if (overlayRaf) { cancelAnimationFrame(overlayRaf); overlayRaf = 0; }
+        overlayPending = null;
+        try {
+            const ctx = overlayCanvas.getContext('2d');
+            ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            overlayCanvas.style.pointerEvents = 'none';
+            overlayCanvas.style.cursor = 'default';
+            overlayCanvas.style.opacity = '0';
+        } catch (e) {}
         setPlaceholder();
         isVideoPlaying = false;
         videoPlayPauseBtn.textContent = 'Старт';
@@ -263,26 +282,66 @@
     }
 
     function setPlaceholder() {
-        // SVG-заглушка в пастельных тонах, заполняет контейнер
+        // SVG-заглушка в стиле liquid glass
         const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720' preserveAspectRatio='xMidYMid meet'>
   <defs>
-    <linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>
-      <stop offset='0%' stop-color='#eef3fb'/>
-      <stop offset='100%' stop-color='#e6effa'/>
+    <linearGradient id='bgGrad' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='#eef6ff'/>
+      <stop offset='48%' stop-color='#e7eef9'/>
+      <stop offset='100%' stop-color='#d9e6fb'/>
+    </linearGradient>
+    <radialGradient id='glow1' cx='80%' cy='-10%' r='80%'>
+      <stop offset='0%' stop-color='rgba(124,199,255,0.35)'/>
+      <stop offset='70%' stop-color='rgba(124,199,255,0.00)'/>
+    </radialGradient>
+    <radialGradient id='glow2' cx='10%' cy='10%' r='70%'>
+      <stop offset='0%' stop-color='rgba(139,182,230,0.25)'/>
+      <stop offset='70%' stop-color='rgba(139,182,230,0.00)'/>
+    </radialGradient>
+    <filter id='blur' x='-50%' y='-50%' width='200%' height='200%'>
+      <feGaussianBlur stdDeviation='30'/>
+    </filter>
+    <linearGradient id='glassFill' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='rgba(255,255,255,0.70)'/>
+      <stop offset='100%' stop-color='rgba(255,255,255,0.35)'/>
     </linearGradient>
   </defs>
-  <rect width='1280' height='720' fill='url(#g)'/>
-  <g fill='none' stroke='rgba(60,90,140,0.25)'>
-    <rect x='80' y='60' width='1120' height='600' rx='16'/> 
+
+  <!-- Background -->
+  <rect width='1280' height='720' fill='url(#bgGrad)'/>
+  <rect width='1280' height='720' fill='url(#glow1)'/>
+  <rect width='1280' height='720' fill='url(#glow2)'/>
+
+  <!-- Soft abstract blobs -->
+  <g filter='url(#blur)'>
+    <ellipse cx='250' cy='120' rx='180' ry='90' fill='rgba(124,199,255,0.26)'/>
+    <ellipse cx='1060' cy='180' rx='220' ry='110' fill='rgba(124,199,255,0.18)'/>
+    <ellipse cx='300' cy='590' rx='240' ry='120' fill='rgba(139,182,230,0.18)'/>
   </g>
+
+  <!-- Glass card frame -->
+  <g>
+    <rect x='80' y='60' width='1120' height='600' rx='22'
+          fill='url(#glassFill)'
+          stroke='rgba(30,64,175,0.12)' stroke-width='2'
+          opacity='0.88'/>
+    <rect x='80' y='60' width='1120' height='600' rx='22'
+          fill='none' stroke='rgba(124,199,255,0.35)'
+          stroke-width='1'/>
+  </g>
+
+  <!-- Play badge -->
+  <g transform='translate(640,270)'>
+    <circle r='58' fill='rgba(44,123,229,0.18)' stroke='rgba(44,123,229,0.38)' stroke-width='2'/>
+    <polygon points='-6,-18 -6,18 22,0' fill='#2c7be5'/>
+  </g>
+
+  <!-- Text -->
   <g font-family='Inter,Segoe UI,Arial' text-anchor='middle'>
-    <text x='640' y='360' font-size='42' fill='#2f5078' opacity='0.7'>Нет активного потока</text>
-    <text x='640' y='408' font-size='20' fill='#2f5078' opacity='0.6'>Нажмите «Старт» или выберите камеру/файл</text>
+    <text x='640' y='360' font-size='40' fill='#1f3d6b' opacity='0.85' style='letter-spacing:.3px;'>Нет активного потока</text>
+    <text x='640' y='404' font-size='20' fill='#33507a' opacity='0.7'>Нажмите «Старт» или выберите камеру/файл</text>
   </g>
-  <circle cx='640' cy='280' r='56' fill='none' stroke='rgba(44,123,229,0.35)' stroke-width='8'/>
-  <rect x='600' y='260' width='80' height='40' rx='6' fill='rgba(44,123,229,0.2)'/>
-  <polygon points='618,268 618,292 642,280' fill='#2c7be5'/>
 </svg>`;
         const encoded = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
         videoStream.src = encoded;

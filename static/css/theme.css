@@ -116,6 +116,11 @@ html, body { overflow-x: hidden !important; }
   -webkit-backdrop-filter: blur(22px) saturate(140%);
   border-radius: var(--radius-xl);
 }
+.video-surface{
+  background: var(--grad-video);
+  border:1px solid rgba(30,64,175,0.12);
+  box-shadow: var(--shadow-soft);
+}
 .card-md{ border-radius: var(--radius-md); }
 .glass{
   background: var(--grad-toolbar);
@@ -124,6 +129,14 @@ html, body { overflow-x: hidden !important; }
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   border-radius: var(--radius-xl);
+}
+
+.seek-wrap{
+  background: var(--grad-panel);
+  border:1px solid rgba(30,64,175,0.10);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  box-shadow: var(--shadow-soft);
 }
 
 /* Utilities: buttons */
@@ -135,6 +148,10 @@ html, body { overflow-x: hidden !important; }
   box-shadow: 0 6px 18px rgba(31,60,116,.12), 0 0 0 1px rgba(255,255,255,0.35) inset;
   transition: transform .06s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease, filter .18s ease;
 }
+.pill{ display:inline-flex; align-items:center; justify-content:center; border-radius: var(--radius-sm); border:1px solid rgba(30,64,175,0.20); background: var(--grad-btn); box-shadow: 0 4px 12px rgba(31,60,116,.10); padding:8px 14px; height:40px; line-height:24px; font-weight:600; }
+.pill:hover{ background: var(--grad-btn-hover); border-color: rgba(42,116,234,.45); }
+.file-input-btn{ position: relative; overflow: hidden; }
+.file-input-btn input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 .btn:hover{
   border-color: rgba(42,116,234,.55);
   background: var(--grad-btn-hover);
@@ -191,6 +208,14 @@ html, body { overflow-x: hidden !important; }
   -webkit-backdrop-filter: blur(10px) saturate(120%);
   color: var(--text);
 }
+
+/* Range input styling to match glass look */
+input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; border-radius:999px; background:linear-gradient(180deg,#e9f1ff,#dbe7ff); border:1px solid rgba(30,64,175,0.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }
+input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:linear-gradient(180deg,#4b95ff,#2a74ea); box-shadow:0 2px 6px rgba(31,60,116,.25), inset 0 1px 0 rgba(255,255,255,.45); border:1px solid rgba(42,116,234,.6); }
+input[type=range]::-moz-range-thumb{ width:18px; height:18px; border-radius:50%; background:linear-gradient(180deg,#4b95ff,#2a74ea); box-shadow:0 2px 6px rgba(31,60,116,.25), inset 0 1px 0 rgba(255,255,255,.45); border:1px solid rgba(42,116,234,.6); }
+
+/* Stream status */
+.stream-status{ color:#1f3d6b; font-weight:700; text-shadow: 0 1px 0 rgba(255,255,255,.5); }
 
 /* Заголовок */
 h2{
