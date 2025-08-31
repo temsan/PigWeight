@@ -195,21 +195,188 @@ def ocv_read_jpeg(stream_id: str, timeout: float = 1.0) -> Optional[bytes]:
 
 def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Optional[bytes]:
     return _ocv_safe_call('seek_read_jpeg', stream_id, t, timeout=timeout)
+def ocv_meta(stream_id: str) -> Dict[str, Any]:
+    return _ocv_safe_call('meta', stream_id)
+
+def ocv_probe_file(path: str) -> Dict[str, Any]:
+    """Open a file temporarily in the worker to fetch meta, then close it."""
+    tmp_id = f"probe_{int(time.time()*1000)}"
+    try:
+        meta = ocv_open_file(tmp_id, path)
+        # ensure meta returns expected keys
+        fps = float(meta.get("fps", 0.0) or 0.0)
+        dur = float(meta.get("duration", 0.0) or 0.0)
+        fc = int(meta.get("frame_count", 0) or 0)
+        return {"fps": fps, "duration": dur, "frame_count": fc}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        try:
+            ocv_close(tmp_id)
+        except Exception:
+            pass
+def ocv_meta(stream_id: str) -> Dict[str, Any]:
+    return _ocv_safe_call('meta', stream_id)
 
 class SimpleTracker:
-    def __init__(self, iou_threshold=0.5, max_age=30):
-        self.iou_threshold = iou_threshold
-        self.max_age = max_age
+    def __init__(self, iou_threshold=0.3, max_age=30, dist_weight=0.2):
+        self.iou_threshold = float(iou_threshold)
+        self.max_age = int(max_age)
+        self.dist_weight = float(dist_weight)
         self.next_id = 1
-        self.tracks = {}
+        # id -> {bbox, age, cx, cy}
+        self.tracks: Dict[int, Dict[str, Any]] = {}
 
-    def update(self, detections):
-        # This is a simplified tracker. A real implementation would be more complex.
-        # For now, we just return the detections as tracks.
-        tracks = []
-        for i, det in enumerate(detections):
-            tracks.append({**det, 'id': i})
-        return tracks
+    @staticmethod
+    def _iou(a, b):
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+        inter_w = max(0.0, inter_x2 - inter_x1)
+        inter_h = max(0.0, inter_y2 - inter_y1)
+        inter = inter_w * inter_h
+        if inter <= 0:
+            return 0.0
+        area_a = max(0.0, (ax2 - ax1)) * max(0.0, (ay2 - ay1))
+        area_b = max(0.0, (bx2 - bx1)) * max(0.0, (by2 - by1))
+        denom = area_a + area_b - inter
+        return inter / denom if denom > 0 else 0.0
+
+    @staticmethod
+    def _center(b):
+        x1, y1, x2, y2 = b
+        return (0.5 * (x1 + x2), 0.5 * (y1 + y2))
+
+    def _hungarian(self, cost: List[List[float]]):
+        # Minimal Hungarian for small N (<= 50). Returns list of (row->col) or -1.
+        n = max(len(cost), len(cost[0]) if cost else 0)
+        # pad to square
+        C = [[0.0]*n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                C[i][j] = cost[i][j] if i < len(cost) and j < len(cost[0]) else 1e6
+        u = [0.0]*(n+1)
+        v = [0.0]*(n+1)
+        p = [0]*(n+1)
+        way = [0]*(n+1)
+        for i in range(1, n+1):
+            p[0] = i
+            j0 = 0
+            minv = [float('inf')]*(n+1)
+            used = [False]*(n+1)
+            while True:
+                used[j0] = True
+                i0 = p[j0]
+                delta = float('inf')
+                j1 = 0
+                for j in range(1, n+1):
+                    if used[j]:
+                        continue
+                    cur = C[i0-1][j-1]-u[i0]-v[j]
+                    if cur < minv[j]:
+                        minv[j] = cur
+                        way[j] = j0
+                    if minv[j] < delta:
+                        delta = minv[j]
+                        j1 = j
+                for j in range(0, n+1):
+                    if used[j]:
+                        u[p[j]] += delta
+                        v[j] -= delta
+                    else:
+                        minv[j] -= delta
+                j0 = j1
+                if p[j0] == 0:
+                    break
+            while True:
+                j1 = way[j0]
+                p[j0] = p[j1]
+                j0 = j1
+                if j0 == 0:
+                    break
+        ans = [-1]*n
+        for j in range(1, n+1):
+            if p[j] != 0 and p[j]-1 < len(cost):
+                ans[p[j]-1] = j-1 if j-1 < len(cost[0]) else -1
+        return ans
+
+    def update(self, detections: List[Dict[str, Any]]):
+        det_bboxes = [d['bbox'] for d in detections]
+        det_centers = [self._center(b) for b in det_bboxes]
+        track_ids = list(self.tracks.keys())
+        track_bboxes = [self.tracks[tid]['bbox'] for tid in track_ids]
+        track_centers = [(self.tracks[tid].get('cx'), self.tracks[tid].get('cy')) for tid in track_ids]
+
+        if det_bboxes and track_bboxes:
+            # Build cost = (1 - IoU) + w * normalized center distance
+            cost = []
+            for i, bb in enumerate(det_bboxes):
+                row = []
+                cx, cy = det_centers[i]
+                for k, tb in enumerate(track_bboxes):
+                    iou = self._iou(bb, tb)
+                    tcx, tcy = track_centers[k]
+                    if tcx is None or tcy is None:
+                        d = 0.0
+                    else:
+                        dx = cx - tcx
+                        dy = cy - tcy
+                        # normalize by size of union box diagonal to prefer nearby
+                        ux1, uy1 = min(bb[0], tb[0]), min(bb[1], tb[1])
+                        ux2, uy2 = max(bb[2], tb[2]), max(bb[3], tb[3])
+                        diag = max(1.0, ((ux2-ux1)**2 + (uy2-uy1)**2) ** 0.5)
+                        d = ((dx*dx + dy*dy) ** 0.5) / diag
+                    # penalize low IoU heavily
+                    base = (1.0 - iou)
+                    if iou < self.iou_threshold:
+                        base += 10.0
+                    row.append(base + self.dist_weight * d)
+                cost.append(row)
+            assign = self._hungarian(cost)
+            used_tracks = set()
+            det_to_id: Dict[int, int] = {}
+            for i, j in enumerate(assign):
+                if j is None or j < 0 or i >= len(det_bboxes) or j >= len(track_ids):
+                    continue
+                # validate IoU threshold
+                if self._iou(det_bboxes[i], track_bboxes[j]) < self.iou_threshold:
+                    continue
+                tid = track_ids[j]
+                det_to_id[i] = tid
+                used_tracks.add(tid)
+                cx, cy = det_centers[i]
+                self.tracks[tid].update({'bbox': det_bboxes[i], 'cx': cx, 'cy': cy, 'age': self.max_age})
+            # New tracks
+            for i in range(len(det_bboxes)):
+                if i not in det_to_id:
+                    tid = self.next_id
+                    self.next_id += 1
+                    cx, cy = det_centers[i]
+                    self.tracks[tid] = {'bbox': det_bboxes[i], 'cx': cx, 'cy': cy, 'age': self.max_age}
+                    det_to_id[i] = tid
+            # Age unmatched tracks
+            rm = []
+            for tid in list(self.tracks.keys()):
+                if tid not in used_tracks and self.tracks[tid]['age'] > 0:
+                    self.tracks[tid]['age'] -= 1
+                    if self.tracks[tid]['age'] <= 0:
+                        rm.append(tid)
+            for tid in rm:
+                self.tracks.pop(tid, None)
+            ids_out = [det_to_id[i] for i in range(len(det_bboxes))]
+        else:
+            # No existing tracks → create new for all dets
+            ids_out = []
+            for i, b in enumerate(det_bboxes):
+                tid = self.next_id
+                self.next_id += 1
+                cx, cy = det_centers[i]
+                self.tracks[tid] = {'bbox': b, 'cx': cx, 'cy': cy, 'age': self.max_age}
+                ids_out.append(tid)
+        return [{**detections[i], 'id': ids_out[i]} for i in range(len(detections))]
 
 # --- Unified Video Stream Architecture ---
 
@@ -295,12 +462,22 @@ class VideoStream(abc.ABC):
                     results = self.model.predict(proc, imgsz=640, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
                     r = results[0] if results else None
                     if r and hasattr(r, "masks") and r.masks is not None:
-                        self.last_count = len(r.masks.xy)
-                        # Normalize masks to original full frame 0-1 range, accounting for vertical crop offset
-                        hc, wc = proc.shape[:2]
-                        # Map each polygon point (x,y) from cropped coords to original normalized coords
+                        polys = r.masks.xy
+                        self.last_count = len(polys)
+                        # Build detections by bbox for simple tracking on cropped frame
+                        dets = []
+                        for m in polys:
+                            if m is None or len(m) == 0:
+                                continue
+                            xs = [float(p[0]) for p in m]
+                            ys = [float(p[1]) for p in m]
+                            x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+                            dets.append({'bbox': [x1, y1, x2, y2]})
+                        tracks = self.tracker.update(dets) if dets else []
+                        ids = [t['id'] for t in tracks] if tracks else []
+                        # Normalize masks back to original frame
                         mapped: list[list[tuple[float, float]]] = []
-                        for m in r.masks.xy:
+                        for m in polys:
                             pts = []
                             for p in m:
                                 x = float(p[0])
@@ -311,11 +488,14 @@ class VideoStream(abc.ABC):
                     else:
                         self.last_count = 0
                         self.last_masks = []
-                    await STREAM_MANAGER.broadcast(self.stream_id, {
+                    payload = {
                         "type": "count_update",
                         "count": self.last_count,
                         "debug": {"masks": self.last_masks}
-                    })
+                    }
+                    if self.last_count:
+                        payload["debug"]["ids"] = ids if 'ids' in locals() else []
+                    await STREAM_MANAGER.broadcast(self.stream_id, payload)
             await asyncio.sleep(1)
 
     async def start(self):
@@ -460,11 +640,28 @@ async def read_root():
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
     try:
-        safe_name = "".join(c for c in file.filename if c.isalnum() or c in "._-")
+        # Always save under the original safe filename (overwrite if exists)
+        safe_name = "".join(c for c in (file.filename or "") if c.isalnum() or c in "._-") or "upload.bin"
         dst = UPLOAD_DIR / safe_name
-        with open(dst, "wb") as buffer:
-            buffer.write(await file.read())
-        return {"file_path": str(dst)}
+        content = await file.read()
+        try:
+            # Skip rewrite if file exists with same size to avoid SSD churn
+            if not (dst.exists() and dst.stat().st_size == len(content)):
+                with open(dst, "wb") as buffer:
+                    buffer.write(content)
+        except Exception:
+            # Fallback to simple write
+            with open(dst, "wb") as buffer:
+                buffer.write(content)
+        meta = ocv_probe_file(str(dst))
+        resp = {"file_path": str(dst)}
+        if meta and not meta.get("error"):
+            resp.update({
+                "duration": float(meta.get("duration", 0.0) or 0.0),
+                "fps": float(meta.get("fps", 0.0) or 0.0),
+                "frame_count": int(meta.get("frame_count", 0) or 0)
+            })
+        return resp
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -472,7 +669,17 @@ async def upload_file(file: UploadFile = File(...)):
 async def api_stream_start(stream_id: str, source_uri: str):
     stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
     await stream.start()
-    return {"status": "started", "stream_id": stream_id}
+    resp = {"status": "started", "stream_id": stream_id}
+    if isinstance(stream, FileStream):
+        # provide best-known meta immediately
+        resp.update({
+            "type": "file",
+            "duration": float(stream.duration or 0.0),
+            "fps": float(stream.fps or 0.0)
+        })
+    else:
+        resp.update({"type": "rtsp"})
+    return resp
 
 @app.get("/api/stream/{stream_id}/stop")
 async def api_stream_stop(stream_id: str):
@@ -512,6 +719,14 @@ async def api_stream_info(stream_id: str):
     if not stream:
         return JSONResponse({"error": "stream not found"}, status_code=404)
     if isinstance(stream, FileStream):
+        # Refresh meta lazily if duration is unknown
+        if not stream.duration or stream.duration <= 0.0:
+            try:
+                meta = ocv_meta(stream.stream_id)
+                stream.duration = float(meta.get("duration", stream.duration or 0.0) or 0.0)
+                stream.fps = float(meta.get("fps", stream.fps or 0.0) or 0.0)
+            except Exception:
+                pass
         return {
             "type": "file",
             "duration": float(stream.duration or 0.0),

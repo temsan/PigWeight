@@ -12,10 +12,11 @@
     html, body { margin: 0; padding: 0; }
     #main-container { padding-top: 64px; }
     .video-wrapper { position: relative; }
-    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 10; background-color: transparent; }
+    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:auto; z-index: 10; background-color: transparent; cursor: crosshair; }
     #videoStream { display: block; width: 100%; height: auto; object-fit: contain; z-index: 1; }
     /* Align numeric inputs on the weights panel to the right */
     .panel-body input[type="number"] { text-align: right; }
+    .stream-status { display:inline-block; min-width:64px; text-align:right; }
   </style>
 </head>
 <body style="overflow:auto;">
@@ -99,6 +100,13 @@
     const avgWindow = 10;
     const streamSources = {}; // id -> sourceUri (predefined + uploads)
     let seekTimer = null;
+    let idAliases = {}; // instanceId -> user-defined label
+    let lastIds = null; // last ids from WS
+    let lastMasks = null; // last masks from WS
+
+    function aliasesKey(streamId) { return `aliases:${streamId}`; }
+    function loadAliases(streamId) { try { return JSON.parse(localStorage.getItem(aliasesKey(streamId)) || '{}'); } catch { return {}; } }
+    function saveAliases(streamId) { try { localStorage.setItem(aliasesKey(streamId), JSON.stringify(idAliases || {})); } catch {} }
 
     function updateVideoLayout() {
         const top = document.getElementById('topToolbar');
@@ -162,6 +170,7 @@
         streamStatus.textContent = 'Live';
         connectWebSocket(streamId);
         initChart();
+        idAliases = loadAliases(streamId);
         
         // Configure seek UI (robust): drive state from /info on every poll
         if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
@@ -190,6 +199,7 @@
             ws.close();
             ws = null;
         }
+        if (activeStreamId) { saveAliases(activeStreamId); }
         if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
         setPlaceholder();
         isVideoPlaying = false;
@@ -213,7 +223,9 @@
                     recalcAvgWeight();
                 }
                 if (data.debug && data.debug.masks) {
-                    drawOverlay(data.debug.masks);
+                    lastMasks = data.debug.masks;
+                    lastIds = data.debug.ids || null;
+                    drawOverlay(lastMasks, lastIds);
                 }
                 // Update chart with low overhead
                 if (chart) {
@@ -290,7 +302,7 @@
         return { x, y, w, h };
     }
 
-    function drawOverlay(masks) {
+    function drawOverlay(masks, ids = null) {
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
         const cw = overlayCanvas.width;
@@ -300,12 +312,11 @@
 
         const rect = getRenderedImageRect();
 
-        // Pastel filled polygons with high-contrast crisp outlines
+        // Soft pastel segmentation overlays, optional instance ids (from backend)
         masks.forEach((poly, idx) => {
             if (!Array.isArray(poly) || poly.length < 3) return;
             const hue = (idx * 47) % 360; // spread hues
-            const fill = `hsla(${hue}, 65%, 75%, 0.25)`;
-            const stroke = `hsla(${hue}, 75%, 40%, 1)`;
+            const fill = `hsla(${hue}, 65%, 70%, 0.22)`;
             ctx.beginPath();
             poly.forEach(([nx, ny], i) => {
                 const x = rect.x + nx * rect.w;
@@ -313,35 +324,90 @@
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             });
             ctx.closePath();
+            // Soft fill with slight blur to avoid hard edges
+            ctx.save();
             ctx.fillStyle = fill;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
+            ctx.filter = 'blur(0.6px)';
+            ctx.globalAlpha = 1.0;
             ctx.fill();
-            // Outer halo for edge contrast
-            ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-            ctx.lineWidth = 4;
-            ctx.stroke();
-            // Inner colored outline
-            ctx.strokeStyle = stroke;
-            ctx.lineWidth = 2;
-            ctx.stroke();
+            ctx.restore();
 
-            // Numbering: draw index (1-based) at polygon centroid (in rendered space)
-            let cx = 0, cy = 0;
-            poly.forEach(([nx, ny]) => { cx += rect.x + nx * rect.w; cy += rect.y + ny * rect.h; });
-            cx /= poly.length; cy /= poly.length;
-            const label = String(idx + 1);
-            ctx.font = '600 16px system-ui, Segoe UI, Arial';
+            // Numbering badge (segmentation-style) near polygon's top-left
+            let minx = Infinity, miny = Infinity;
+            poly.forEach(([nx, ny]) => {
+                const x = rect.x + nx * rect.w;
+                const y = rect.y + ny * rect.h;
+                if (x < minx) minx = x;
+                if (y < miny) miny = y;
+            });
+            const instId = (ids && ids[idx]) ? ids[idx] : (idx + 1);
+            const label = String(idAliases[instId] ?? instId);
+            const padX = 6, padY = 3, radius = 6;
+            ctx.font = '600 13px system-ui, Segoe UI, Arial';
+            const tw = ctx.measureText(label).width;
+            const bw = Math.ceil(tw + padX * 2);
+            const bh = 20;
+            let bx = Math.max(rect.x, Math.min(minx - 8, rect.x + rect.w - bw));
+            let by = Math.max(rect.y, Math.min(miny - 8, rect.y + rect.h - bh));
+            // rounded rect
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(bx + radius, by);
+            ctx.lineTo(bx + bw - radius, by);
+            ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + radius);
+            ctx.lineTo(bx + bw, by + bh - radius);
+            ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - radius, by + bh);
+            ctx.lineTo(bx + radius, by + bh);
+            ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - radius);
+            ctx.lineTo(bx, by + radius);
+            ctx.quadraticCurveTo(bx, by, bx + radius, by);
+            // subtle glassy background
+            ctx.fillStyle = 'rgba(30,50,80,0.85)';
+            ctx.fill();
+            ctx.fillStyle = '#fff';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            // text halo for contrast
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-            ctx.strokeText(label, cx, cy);
-            ctx.fillStyle = 'rgba(30,50,80,0.95)';
-            ctx.fillText(label, cx, cy);
+            ctx.fillText(label, bx + bw / 2, by + bh / 2);
+            ctx.restore();
         });
     }
+
+    function pointInPoly(px, py, poly, rect) {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const xi = rect.x + poly[i][0] * rect.w;
+            const yi = rect.y + poly[i][1] * rect.h;
+            const xj = rect.x + poly[j][0] * rect.w;
+            const yj = rect.y + poly[j][1] * rect.h;
+            const intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-6) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    overlayCanvas.addEventListener('click', (e) => {
+        if (!lastMasks || !lastMasks.length) return;
+        const rectDom = overlayCanvas.getBoundingClientRect();
+        const px = e.clientX - rectDom.left;
+        const py = e.clientY - rectDom.top;
+        const imgRect = getRenderedImageRect();
+        // check topmost polygon first: iterate reversed
+        let foundIdx = -1;
+        for (let i = lastMasks.length - 1; i >= 0; i--) {
+            if (pointInPoly(px, py, lastMasks[i], imgRect)) { foundIdx = i; break; }
+        }
+        if (foundIdx < 0) return;
+        const instId = (lastIds && lastIds[foundIdx]) ? lastIds[foundIdx] : (foundIdx + 1);
+        const current = idAliases[instId] ?? instId;
+        const val = prompt('Номер свиньи для ID ' + instId + ':', String(current));
+        if (val === null) return;
+        const trimmed = String(val).trim();
+        if (trimmed === '') { delete idAliases[instId]; } else { idAliases[instId] = trimmed; }
+        if (activeStreamId) saveAliases(activeStreamId);
+        drawOverlay(lastMasks, lastIds);
+    });
+
+    // Note: reset button removed per request
 
     function initChart() {
         const ctx = liveCountChart.getContext('2d');
@@ -441,12 +507,33 @@
             await stopStream();
             activeStreamId = streamId;
             streamSources[streamId] = sourceUri;
+            // Seed duration from upload meta if available
+            if (uploadData.duration) {
+                const dur = Number(uploadData.duration || 0);
+                if (!Number.isNaN(dur) && dur > 0) {
+                    seekRange.max = dur;
+                    durTime.textContent = dur.toFixed(1);
+                }
+                if (uploadData.fps) {
+                    const fps = Number(uploadData.fps || 0);
+                    if (!Number.isNaN(fps) && fps > 0) {
+                        seekRange.step = (1/Math.min(60, Math.max(1, fps))).toFixed(2);
+                    }
+                }
+            }
             await startStream(streamId, sourceUri);
-            const response = await fetch(`/api/stream/${streamId}/info`);
-            const info = await response.json();
-            const dur = Number(info.duration || 0);
-            seekRange.max = dur;
-            durTime.textContent = dur.toFixed(1);
+            // Confirm once more from /info
+            try {
+                const response = await fetch(`/api/stream/${streamId}/info`);
+                if (response.ok) {
+                    const info = await response.json();
+                    const dur = Number(info.duration || 0);
+                    if (!Number.isNaN(dur) && dur > 0) {
+                        seekRange.max = dur;
+                        durTime.textContent = dur.toFixed(1);
+                    }
+                }
+            } catch (_) {}
             // keep slider always enabled; just update values
         } else {
             streamStatus.textContent = `Error uploading file: ${uploadData.error}`;
@@ -455,10 +542,12 @@
 
     // Seek handlers
     seekRange.addEventListener('input', (e) => {
+        e.stopPropagation();
         const t = Number(e.target.value || 0);
         curTime.textContent = t.toFixed(1);
     });
     seekRange.addEventListener('change', async (e) => {
+        e.stopPropagation();
         const t = Number(e.target.value || 0);
         const id = activeStreamId;
         const src = streamSources[id] || '';
@@ -466,6 +555,10 @@
             try { await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`); } catch (err) {}
         }
     });
+
+    // Prevent accidental blur/propagation on pointer interactions
+    seekRange.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+    seekRange.addEventListener('pointerup', (e) => { e.stopPropagation(); });
 
     document.addEventListener('DOMContentLoaded', async () => {
         populateStreams();

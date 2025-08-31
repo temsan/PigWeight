@@ -38,45 +38,85 @@ class _Worker(mp.Process):
 
     def _open_cap(self, kind: str, sid: str, src: str) -> Tuple[bool, Dict[str, Any]]:
         try:
-            cap = cv2.VideoCapture(src)
-            # try to reduce decoder threading/buffers
-            self._safe_set(cap, getattr(cv2, 'CAP_PROP_THREADS', 42), 1)
-            self._safe_set(cap, getattr(cv2, 'CAP_PROP_BUFFERSIZE', 43), 1)
-            if not cap or not cap.isOpened():
-                try:
-                    cap.release()
-                except Exception:
-                    pass
-                return False, {"error": "open failed"}
-            fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-            duration = (frame_count / fps) if (fps > 0 and frame_count > 0) else 0.0
-            if duration <= 0.0:
-                # Fallback: try to use POS_AVI_RATIO and POS_MSEC to estimate duration
-                try:
-                    self._safe_set(cap, cv2.CAP_PROP_POS_AVI_RATIO, 1)
-                    ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
-                    if ms > 0:
-                        duration = ms / 1000.0
-                except Exception:
-                    pass
-                finally:
-                    # Reset back to start
+            def _meta_from_cap(cap, kind: str):
+                fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0) or 25.0
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                duration = (frame_count / fps) if (fps > 0 and frame_count > 0) else 0.0
+                if duration <= 0.0 and kind == "file":
                     try:
-                        self._safe_set(cap, cv2.CAP_PROP_POS_AVI_RATIO, 0)
-                        self._safe_set(cap, cv2.CAP_PROP_POS_FRAMES, 0)
+                        self._safe_set(cap, cv2.CAP_PROP_POS_AVI_RATIO, 1)
+                        ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+                        if ms > 0:
+                            duration = ms / 1000.0
                     except Exception:
                         pass
+                    finally:
+                        try:
+                            self._safe_set(cap, cv2.CAP_PROP_POS_AVI_RATIO, 0)
+                            self._safe_set(cap, cv2.CAP_PROP_POS_FRAMES, 0)
+                        except Exception:
+                            pass
+                return fps, frame_count, duration
+
+            if kind == "file":
+                backends = [
+                    getattr(cv2, 'CAP_MSMF', 0),
+                    getattr(cv2, 'CAP_FFMPEG', 0),
+                    getattr(cv2, 'CAP_DSHOW', 0),
+                    getattr(cv2, 'CAP_ANY', 0)
+                ]
+            else:
+                backends = [getattr(cv2, 'CAP_ANY', 0)]
+
+            best_cap = None
+            best = None
+            last_err = None
+            for be in backends:
+                try:
+                    cap = cv2.VideoCapture(src, be) if be else cv2.VideoCapture(src)
+                    self._safe_set(cap, getattr(cv2, 'CAP_PROP_THREADS', 42), 1)
+                    self._safe_set(cap, getattr(cv2, 'CAP_PROP_BUFFERSIZE', 43), 1)
+                    if not cap or not cap.isOpened():
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        continue
+                    fps, fc, dur = _meta_from_cap(cap, kind)
+                    score = (1 if fc > 0 else 0) + (1 if dur > 0 else 0)
+                    if best is None or score > best[0]:
+                        if best_cap is not None and best_cap is not cap:
+                            try:
+                                best_cap.release()
+                            except Exception:
+                                pass
+                        best_cap = cap
+                        best = (score, fps, fc, dur)
+                        if score >= 2:
+                            break
+                    else:
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+
+            if best_cap is None:
+                return False, {"error": last_err or "open failed"}
+
+            _, fps, frame_count, duration = best
             self.sessions[sid] = {
                 "type": kind,
                 "src": src,
-                "cap": cap,
+                "cap": best_cap,
                 "fps": float(fps),
-                "frame_count": frame_count,
+                "frame_count": int(frame_count),
                 "duration": float(duration),
                 "last_ts": 0.0,
             }
-            return True, {"fps": float(fps), "frame_count": frame_count, "duration": float(duration)}
+            return True, {"fps": float(fps), "frame_count": int(frame_count), "duration": float(duration)}
         except Exception as e:
             return False, {"error": str(e)}
 
