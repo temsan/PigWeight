@@ -123,18 +123,27 @@
     }
 
     async function getStreams() {
-        // In a real application, you would fetch this from the backend
-        // Updated to current camera channels
-        return {
-            'cam101': 'rtsp://rtsp:Qwerty.12!@10.15.6.27:554/ISAPI/Streaming/Channels/101',
-            'cam102': 'rtsp://rtsp:Qwerty.12!@10.15.6.27:554/ISAPI/Streaming/Channels/102'
-        };
+        // Fetch camera list only from backend (.env-driven)
+        try {
+            const resp = await fetch('/api/cameras');
+            if (!resp.ok) return {};
+            const data = await resp.json();
+            return (data && typeof data === 'object') ? data : {};
+        } catch (_) {
+            return {};
+        }
     }
 
     async function populateStreams() {
         const streams = await getStreams();
         streamRadios.innerHTML = '';
-        Object.keys(streams).forEach((id, idx) => {
+        const ids = Object.keys(streams);
+        if (ids.length === 0) {
+            // No cameras configured in .env
+            streamRadios.innerHTML = '<span style="opacity:.6;">Нет камер</span>';
+            return;
+        }
+        ids.forEach((id, idx) => {
             streamSources[id] = streams[id];
             const radio = document.createElement('input');
             radio.type = 'radio';

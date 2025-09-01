@@ -115,6 +115,36 @@ STATIC_DIR = BASE_DIR / "static"
 
 # --- Helper Functions ---
 
+def cameras_from_env() -> Dict[str, str]:
+    """Collect camera RTSP URLs from environment variables.
+
+    Supported patterns (case-sensitive):
+      - CAM_CH<digits>=rtsp://...
+      - If no CAM_CH* are present, fallback to CAM_URL or CAM_DEFAULT as cam101
+    Returns mapping like {"cam101": "rtsp://...", ...} ordered by channel number.
+    """
+    cams: Dict[str, str] = {}
+    items = []
+    for key, val in os.environ.items():
+        if not val:
+            continue
+        if key.startswith("CAM_CH"):
+            suf = key[6:]  # after CAM_CH
+            if suf.isdigit():
+                try:
+                    items.append((int(suf), val))
+                except Exception:
+                    continue
+    if items:
+        for num, url in sorted(items, key=lambda t: t[0]):
+            cams[f"cam{num}"] = url
+        return cams
+    # Fallback
+    url = os.getenv("CAM_URL") or os.getenv("CAM_DEFAULT")
+    if url:
+        cams["cam101"] = url
+    return cams
+
 def encode_jpeg(frame, quality: int = None) -> bytes:
     q = quality or JPEG_QUALITY
     encode_params = [
@@ -683,8 +713,13 @@ async def api_stream_start(stream_id: str, source_uri: str):
 
 @app.get("/api/stream/{stream_id}/stop")
 async def api_stream_stop(stream_id: str):
-    await STREAM_MANAGER.stop_stream(stream_id)
-    return {"status": "stopped", "stream_id": stream_id}
+    try:
+        await STREAM_MANAGER.stop_stream(stream_id)
+        return {"status": "stopped", "stream_id": stream_id}
+    except Exception as e:
+        # Be resilient: never break UI on stop
+        logger.error(f"Stop stream error for {stream_id}: {e}")
+        return JSONResponse({"status": "stopped", "stream_id": stream_id, "warning": str(e)}, status_code=200)
 
 @app.get("/api/stream/{stream_id}/snapshot")
 async def api_stream_snapshot(stream_id: str):
@@ -712,6 +747,11 @@ async def api_stream_feed(stream_id: str):
     if not stream or not stream.running:
         return JSONResponse({"error": "stream not found or not running"}, status_code=404)
     return StreamingResponse(mjpeg_generator(stream), media_type="multipart/x-mixed-replace; boundary=frame")
+
+@app.get("/api/cameras")
+async def api_cameras():
+    """Return available cameras as defined in .env (env vars)."""
+    return cameras_from_env()
 
 @app.get("/api/stream/{stream_id}/info")
 async def api_stream_info(stream_id: str):
