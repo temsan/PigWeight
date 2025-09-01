@@ -124,8 +124,10 @@
 
     async function getStreams() {
         // In a real application, you would fetch this from the backend
+        // Updated to current camera channels
         return {
-            'cam1': 'rtsp://admin:Qwerty.123@10.15.6.24/1/1'
+            'cam101': 'rtsp://rtsp:Qwerty.12!@10.15.6.27:554/ISAPI/Streaming/Channels/101',
+            'cam102': 'rtsp://rtsp:Qwerty.12!@10.15.6.27:554/ISAPI/Streaming/Channels/102'
         };
     }
 
