@@ -472,6 +472,11 @@ class VideoStream(abc.ABC):
         self._stream_task: Optional[asyncio.Task] = None
         # Recent crossings to render on UI (store as list of dicts with ts)
         self._recent_crossings: List[Dict[str, Any]] = []
+        # Порядок событий пересечения слева и первое появление
+        self._first_seen_order: Dict[int, int] = {}
+        self._arrival_counter: int = 1
+        self._left_cross_rank: Dict[int, int] = {}
+        self._left_cross_counter: int = 1
         # Session numbering and act-of-weighing metrics
         self._session_id_map: Dict[int, int] = {}
         self._next_session_label: int = 1
@@ -494,6 +499,10 @@ class VideoStream(abc.ABC):
         self._act_crossings = []
         self._act_last_cross_ts = 0.0
         self._last_timeline_ts = time.time()
+        self._first_seen_order = {}
+        self._arrival_counter = 1
+        self._left_cross_rank = {}
+        self._left_cross_counter = 1
 
     def _finalize_act_to_files(self):
         try:
@@ -670,6 +679,10 @@ class VideoStream(abc.ABC):
                                     "x": float(L), "y": float(y_at),
                                     "count_est": int(self.reported_count)
                                 })
+                                # порядковый номер пересечения слева
+                                if int(tid) not in self._left_cross_rank:
+                                    self._left_cross_rank[int(tid)] = self._left_cross_counter
+                                    self._left_cross_counter += 1
                             except Exception:
                                 pass
                     elif prev > R >= cx:
@@ -856,19 +869,52 @@ async def _global_infer_loop(self):
                                 centroids_local.append((cx_m, cy_m))
                             tracks = self.tracker.update(dets) if dets else []
                             ids = [t['id'] for t in tracks] if tracks else []
-                            # Stable session numbering
-                            session_labels: List[int] = []
+                            # Зафиксировать порядок первого появления (входа в кадр)
                             for tid in ids:
-                                if tid not in self._session_id_map:
-                                    self._session_id_map[tid] = self._next_session_label
-                                    self._next_session_label += 1
-                                session_labels.append(self._session_id_map[tid])
+                                if tid not in self._first_seen_order:
+                                    self._first_seen_order[tid] = self._arrival_counter
+                                    self._arrival_counter += 1
                             # centers for flow counting (normalized X) — по центроидам масок
                             centers_x: List[float] = []
                             centers_y: List[float] = []
                             for (cxm, cym) in centroids_local:
                                 centers_x.append(float(cxm) / float(W0))
                                 centers_y.append((float(cym) + float(y0)) / float(H0))
+                            # Присваиваем новые метки слева-направо, чтобы цифры были по порядку
+                            if ids:
+                                new_pairs: List[Tuple[int, float]] = []
+                                for i, tid in enumerate(ids):
+                                    if tid not in self._session_id_map:
+                                        xnorm = centers_x[i] if i < len(centers_x) else 0.0
+                                        new_pairs.append((tid, float(xnorm)))
+                                new_pairs.sort(key=lambda t: t[1])
+                                for tid, _ in new_pairs:
+                                    if tid not in self._session_id_map:
+                                        self._session_id_map[tid] = self._next_session_label
+                                        self._next_session_label += 1
+                            # Собираем последовательность меток по трекам текущего кадра
+                            session_labels: List[int] = [self._session_id_map.get(tid, 0) for tid in ids]
+                            # Дополнительно подготовим «человеческий» порядок: по порядку пересечения ЛЕВОЙ линии,
+                            # если объект её ещё не пересёк — по времени входа (первого появления),
+                            # при равенстве — правее раньше (справа-налево), чтобы слои масок были читаемы
+                            try:
+                                n = len(centroids_local)
+                                ordered_labels = [0] * n
+                                order_idx = list(range(n))
+                                # Привязать индекс i к track id
+                                def left_rank(i: int) -> int:
+                                    try:
+                                        tid = ids[i]
+                                        if int(tid) in self._left_cross_rank:
+                                            return int(self._left_cross_rank[int(tid)])
+                                        return int(self._first_seen_order.get(tid, 1_000_000))
+                                    except Exception:
+                                        return 1_000_000
+                                order_idx.sort(key=lambda i: (left_rank(i), -(centroids_local[i][0] if i < len(centroids_local) else 0.0)))
+                                for rank, idx_i in enumerate(order_idx, start=1):
+                                    ordered_labels[idx_i] = rank
+                            except Exception:
+                                ordered_labels = list(range(1, len(centroids_local) + 1))
                             self._update_line_counters(ids, centers_x, centers_y)
                             # Normalize masks back to original frame
                             mapped: list[list[tuple[float, float]]] = []
@@ -926,8 +972,8 @@ async def _global_infer_loop(self):
                             pass
                         # include stable labels and act-of-weighing stats
                         try:
-                            if session_labels:
-                                payload["debug"]["labels"] = session_labels
+                            if 'ordered_labels' in locals() and ordered_labels:
+                                payload["debug"]["labels"] = ordered_labels
                             payload["debug"]["act"] = {
                                 "seen_total": int(len(self._act_seen_labels)),
                                 "peak_concurrent": int(self._act_peak),
@@ -1332,6 +1378,48 @@ async def api_records_get(name: str):
         if (RECORDS_DIR / svg_name).exists():
             js["svg"] = f"/records/{svg_name}"
         return js
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# --- Runtime adjustable cut lines ---
+@app.get("/api/lines")
+async def api_get_lines():
+    try:
+        return {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/lines")
+async def api_set_lines(left_x: float = Query(None), right_x: float = Query(None), body: dict = Body(None)):
+    try:
+        # Поддерживаем как query, так и JSON body: {left_x, right_x}
+        lx = left_x
+        rx = right_x
+        if body and isinstance(body, dict):
+            if lx is None and body.get("left_x") is not None:
+                lx = float(body.get("left_x"))
+            if rx is None and body.get("right_x") is not None:
+                rx = float(body.get("right_x"))
+        if lx is None or rx is None:
+            return JSONResponse({"error": "left_x and right_x are required"}, status_code=400)
+        # Нормализуем и гарантируем разнос и порядок
+        try:
+            lx = _clamp01(float(lx))
+            rx = _clamp01(float(rx))
+        except Exception:
+            return JSONResponse({"error": "invalid values"}, status_code=400)
+        if lx > rx:
+            lx, rx = rx, lx
+        # Минимальный зазор 0.05
+        min_gap = 0.05
+        if (rx - lx) < min_gap:
+            mid = 0.5 * (lx + rx)
+            lx = max(0.0, mid - min_gap / 2)
+            rx = min(1.0, mid + min_gap / 2)
+        # Применяем глобально (для всех потоков)
+        global LINE_LEFT_X, LINE_RIGHT_X
+        LINE_LEFT_X, LINE_RIGHT_X = float(lx), float(rx)
+        return {"left_x": LINE_LEFT_X, "right_x": LINE_RIGHT_X}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

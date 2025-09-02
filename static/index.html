@@ -348,7 +348,25 @@
                 if (data.debug && data.debug.masks) {
                     lastMasks = data.debug.masks;
                     lastIds = data.debug.ids || null;
-                    try { window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : []; } catch (e) {}
+                    try {
+                        window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
+                        // анимированные всплывающие +1/-1
+                        const now = performance.now();
+                        window.__popups = window.__popups || [];
+                        const prevTs = window.__lastPopupTs || 0; // ms
+                        const cr = window.__lastCrossings;
+                        let maxTs = prevTs;
+                        cr.forEach(c => {
+                            const tsMs = Number(c.ts || 0) * 1000;
+                            if (tsMs > prevTs) {
+                                const text = c.mode === 'exit' ? '-1' : '+1';
+                                const color = c.side === 'left' ? '#2c7be5' : '#51cf66';
+                                window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
+                            }
+                            if (tsMs > maxTs) maxTs = tsMs;
+                        });
+                        window.__lastPopupTs = maxTs;
+                    } catch (e) {}
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
                     scheduleOverlay(lastMasks, lastIds);
                     try { if (Array.isArray(lastMasks) && lastMasks.length) streamStatus.textContent = 'Live + overlay'; } catch (e) {}
@@ -563,6 +581,71 @@
             ctx.beginPath();
             ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
             ctx.fill();
+            // Перетаскивание линий отсечки мышью/тапом
+            try {
+                if (!window.__linesDragInit) {
+                    window.__linesDragInit = true;
+                    const onPos = (e) => {
+                        const r = overlayCanvas.getBoundingClientRect();
+                        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                        const x = clientX - r.left;
+                        return Math.max(0, Math.min(1, (x - rect.x) / rect.w));
+                    };
+                    let dragging = null; // 'left' | 'right'
+                    const onDown = (e) => {
+                        if (!overlayEnabled) return;
+                        const nx = onPos(e);
+                        const lx = (window.__lines && typeof window.__lines.left_x==='number') ? window.__lines.left_x : 0.25;
+                        const rx = (window.__lines && typeof window.__lines.right_x==='number') ? window.__lines.right_x : 0.75;
+                        const distL = Math.abs(nx - lx);
+                        const distR = Math.abs(nx - rx);
+                        if (distL < 0.02 || distR < 0.02) {
+                            dragging = (distL < distR) ? 'left' : 'right';
+                            e.preventDefault();
+                        }
+                    };
+                    const onMove = (e) => {
+                        const nx = onPos(e);
+                        let lx = (window.__lines && typeof window.__lines.left_x==='number') ? window.__lines.left_x : 0.25;
+                        let rx = (window.__lines && typeof window.__lines.right_x==='number') ? window.__lines.right_x : 0.75;
+                        const nearLine = (Math.abs(nx - lx) < 0.02) || (Math.abs(nx - rx) < 0.02);
+                        if (!dragging) {
+                            // Подсказка курсора при наведении
+                            overlayCanvas.style.cursor = nearLine ? 'ew-resize' : 'crosshair';
+                            return;
+                        }
+                        // Перетаскивание
+                        if (dragging === 'left') lx = nx; else rx = nx;
+                        if (lx > rx) { const t = lx; lx = rx; rx = t; }
+                        const minGap = 0.05;
+                        if ((rx - lx) < minGap) {
+                            const mid = (lx + rx) / 2;
+                            lx = Math.max(0, mid - minGap/2);
+                            rx = Math.min(1, mid + minGap/2);
+                        }
+                        window.__lines = { left_x: lx, right_x: rx };
+                        overlayCanvas.style.cursor = 'ew-resize';
+                        scheduleOverlay(lastMasks, lastIds);
+                        e.preventDefault();
+                    };
+                    const onUp = async () => {
+                        if (!dragging) return;
+                        dragging = null;
+                        try {
+                            const { left_x, right_x } = window.__lines || {};
+                            await fetch('/api/lines', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ left_x, right_x }) });
+                        } catch(_) {}
+                        overlayCanvas.style.cursor = 'crosshair';
+                    };
+                    overlayCanvas.addEventListener('mousedown', onDown);
+                    overlayCanvas.addEventListener('mousemove', onMove);
+                    overlayCanvas.addEventListener('mouseup', onUp);
+                    overlayCanvas.addEventListener('mouseleave', () => { dragging = null; overlayCanvas.style.cursor = 'crosshair'; });
+                    overlayCanvas.addEventListener('touchstart', onDown, {passive:false});
+                    overlayCanvas.addEventListener('touchmove', onMove, {passive:false});
+                    overlayCanvas.addEventListener('touchend', onUp);
+                }
+            } catch(_) {}
             ctx.restore();
         } catch (e) {}
 

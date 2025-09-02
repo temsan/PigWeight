@@ -56,3 +56,21 @@ python main.py
 ## Лицензия
 
 MIT
+
+## Конфигурация (.env)
+
+В корне проекта создайте файл `.env` и задайте как минимум путь к модели. Пример минимальной конфигурации:
+
+```
+PIG_MODEL_PATH=models/pig_yolo11-seg.v3.pt
+# Для ultra-fast эндпоинтов можно переопределить отдельным путём:
+# ULTRA_MODEL=models/pig_yolo11-seg.v3.pt
+
+DETECTION_MODE=pig-only
+FPS=12
+JPEG_QUALITY=80
+LINE_LEFT_X=0.25
+LINE_RIGHT_X=0.75
+```
+
+Если переменные не заданы или файл модели отсутствует, бэкенд автоматически использует `models/best.pt` как резервный вариант.
