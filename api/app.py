@@ -113,22 +113,30 @@ if (LINE_RIGHT_X - LINE_LEFT_X) < 0.05:
 
 # Model config (строго .pt из каталога ./models)
 DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only").lower()
-# Новая версия весов по умолчанию (v3). Если её нет, далее будет fallback на best.pt
-PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.v3.pt")
+# Разрешаем указывать путь единой переменной MODEL_PATH, либо старым PIG_MODEL_PATH
+_ENV_MODEL_PATH = os.getenv("MODEL_PATH")
+PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH")
 PIG_CLASS_ID = int(os.getenv("PIG_CLASS_ID", "0"))
 
 # Выбор эффективной модели и классов
 if DETECTION_MODE == "pig-only":
-    # Безопасный фоллбек: если указанный файл отсутствует, используем models/best.pt
-    _p = Path(PIG_MODEL_PATH)
+    # Для режима pig-only принимаем MODEL_PATH (приоритет) или PIG_MODEL_PATH
+    _chosen_path = _ENV_MODEL_PATH or PIG_MODEL_PATH
+    if not _chosen_path:
+        raise RuntimeError("MODEL_PATH или PIG_MODEL_PATH не задан в .env")
+    _p = Path(_chosen_path)
     if not _p.exists():
-        MODEL_PATH = str((BASE_DIR / "models" / "best.pt").as_posix()).replace("\\", "/")
-        logger.warning(f"PIG_MODEL_PATH not found: {PIG_MODEL_PATH}. Falling back to: {MODEL_PATH}")
-    else:
-        MODEL_PATH = PIG_MODEL_PATH
+        raise RuntimeError(f"Файл модели не найден: {_chosen_path}")
+    MODEL_PATH = _chosen_path
     TARGET_CLASS_IDS = {PIG_CLASS_ID}
 else:
     TARGET_CLASS_IDS = set(map(int, os.getenv("TARGET_CLASS_IDS", "20,17,19").split(",")))
+    # В остальных режимах ожидаем путь в MODEL_PATH
+    if not _ENV_MODEL_PATH:
+        raise RuntimeError("MODEL_PATH не задан в .env для текущего DETECTION_MODE")
+    if not Path(_ENV_MODEL_PATH).exists():
+        raise RuntimeError(f"Файл модели не найден: {_ENV_MODEL_PATH}")
+    MODEL_PATH = _ENV_MODEL_PATH
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))
 AVG_WINDOW = int(os.getenv("AVG_WINDOW", "20"))
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
@@ -964,6 +972,20 @@ async def _global_infer_loop(self):
                                 "size": {"w": frame_size[0], "h": frame_size[1]}
                             }
                         }
+                        # model meta for UI
+                        try:
+                            payload["debug"]["model"] = {
+                                "path": str(MODEL_PATH),
+                                "name": os.path.basename(str(MODEL_PATH)),
+                            }
+                        except Exception:
+                            pass
+                        # include imgsz if known
+                        try:
+                            if '_IMG_SIZE' in locals():
+                                payload["debug"]["imgsz"] = int(_IMG_SIZE)
+                        except Exception:
+                            pass
                         # include line positions for UI
                         try:
                             payload["debug"]["lines"] = {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)}

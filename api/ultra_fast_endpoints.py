@@ -152,9 +152,14 @@ class UltraFastProcessor:
                 
             # Быстрый инференс
             inference_start = time.perf_counter()
+            # Единый размер входа для синхрона с тренингом: берём IMG_SIZE (default 960)
+            try:
+                _IMG_SIZE = int(os.getenv("IMG_SIZE", "960"))
+            except Exception:
+                _IMG_SIZE = 960
             results = self.model.predict(
                 frame,
-                imgsz=416,  # Меньший размер для скорости
+                imgsz=_IMG_SIZE,
                 conf=0.25,  # Более низкий threshold для responsiveness
                 verbose=False,
                 device='cpu',  # Можно переключить на 'cuda' если есть GPU
@@ -410,8 +415,10 @@ async def ws_video_ultra_fast(websocket: WebSocket):
     cap = None
     
     try:
-        # Инициализируем модель: берём из .env (ULTRA_MODEL или PIG_MODEL_PATH), иначе дефолт v3
-        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH") or "models/pig_yolo11-seg.v3.pt"
+        # Инициализируем модель: путь строго из .env (ULTRA_MODEL, иначе PIG_MODEL_PATH)
+        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH")
+        if not model_path:
+            raise RuntimeError("Не задан путь к модели (ULTRA_MODEL или PIG_MODEL_PATH) в .env")
         await ultra_processor.init_model(model_path)
         
         # Пробуем различные источники видео
@@ -604,7 +611,9 @@ async def ws_video_file_ultra_fast(websocket: WebSocket, id: str = Query(...)):
             return
 
         # Инициализируем модель: из .env или дефолт v3
-        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH") or "models/pig_yolo11-seg.v3.pt"
+        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH")
+        if not model_path:
+            return JSONResponse({"error": "Model path not set in env (ULTRA_MODEL/PIG_MODEL_PATH)"}, status_code=500)
         await ultra_processor.init_model(model_path)
 
         fps = session.get('fps', 25.0)
@@ -919,7 +928,9 @@ async def api_video_file_frame_ultra_fast(
                     logger.debug(f"PyAV fallback after OpenCV read fail also failed: {e}")
             return JSONResponse({"error": "Failed to read frame", "details": {"t": t, "frame": frame_number}}, status_code=500)
         # Инициализация модели и обработка как раньше
-        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH") or "models/pig_yolo11-seg.v3.pt"
+        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH")
+        if not model_path:
+            return JSONResponse({"error": "Model path not set in env (ULTRA_MODEL/PIG_MODEL_PATH)"}, status_code=500)
         await ultra_processor.init_model(model_path)
         processed_frame, stats = await ultra_processor.process_frame_ultra_fast(frame, id)
         stats['seek_ms'] = seek_time

@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch", type=int, default=8, help="Batch size")
     p.add_argument("--imgsz", type=int, default=960, help="Размер входного изображения")
     p.add_argument("--device", type=str, default="cpu", help="GPU id ('0') или 'cpu'")
-    p.add_argument("--out", type=str, default="models/pig_yolo11-seg.pt", help="Куда скопировать итоговый best.pt")
+    p.add_argument("--out", type=str, default="models/pig_yolo11-seg.v3.pt", help="Куда скопировать итоговый best.pt")
     return p.parse_args()
 
 

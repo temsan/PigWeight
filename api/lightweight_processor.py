@@ -128,9 +128,15 @@ class LightweightVideoProcessor:
         """Упрощенный инференс только для подсчета"""
         try:
             # Минимальные параметры для скорости
+            # Синхронизация размера входа с остальным кодом: IMG_SIZE (default 960)
+            try:
+                import os  # локальный импорт, чтобы не тянуть наверх
+                _IMG_SIZE = int(os.getenv("IMG_SIZE", "960"))
+            except Exception:
+                _IMG_SIZE = 960
             results = self.model.predict(
                 frame,
-                imgsz=320,  # Уменьшенный размер для скорости
+                imgsz=_IMG_SIZE,
                 conf=0.5,
                 verbose=False,
                 device='cpu'  # Используем CPU для стабильности

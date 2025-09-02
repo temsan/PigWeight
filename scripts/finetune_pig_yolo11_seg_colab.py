@@ -6,20 +6,20 @@ Google Colab-скрипт дообучения (fine-tune) YOLO11 сегмент
 
 Ожидания:
 - В Colab у вас есть архив датасета с экспортом Roboflow YOLOv11/YOLOv8 Segmentation.
-  Например, "/content/models/pig 2.v2i.yolov11.zip" (обратите внимание на пробелы в имени).
-- У вас есть стартовые веса сегментационной модели, например "/content/models/pig_yolo11-seg.pt".
+  Например, "/content/models/pig 2.v5i.yolov11.zip" (обратите внимание на пробелы в имени).
+- У вас есть стартовые веса сегментационной модели, например "/content/models/pig_yolo11-seg.v3.pt".
 - Скрипт распакует датасет в /content/datasets/<имя>, запустит обучение с указанными весами
   и по завершении создаст графики метрик наподобие Roboflow (лоссы, PR/Recall/mAP и т.п.).
 
 Быстрый запуск в Colab (пример):
   !python /content/PigWeight/scripts/finetune_pig_yolo11_seg_colab.py \
-      --zip "/content/PigWeight/models/pig 2.v2i.yolov11.zip" \
-      --base "/content/PigWeight/models/pig_yolo11-seg.pt" \
+      --zip "/content/PigWeight/models/pig 2.v5i.yolov11.zip" \
+      --base "/content/PigWeight/models/pig_yolo11-seg.v3.pt" \
       --epochs 300 --batch 8 --imgsz 640 --device 0
 
 Параметры по умолчанию:
-- zip: /content/models/pig 2.v2i.yolov11.zip
-- base: /content/models/pig_yolo11-seg.pt (ваши текущие веса)
+- zip: /content/models/pig 2.v5i.yolov11.zip
+- base: /content/models/pig_yolo11-seg.v3.pt (ваши текущие веса)
 - epochs: 300
 - batch: 8
 - imgsz: 960
@@ -401,8 +401,8 @@ def print_metrics_summary(results_csv: Path) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="Fine-tune YOLO11 segmentation model on Colab with metrics plots")
-    ap.add_argument("--zip", type=str, default="/content/models/pig 2.v2i.yolov11.zip", help="Путь к ZIP датасета (возможно с пробелами)")
-    ap.add_argument("--base", type=str, default="/content/models/pig_yolo11-seg.pt", help="Путь к начальным весам .pt для дообучения")
+    ap.add_argument("--zip", type=str, default="/content/models/pig 2.v5i.yolov11.zip", help="Путь к ZIP датасета (возможно с пробелами)")
+    ap.add_argument("--base", type=str, default="/content/models/pig_yolo11-seg.v3.pt", help="Путь к начальным весам .pt для дообучения")
     ap.add_argument("--epochs", type=int, default=300, help="Количество эпох")
     ap.add_argument("--batch", type=int, default=8, help="Batch size")
     ap.add_argument("--imgsz", type=int, default=960, help="Размер входного изображения")
@@ -426,7 +426,7 @@ def main():
     ensure_pkg_installation()
 
     datasets_root = Path("/content/datasets")
-    ds_root = unzip_dataset(zip_path, datasets_root / "pig.v2i.yolov11")
+    ds_root = unzip_dataset(zip_path, datasets_root / "pig.v5i.yolov11")
     data_yaml = ensure_data_yaml(ds_root)
 
     # Построение команды обучения

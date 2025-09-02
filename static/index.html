@@ -381,7 +381,14 @@
                         rightInEl.textContent = String(rightInCount);
                         avgFlowEl.textContent = String(av);
                     } catch (e) {}
-                    streamStatus.textContent = `Live | Слева (вход): ${leftInCount} | Справа (вход): ${rightInCount}`;
+                    // Отобразить имя модели (если пришло) и размер входа
+                    let modelInfo = '';
+                    try {
+                        const m = data.debug && data.debug.model ? data.debug.model : null;
+                        const imgsz = data.debug && data.debug.imgsz ? `, ${data.debug.imgsz}` : '';
+                        if (m && m.name) modelInfo = ` | Модель: ${m.name}${imgsz}`;
+                    } catch (_) {}
+                    streamStatus.textContent = `Live | Слева (вход): ${leftInCount} | Справа (вход): ${rightInCount}${modelInfo}`;
                 }
                 if (data.debug && data.debug.act) {
                     const a = data.debug.act;
@@ -392,7 +399,12 @@
                     } catch (e) {}
                 }
                 if (data.debug && data.debug.lines) {
-                    try { window.__lines = data.debug.lines; } catch (e) {}
+                    try {
+                        // Не перетирать локальное перетаскивание
+                        if (!window.__isDraggingLines) {
+                            window.__lines = data.debug.lines;
+                        }
+                    } catch (e) {}
                 }
                 // Update chart with low overhead
                 if (chart) {
@@ -601,6 +613,7 @@
                         const distR = Math.abs(nx - rx);
                         if (distL < 0.02 || distR < 0.02) {
                             dragging = (distL < distR) ? 'left' : 'right';
+                            window.__isDraggingLines = true;
                             e.preventDefault();
                         }
                     };
@@ -636,6 +649,7 @@
                             await fetch('/api/lines', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ left_x, right_x }) });
                         } catch(_) {}
                         overlayCanvas.style.cursor = 'crosshair';
+                        window.__isDraggingLines = false;
                     };
                     overlayCanvas.addEventListener('mousedown', onDown);
                     overlayCanvas.addEventListener('mousemove', onMove);
@@ -663,6 +677,46 @@
                     ctx.fill();
                 });
                 ctx.restore();
+            }
+        } catch (e) {}
+
+        // Всплывающие кругляши "+1/-1" над точкой пересечения
+        try {
+            if (Array.isArray(window.__popups) && window.__popups.length) {
+                const now = performance.now();
+                ctx.save();
+                const keep = [];
+                window.__popups.forEach(p => {
+                    const k = Math.min(1, Math.max(0, (now - p.t0) / (p.dur || 900)));
+                    const alpha = 1 - k;                 // плавное исчезание
+                    const ease = k * (2 - k);             // ease-out для подъёма
+                    const px = rect.x + (Number(p.x) || 0.5) * rect.w;
+                    const py = rect.y + (Number(p.y) || 0.5) * rect.h - ease * (p.rise || 28);
+                    const r = 13;                         // радиус пузыря
+                    // фон пузыря
+                    ctx.globalAlpha = Math.max(0, alpha);
+                    ctx.beginPath();
+                    ctx.fillStyle = (p.color || '#2c7be5').replace('0.9', '1');
+                    ctx.arc(px, py, r, 0, Math.PI * 2);
+                    ctx.fill();
+                    // тонкая окантовка
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+                    ctx.stroke();
+                    // текст
+                    ctx.font = '700 14px system-ui, Segoe UI, Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(String(p.text || '+1'), px, py + 0.5);
+                    if (k < 1) keep.push(p);
+                });
+                ctx.restore();
+                window.__popups = keep;
+                // пока есть активные попапы — продолжаем анимацию
+                if (keep.length) {
+                    try { scheduleOverlay(lastMasks, lastIds); } catch (_) {}
+                }
             }
         } catch (e) {}
 

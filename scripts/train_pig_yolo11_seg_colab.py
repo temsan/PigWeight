@@ -130,7 +130,7 @@ def main():
     ap.add_argument("--batch", type=int, default=8, help="Batch size")
     ap.add_argument("--imgsz", type=int, default=960, help="Размер входного изображения")
     ap.add_argument("--device", type=str, default="0", help="GPU id ('0') или 'cpu' (на Colab обычно 0)")
-    ap.add_argument("--out", type=str, default="/content/pig_yolo11-seg.pt", help="Куда скопировать итоговый best.pt")
+    ap.add_argument("--out", type=str, default="/content/pig_yolo11-seg.v3.pt", help="Куда скопировать итоговый best.pt")
     ap.add_argument("--save_to_drive", action="store_true", help="Скопировать чекпойнт на Google Drive, если смонтирован")
     args = ap.parse_args()
 
