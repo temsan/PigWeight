@@ -836,7 +836,12 @@ async def _global_infer_loop(self):
                         H0, W0, _ = frame.shape
                         y0, y1 = self._detect_black_bars_top_bottom(frame)
                         proc = frame[y0:y1, :, :] if (0 <= y0 < y1 <= H0) else frame
-                        results = self.model.predict(proc, imgsz=640, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
+                        # imgsz из переменной окружения (по умолчанию 960)
+                        try:
+                            _IMG_SIZE = int(os.getenv("IMG_SIZE", "960"))
+                        except Exception:
+                            _IMG_SIZE = 960
+                        results = self.model.predict(proc, imgsz=_IMG_SIZE, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
                         r = results[0] if results else None
                         # Быстрая диагностика кадра
                         try:

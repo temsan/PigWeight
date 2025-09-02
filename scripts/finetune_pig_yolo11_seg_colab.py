@@ -22,7 +22,7 @@ Google Colab-скрипт дообучения (fine-tune) YOLO11 сегмент
 - base: /content/models/pig_yolo11-seg.pt (ваши текущие веса)
 - epochs: 300
 - batch: 8
-- imgsz: 640
+- imgsz: 960
 - device: 0 (GPU)
 - out: /content/pig_yolo11-seg-finetuned.pt
 """
@@ -405,7 +405,7 @@ def main():
     ap.add_argument("--base", type=str, default="/content/models/pig_yolo11-seg.pt", help="Путь к начальным весам .pt для дообучения")
     ap.add_argument("--epochs", type=int, default=300, help="Количество эпох")
     ap.add_argument("--batch", type=int, default=8, help="Batch size")
-    ap.add_argument("--imgsz", type=int, default=640, help="Размер входного изображения")
+    ap.add_argument("--imgsz", type=int, default=960, help="Размер входного изображения")
     ap.add_argument("--device", type=str, default="0", help="GPU id ('0') или 'cpu'")
     ap.add_argument("--name", type=str, default="pig-finetune", help="Имя прогона (runs/segment/<name>)")
     ap.add_argument("--out", type=str, default="/content/pig_yolo11-seg-finetuned.pt", help="Куда скопировать итоговый best.pt")
