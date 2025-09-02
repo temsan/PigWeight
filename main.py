@@ -58,7 +58,7 @@ def install_requirements():
         if not os.path.exists(requirements_path):
             print("Error: requirements.txt not found!")
             raise FileNotFoundError("requirements.txt not found")
-            
+                
         subprocess.check_call([
             sys.__executable__ if hasattr(sys, "__executable__") else sys.executable,
             "-m",

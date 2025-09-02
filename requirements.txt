@@ -10,8 +10,9 @@ APScheduler==3.10.4
 tzdata>=2023.3
 
 # Video/Imaging
-numpy<2
-opencv-python-headless==4.9.0.80
+# Для Python 3.13 требуются колёса numpy 2.x и совместимый OpenCV
+numpy>=2.0.0,<3
+opencv-python-headless>=4.10.0.84
 # Стабильный декодер и seek для файлов (замена проблемного OpenCV-ffmpeg пути)
 # av==12.2.0
 

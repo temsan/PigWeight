@@ -17,6 +17,16 @@
     /* Align numeric inputs on the weights panel to the right */
     .panel-body input[type="number"] { text-align: right; }
     .stream-status { display:inline-block; min-width:64px; text-align:right; }
+    /* Loading overlay */
+    #loadingOverlay { position:absolute; inset:0; z-index: 20; display:none; align-items:center; justify-content:center; backdrop-filter: blur(2px); background: rgba(245,248,255,0.72); }
+    #loadingOverlay .box { display:flex; flex-direction:column; align-items:center; gap:10px; padding:16px 18px; border-radius:12px; background: rgba(255,255,255,0.9); border:1px solid rgba(60,90,140,.12); box-shadow: 0 6px 24px rgba(40,60,90,.12); }
+    #loadingOverlay .spinner { width:28px; height:28px; border:3px solid rgba(44,123,229,0.18); border-top-color:#2c7be5; border-radius:50%; animation: spin 0.9s linear infinite; }
+    #loadingOverlay .loading-text { font: 600 14px system-ui, Segoe UI, Arial; color:#1f3d6b; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .flow-row { display:flex; gap:10px; align-items:stretch; justify-content:space-between; }
+    .flow-box { flex:1 1 0; display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; background:rgba(240,245,252,0.85); border:1px solid rgba(60,90,140,.12); text-align:center; }
+    .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
+    .flow-title { font-size:12px; color:#2f5078; opacity:.8; }
   </style>
 </head>
 <body style="overflow:auto;">
@@ -45,10 +55,40 @@
           <div id="videoWrapper" class="video-wrapper card glass video-surface rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto;">
             <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
             <canvas id="overlayCanvas"></canvas>
+            <div id="loadingOverlay" aria-live="polite">
+              <div class="box">
+                <div class="spinner"></div>
+                <div class="loading-text" id="loadingText">Загрузка…</div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="right-col card glass rounded-xl" style="flex:0 0 420px; max-width:420px; order:1;">
           <div class="panel-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
+            <div class="flow-row" id="flowRow">
+              <div class="flow-box">
+                <div class="flow-title">Слева (вход)</div>
+                <div id="leftIn" class="flow-val">0</div>
+              </div>
+              <div class="flow-box">
+                <div class="flow-title">Среднее</div>
+                <div id="avgFlow" class="flow-val">0</div>
+              </div>
+              <div class="flow-box">
+                <div class="flow-title">Справа (выход)</div>
+                <div id="rightIn" class="flow-val">0</div>
+              </div>
+            </div>
+            <div class="flow-row">
+              <div class="flow-box" style="flex:1 1 100%;">
+                <div class="flow-title">Акт взвешивания</div>
+                <div style="display:flex; gap:12px; justify-content:space-between;">
+                  <div><div class="flow-title">Всего свиней</div><div id="actSeen" class="flow-val">0</div></div>
+                  <div><div class="flow-title">Пик одновременно</div><div id="actPeak" class="flow-val">0</div></div>
+                  <div><div class="flow-title">Длительность, с</div><div id="actDur" class="flow-val">0</div></div>
+                </div>
+              </div>
+            </div>
             <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
               <label for="manualCount" class="stat-title" style="min-width:150px; color:#2f5078;">Количество</label>
               <input type="number" id="manualCount" min="0" style="flex:1 1 auto; min-width:0; font-size:32px; padding:12px 14px; font-weight:600;">
@@ -91,9 +131,12 @@
     const durTime = document.getElementById('durTime');
     const liveCountChart = document.getElementById('liveCountChart');
     const historyTable = document.getElementById('history').querySelector('tbody');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingText = document.getElementById('loadingText');
 
     let activeStreamId = null;
     let isVideoPlaying = false;
+    let hasFirstFrame = false;
     let ws = null;
     let chart = null;
     const countHistory = [];
@@ -106,6 +149,12 @@
     let lastIds = null; // last ids from WS
     let lastMasks = null; // last masks from WS
     let overlayBlockUntil = 0;
+    const leftInEl = document.getElementById('leftIn');
+    const rightInEl = document.getElementById('rightIn');
+    const avgFlowEl = document.getElementById('avgFlow');
+    const actSeenEl = document.getElementById('actSeen');
+    const actPeakEl = document.getElementById('actPeak');
+    const actDurEl = document.getElementById('actDur');
 
     function aliasesKey(streamId) { return `aliases:${streamId}`; }
     function loadAliases(streamId) { try { return JSON.parse(localStorage.getItem(aliasesKey(streamId)) || '{}'); } catch { return {}; } }
@@ -120,6 +169,28 @@
         const avail = Math.max(320, window.innerHeight - toolbarH - padding);
         wrapper.style.height = avail + 'px';
         syncOverlaySize();
+    }
+
+    function showLoader(text = 'Загрузка…') {
+        try { loadingText.textContent = text; loadingOverlay.style.display = 'flex'; } catch (e) {}
+    }
+
+    function hideLoader() {
+        try { loadingOverlay.style.display = 'none'; } catch (e) {}
+    }
+
+    function setupFirstFrameWatch() {
+        try {
+            const onFirst = () => {
+                if (!hasFirstFrame) {
+                    hasFirstFrame = true;
+                    try { videoStream.style.opacity = '1'; } catch (e) {}
+                    hideLoader();
+                }
+            };
+            // For MJPEG <img>, load may fire on frames; guard with flag
+            videoStream.addEventListener('load', onFirst, { once: true });
+        } catch (e) {}
     }
 
     async function getStreams() {
@@ -177,8 +248,12 @@
 
     async function startStream(streamId, sourceUri) {
         streamSources[streamId] = sourceUri;
+        hasFirstFrame = false;
+        showLoader('Запуск…');
+        try { videoStream.style.opacity = '0'; } catch (e) {}
         await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
         videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+        setupFirstFrameWatch();
         isVideoPlaying = true;
         videoPlayPauseBtn.textContent = 'Стоп';
         streamStatus.textContent = 'Live';
@@ -205,7 +280,12 @@
                     const dur = Number(info.duration || 0);
                     const t = Number(info.current_time || 0);
                     if (!Number.isNaN(dur)) { seekRange.max = dur; durTime.textContent = dur.toFixed(1); }
-                    if (!Number.isNaN(t)) { seekRange.value = t; curTime.textContent = t.toFixed(1); }
+                    if (!Number.isNaN(t)) {
+                        if (!isSeeking) {
+                            seekRange.value = t;
+                            curTime.textContent = t.toFixed(1);
+                        }
+                    }
                     const fps = Number(info.fps || 0);
                     if (!seekStepSet && fps > 0) {
                         seekRange.step = (1/Math.min(60, Math.max(1, fps))).toFixed(2);
@@ -222,6 +302,7 @@
         if (id) {
             await fetch(`/api/stream/${id}/stop`);
         }
+        hideLoader();
         if (ws) {
             ws.close();
             ws = null;
@@ -241,6 +322,8 @@
             overlayCanvas.style.cursor = 'default';
             overlayCanvas.style.opacity = '0';
         } catch (e) {}
+        // Сброс счётчиков потоков
+        try { leftInEl.textContent = '0'; rightInEl.textContent = '0'; avgFlowEl.textContent = '0'; } catch (e) {}
         setPlaceholder();
         isVideoPlaying = false;
         videoPlayPauseBtn.textContent = 'Старт';
@@ -265,7 +348,29 @@
                 if (data.debug && data.debug.masks) {
                     lastMasks = data.debug.masks;
                     lastIds = data.debug.ids || null;
+                    try { window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : []; } catch (e) {}
+                    try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
                     scheduleOverlay(lastMasks, lastIds);
+                    try { if (Array.isArray(lastMasks) && lastMasks.length) streamStatus.textContent = 'Live + overlay'; } catch (e) {}
+                }
+                if (data.debug && data.debug.flow) {
+                    const f = data.debug.flow;
+                    const lv = Number(f.left_flow ?? f.left_in ?? 0);
+                    const rv = Number(f.right_flow ?? f.right_in ?? 0);
+                    const av = Math.round((lv + rv) / 2);
+                    try { leftInEl.textContent = String(lv); rightInEl.textContent = String(rv); avgFlowEl.textContent = String(av); } catch (e) {}
+                    streamStatus.textContent = `Live | Слева: ${lv} | Справа: ${rv}`;
+                }
+                if (data.debug && data.debug.act) {
+                    const a = data.debug.act;
+                    try {
+                        actSeenEl.textContent = String(Number(a.seen_total||0));
+                        actPeakEl.textContent = String(Number(a.peak_concurrent||0));
+                        actDurEl.textContent = String((Number(a.duration_sec||0)).toFixed(1));
+                    } catch (e) {}
+                }
+                if (data.debug && data.debug.lines) {
+                    try { window.__lines = data.debug.lines; } catch (e) {}
                 }
                 // Update chart with low overhead
                 if (chart) {
@@ -344,11 +449,7 @@
           stroke-width='1'/>
   </g>
 
-  <!-- Play badge -->
-  <g transform='translate(640,270)'>
-    <circle r='58' fill='rgba(44,123,229,0.18)' stroke='rgba(44,123,229,0.38)' stroke-width='2'/>
-    <polygon points='-6,-18 -6,18 22,0' fill='#2c7be5'/>
-  </g>
+  <!-- No badge to avoid flicker before first frame -->
 
   <!-- Text -->
   <g font-family='Inter,Segoe UI,Arial' text-anchor='middle'>
@@ -365,9 +466,14 @@
         const w = wrapper ? wrapper.clientWidth : videoStream.clientWidth;
         const h = wrapper ? wrapper.clientHeight : videoStream.clientHeight;
         if (!w || !h) return;
-        if (overlayCanvas.width !== w || overlayCanvas.height !== h) {
-            overlayCanvas.width = w;
-            overlayCanvas.height = h;
+        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+        const bw = Math.floor(w * dpr);
+        const bh = Math.floor(h * dpr);
+        if (overlayCanvas.width !== bw || overlayCanvas.height !== bh) {
+            overlayCanvas.width = bw;
+            overlayCanvas.height = bh;
+            overlayCanvas.style.width = w + 'px';
+            overlayCanvas.style.height = h + 'px';
         }
     }
 
@@ -390,23 +496,83 @@
 
     function colorForInstance(instId) {
         const hue = (Number(instId) * 57) % 360;
-        return `hsla(${hue}, 65%, 70%, 0.22)`;
+        // Более мягкая заливка без плотного контура
+        return `hsla(${hue}, 65%, 70%, 0.25)`;
     }
 
     function drawOverlay(masks, ids = null) {
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
+        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+        // Обеспечить единый масштаб в device pixels для чёткости
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         const cw = overlayCanvas.width;
         const ch = overlayCanvas.height;
         ctx.clearRect(0, 0, cw, ch);
-        if (!masks || !masks.length) return;
 
         const rect = getRenderedImageRect();
+
+        // Выделенные линии отсечки по третям ширины
+        try {
+            ctx.save();
+            const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
+            const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
+            const x1 = rect.x + rect.w * leftX;
+            const x2 = rect.x + rect.w * rightX;
+            // полупрозрачные направляющие полосы
+            ctx.fillStyle = 'rgba(44,123,229,0.12)';
+            ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
+            ctx.fillStyle = 'rgba(81,207,102,0.12)';
+            ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
+            // основные яркие линии
+            ctx.setLineDash([]);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(44,123,229,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x1, rect.y);
+            ctx.lineTo(x1, rect.y + rect.h);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(81,207,102,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x2, rect.y);
+            ctx.lineTo(x2, rect.y + rect.h);
+            ctx.stroke();
+            // маленькие маркеры вверху
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.beginPath();
+            ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.beginPath();
+            ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        } catch (e) {}
+
+        // Отрисовать кратковременные маркеры пересечений (если пришли)
+        try {
+            const cr = window.__lastCrossings || [];
+            if (Array.isArray(cr) && cr.length) {
+                ctx.save();
+                cr.forEach(c => {
+                    const cx = rect.x + (Number(c.x) || 0) * rect.w;
+                    const cy = rect.y + (Number(c.y) || 0.5) * rect.h;
+                    ctx.beginPath();
+                    ctx.fillStyle = c.side === 'left' ? 'rgba(44,123,229,0.9)' : 'rgba(80,200,120,0.9)';
+                    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.restore();
+            }
+        } catch (e) {}
+
+        if (!masks || !masks.length) return;
 
         // Soft pastel segmentation overlays, optional instance ids (from backend)
         masks.forEach((poly, idx) => {
             if (!Array.isArray(poly) || poly.length < 3) return;
-            const instId = (ids && ids[idx]) ? ids[idx] : (idx + 1);
+            const labelArr = (window.__lastLabels && Array.isArray(window.__lastLabels)) ? window.__lastLabels : null;
+            const instId = labelArr ? (labelArr[idx] || (idx + 1)) : ((ids && ids[idx]) ? ids[idx] : (idx + 1));
             const fill = colorForInstance(instId);
             ctx.beginPath();
             // Decimate polygon points adaptively to reduce path complexity
@@ -421,9 +587,15 @@
             ctx.closePath();
             // Fill without expensive filters (avoid canvas blur to prevent jank)
             ctx.save();
+            // мягкая заливка
             ctx.fillStyle = fill;
-            ctx.globalAlpha = 1.0;
+            ctx.globalAlpha = 0.42;
             ctx.fill();
+            // лёгкий внутренний контур (нежёсткий)
+            ctx.globalAlpha = 0.6;
+            ctx.lineWidth = 1.2;
+            ctx.strokeStyle = 'rgba(30,50,80,0.28)';
+            ctx.stroke();
             ctx.restore();
 
             // Numbering badge (segmentation-style) near polygon's top-left
@@ -437,7 +609,7 @@
             // instId already computed above for color; reuse it for label
             const label = String(idAliases[instId] ?? instId);
             const padX = 6, padY = 3, radius = 6;
-            ctx.font = '600 13px system-ui, Segoe UI, Arial';
+            ctx.font = '700 12px system-ui, Segoe UI, Arial';
             const tw = ctx.measureText(label).width;
             const bw = Math.ceil(tw + padX * 2);
             const bh = 20;
@@ -456,7 +628,7 @@
             ctx.lineTo(bx, by + radius);
             ctx.quadraticCurveTo(bx, by, bx + radius, by);
             // subtle glassy background
-            ctx.fillStyle = 'rgba(30,50,80,0.85)';
+            ctx.fillStyle = 'rgba(30,50,80,0.82)';
             ctx.fill();
             ctx.fillStyle = '#fff';
             ctx.textAlign = 'center';
@@ -671,6 +843,8 @@
             seekDebounce = setTimeout(async () => {
                 try {
                     overlayBlockUntil = performance.now() + 120;
+                    // Помечаем, что пользователь активно тянет ползунок
+                    isSeeking = true;
                     await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
                 } catch (_) {}
             }, 150);
@@ -687,13 +861,18 @@
         const id = activeStreamId;
         const src = streamSources[id] || '';
         const t = Number(seekRange.value || 0);
-        isSeeking = false;
         if (!/^rtsp:\/\//i.test(src)) {
             try {
                 if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
                 overlayBlockUntil = performance.now() + 180;
                 await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
+                // Завершаем режим ручного перемещения только после ответа
+                isSeeking = false;
             } catch (_) {}
+        }
+        if (/^rtsp:\/\//i.test(src)) {
+            // Для RTSP ничего не дергаем на бек — просто выходим из режима
+            isSeeking = false;
         }
     });
 

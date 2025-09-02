@@ -5,7 +5,7 @@ import json
 import time
 import asyncio
 from pathlib import Path
-from typing import Dict, Optional, Generator, Any, List
+from typing import Dict, Optional, Generator, Any, List, Deque, Tuple
 import colorsys
 from datetime import datetime, timedelta
 import csv
@@ -89,6 +89,28 @@ JPEG_QUALITY = int(os.getenv("JPEG_QUALITY", "80"))
 TARGET_FPS = float(os.getenv("FPS", "12"))
 BOUNDARY = "frame"
 
+# Lines positions (normalized) can be tuned via env; defaults near edges
+def _clamp01(x: float) -> float:
+    try:
+        return max(0.0, min(1.0, float(x)))
+    except Exception:
+        return 0.0
+
+try:
+    LINE_LEFT_X = _clamp01(os.getenv("LINE_LEFT_X", "0.25"))
+except Exception:
+    LINE_LEFT_X = 0.25
+try:
+    LINE_RIGHT_X = _clamp01(os.getenv("LINE_RIGHT_X", "0.75"))
+except Exception:
+    LINE_RIGHT_X = 0.75
+if LINE_LEFT_X > LINE_RIGHT_X:
+    LINE_LEFT_X, LINE_RIGHT_X = LINE_RIGHT_X, LINE_LEFT_X
+if (LINE_RIGHT_X - LINE_LEFT_X) < 0.05:
+    mid = 0.5 * (LINE_LEFT_X + LINE_RIGHT_X)
+    LINE_LEFT_X = max(0.0, mid - 0.025)
+    LINE_RIGHT_X = min(1.0, mid + 0.025)
+
 # Model config (строго .pt из каталога ./models)
 DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only").lower()
 PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.pt")
@@ -103,6 +125,12 @@ else:
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))
 AVG_WINDOW = int(os.getenv("AVG_WINDOW", "20"))
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
+
+# --- Counting/estimation parameters ---
+COUNT_WINDOW_SEC = float(os.getenv("COUNT_WINDOW_SEC", "10.0"))
+COUNT_DECAY_HALFLIFE_SEC = float(os.getenv("COUNT_DECAY_HALFLIFE_SEC", "4.0"))
+COUNT_SOFTMAX_BETA = float(os.getenv("COUNT_SOFTMAX_BETA", "0.8"))
+CROSS_COOLDOWN_SEC = float(os.getenv("CROSS_COOLDOWN_SEC", "2.0"))
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -419,10 +447,117 @@ class VideoStream(abc.ABC):
         self.model = None
         self.model_loaded = False
         self.last_count = 0
+        # Оценка количества: максимум по окну и монотоничный отчёт (не прыгает)
+        self.window_max = WindowMaxEstimator(COUNT_WINDOW_SEC)
+        self.reported_count = 0
+        # flow counters and per-track state
+        self.left_in = 0
+        self.right_in = 0
+        # directional net flows for UI: left (+enter_left, -exit_left), right (+exit_right, -enter_right)
+        self.left_flow = 0
+        self.right_flow = 0
+        self._track_prev_x: Dict[int, float] = {}
+        self._track_last_side_time: Dict[Tuple[int, str], float] = {}
         self.last_masks = []
         self.tracker = SimpleTracker()
         self._infer_task: Optional[asyncio.Task] = None
         self._stream_task: Optional[asyncio.Task] = None
+        # Recent crossings to render on UI (store as list of dicts with ts)
+        self._recent_crossings: List[Dict[str, Any]] = []
+        # Session numbering and act-of-weighing metrics
+        self._session_id_map: Dict[int, int] = {}
+        self._next_session_label: int = 1
+        self._act_seen_labels: set[int] = set()
+        self._act_peak: int = 0
+        self._act_start_ts: float = time.time()
+        self._act_timeline: List[Dict[str, Any]] = []
+        self._act_crossings: List[Dict[str, Any]] = []
+        self._act_last_cross_ts: float = 0.0
+
+    def _reset_act(self):
+        self._session_id_map = {}
+        self._next_session_label = 1
+        self._act_seen_labels = set()
+        self._act_peak = 0
+        self._act_start_ts = time.time()
+        self._act_timeline = []
+        self._act_crossings = []
+        self._act_last_cross_ts = 0.0
+
+    def _finalize_act_to_files(self):
+        try:
+            if not self._act_timeline:
+                return
+            ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+            base = f"act_{self.stream_id}_{ts}"
+            RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+            # JSON summary
+            summary = {
+                "stream_id": self.stream_id,
+                "started_at": self._act_start_ts,
+                "finished_at": time.time(),
+                "duration_sec": float(max(0.0, time.time() - self._act_start_ts)),
+                "seen_total": int(len(self._act_seen_labels)),
+                "peak_concurrent": int(self._act_peak),
+                "flow": {"left_in": int(getattr(self, 'left_in', 0)), "right_in": int(getattr(self, 'right_in', 0))},
+                "timeline": self._act_timeline,
+                "crossings": self._act_crossings,
+            }
+            with open(RECORDS_DIR / f"{base}.json", "w", encoding="utf-8") as f:
+                json.dump(summary, f, ensure_ascii=False, indent=2)
+
+            # SVG chart (lightweight)
+            try:
+                W, H = 1200, 360
+                L, R, T, B = 60, 30, 20, 40
+                max_t = max((p.get("t", 0.0) for p in self._act_timeline), default=1.0)
+                max_c = max((p.get("count_est", 0) for p in self._act_timeline), default=1)
+                def sx(t):
+                    return L + int((t / max(1e-6, max_t)) * (W - L - R))
+                def sy(c):
+                    return T + int((1.0 - (c / max(1, max_c))) * (H - T - B))
+                # path for count
+                path = []
+                first = True
+                for p in self._act_timeline:
+                    x = sx(float(p.get("t", 0.0)))
+                    y = sy(float(p.get("count_est", 0)))
+                    path.append((x, y, first))
+                    first = False
+                def path_d(items):
+                    parts = []
+                    for x, y, first_flag in items:
+                        if first_flag:
+                            parts.append(f"M{x},{y}")
+                        else:
+                            parts.append(f"L{x},{y}")
+                    return " ".join(parts)
+                # crossings circles
+                circles = []
+                for c in self._act_crossings[-150:]:  # cap for size
+                    x = sx(float(c.get("t", 0.0)))
+                    y = sy(float(c.get("count_est", 0.0)))
+                    color = '#2c7be5' if c.get('side') == 'left' else '#51cf66'
+                    circles.append(f"<circle cx='{x}' cy='{y}' r='3' fill='{color}' fill-opacity='0.9' />")
+                svg = [
+                    f"<svg xmlns='http://www.w3.org/2000/svg' width='{W}' height='{H}'>",
+                    "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>",
+                    "<stop offset='0%' stop-color='rgba(44,123,229,0.35)'/>",
+                    "<stop offset='100%' stop-color='rgba(44,123,229,0.00)'/></linearGradient></defs>",
+                    f"<rect width='{W}' height='{H}' fill='white'/>",
+                    f"<rect x='{L}' y='{T}' width='{W-L-R}' height='{H-T-B}' fill='rgba(240,245,252,0.8)' stroke='rgba(60,90,140,0.2)'/>",
+                    f"<path d='{path_d(path)}' stroke='#2c7be5' fill='none' stroke-width='2'/>",
+                    *circles,
+                    f"<text x='{L}' y='{H-8}' font-size='12' fill='#33507a'>t, s</text>",
+                    f"<text x='{W-52}' y='{T+14}' font-size='12' fill='#33507a'>count</text>",
+                    "</svg>"
+                ]
+                with open(RECORDS_DIR / f"{base}.svg", "w", encoding="utf-8") as fsvg:
+                    fsvg.write("\n".join(svg))
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"Finalize act save error for {self.stream_id}: {e}")
 
     @staticmethod
     def _detect_black_bars_top_bottom(frame: np.ndarray) -> tuple[int, int]:
@@ -476,88 +611,286 @@ class VideoStream(abc.ABC):
             return 0, H
         return max(0, y0), min(H, y1)
 
+    def _update_line_counters(self, ids: List[int], centers_x: List[float], centers_y: Optional[List[float]] = None):
+        """Count entries from left/right by crossing vertical lines at 0.25 and 0.75 of width.
+        A crossing is counted when center crosses from <0.25 to >=0.25 (left_in) or
+        from >0.75 to <=0.75 (right_in). Directional and with cooldown to avoid bouncing.
+        """
+        now = time.time()
+        # Линии сдвинуты к краям (настраиваются через env)
+        L = float(LINE_LEFT_X)
+        R = float(LINE_RIGHT_X)
+        cy_iter: List[float] = centers_y if centers_y is not None else [0.5] * len(centers_x)
+        for tid, cx, cy in zip(ids, centers_x, cy_iter):
+            if tid is None:
+                continue
+            prev = self._track_prev_x.get(tid)
+            prev_y = getattr(self, '_track_prev_y', {}).get(tid)
+            if not hasattr(self, '_track_prev_y'):
+                self._track_prev_y = {}
+            if not hasattr(self, '_track_is_inside'):
+                self._track_is_inside = {}
+            prev_inside = bool(self._track_is_inside.get(tid, (prev is not None and L <= prev <= R)))
+            cur_inside = bool(L <= cx <= R)
+
+            def _interp_y(px, py, qx, qy, lx):
+                try:
+                    t = (float(lx) - float(px)) / (float(qx) - float(px))
+                    return max(0.0, min(1.0, float(py) + t * (float(qy) - float(py))))
+                except Exception:
+                    return float(cy)
+
+            if prev is not None and prev_y is not None:
+                # enter events
+                if (not prev_inside) and cur_inside:
+                    if prev < L <= cx:
+                        key = (tid, 'enter_left')
+                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                            self.left_in += 1
+                            self.left_flow += 1
+                            self._track_last_side_time[key] = now
+                            y_at = _interp_y(prev, prev_y, cx, cy, L)
+                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
+                    elif prev > R >= cx:
+                        key = (tid, 'enter_right')
+                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                            self.right_in += 1
+                            self.right_flow -= 1
+                            self._track_last_side_time[key] = now
+                            y_at = _interp_y(prev, prev_y, cx, cy, R)
+                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
+                # exit events
+                if prev_inside and (not cur_inside):
+                    if cx < L <= prev:
+                        key = (tid, 'exit_left')
+                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                            # treat as -1 on left side
+                            self.left_in = max(0, self.left_in - 1)
+                            self.left_flow -= 1
+                            self._track_last_side_time[key] = now
+                            y_at = _interp_y(prev, prev_y, cx, cy, L)
+                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
+                    elif cx > R >= prev:
+                        key = (tid, 'exit_right')
+                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                            self.right_in = max(0, self.right_in - 1)
+                            self.right_flow += 1
+                            self._track_last_side_time[key] = now
+                            y_at = _interp_y(prev, prev_y, cx, cy, R)
+                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
+
+            self._track_prev_x[tid] = cx
+            self._track_prev_y[tid] = cy
+            self._track_is_inside[tid] = cur_inside
+        try:
+            cutoff = now - 1.2
+            if self._recent_crossings:
+                self._recent_crossings = [c for c in self._recent_crossings if c.get("ts", 0) >= cutoff]
+        except Exception:
+            pass
+
     async def _infer_loop(self):
-        from ultralytics import YOLO
-        self.model = YOLO(MODEL_PATH)
-        self.model_loaded = True
-        while self.running:
-            jpeg = await self.get_jpeg()
-            if jpeg:
-                arr = np.frombuffer(jpeg, dtype=np.uint8)
-                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                if frame is not None:
-                    H0, W0, _ = frame.shape
-                    y0, y1 = self._detect_black_bars_top_bottom(frame)
-                    proc = frame[y0:y1, :, :] if (0 <= y0 < y1 <= H0) else frame
-                    results = self.model.predict(proc, imgsz=640, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
-                    r = results[0] if results else None
-                    if r and hasattr(r, "masks") and r.masks is not None:
-                        polys = r.masks.xy
-                        self.last_count = len(polys)
-                        # Build detections by bbox for simple tracking on cropped frame
-                        dets = []
-                        for m in polys:
-                            if m is None or len(m) == 0:
-                                continue
-                            xs = [float(p[0]) for p in m]
-                            ys = [float(p[1]) for p in m]
-                            x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-                            dets.append({'bbox': [x1, y1, x2, y2]})
-                        tracks = self.tracker.update(dets) if dets else []
-                        ids = [t['id'] for t in tracks] if tracks else []
-                        # Normalize masks back to original frame
-                        mapped: list[list[tuple[float, float]]] = []
-                        for m in polys:
-                            pts = []
-                            for p in m:
-                                x = float(p[0])
-                                y = float(p[1]) + float(y0)
-                                pts.append((x / float(W0), y / float(H0)))
-                            mapped.append(pts)
-                        self.last_masks = mapped
-                    else:
-                        self.last_count = 0
-                        self.last_masks = []
-                    payload = {
-                        "type": "count_update",
-                        "count": self.last_count,
-                        "debug": {"masks": self.last_masks}
-                    }
-                    if self.last_count:
-                        payload["debug"]["ids"] = ids if 'ids' in locals() else []
-                    await STREAM_MANAGER.broadcast(self.stream_id, payload)
-            await asyncio.sleep(0.3)
-
-    async def start(self):
-        if not self.running:
-            self.running = True
-            self._stream_task = asyncio.create_task(self._stream_loop())
-            self._infer_task = asyncio.create_task(self._infer_loop())
-
-    async def stop(self):
-        if self.running:
-            self.running = False
-            if self._stream_task:
-                self._stream_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._stream_task
-            if self._infer_task:
-                self._infer_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._infer_task
-
-    @abc.abstractmethod
-    async def _stream_loop(self):
-        pass
+        # Делегируем в глобальную реализацию, чтобы избежать конфликтов hot-reload
+        return await _global_infer_loop(self)
 
     async def get_jpeg(self) -> Optional[bytes]:
         async with self.lock:
             return self.last_jpeg
 
+
+class WeightedMaxEstimator:
+    def __init__(self, window_sec: float, half_life_sec: float, beta: float):
+        from collections import deque
+        self.window_sec = float(max(0.5, window_sec))
+        self.half_life = float(max(0.1, half_life_sec))
+        self.beta = float(max(0.0, beta))
+        self.data: Deque[Tuple[float, int]] = deque()
+
+    def update(self, t: float, count: int) -> float:
+        self.data.append((float(t), int(max(0, count))))
+        # drop old
+        t0 = float(t)
+        while self.data and (t0 - self.data[0][0]) > self.window_sec:
+            self.data.popleft()
+        if not self.data:
+            return float(max(0, count))
+        # recency decay
+        import math
+        lam = math.log(2.0) / self.half_life
+        # softmax on counts (shifted by max for stability)
+        maxc = max(c for _, c in self.data)
+        num = 0.0
+        den = 0.0
+        for ti, ci in self.data:
+            w_time = math.exp(-lam * max(0.0, t0 - ti))
+            w_val = math.exp(self.beta * (ci - maxc))
+            w = w_time * w_val
+            num += ci * w
+            den += w
+        return (num / den) if den > 1e-9 else float(max(0, count))
+
+
+class WindowMaxEstimator:
+    """Простой максимум по скользящему окну времени."""
+    def __init__(self, window_sec: float):
+        from collections import deque
+        self.window_sec = float(max(0.5, window_sec))
+        self.data: Deque[Tuple[float, int]] = deque()
+
+    def update(self, t: float, count: int) -> int:
+        t = float(t)
+        self.data.append((t, int(max(0, count))))
+        # выкидываем устаревшие
+        while self.data and (t - self.data[0][0]) > self.window_sec:
+            self.data.popleft()
+        if not self.data:
+            return int(max(0, count))
+        return int(max(c for _, c in self.data))
+
+# NOTE: Глобальная реализация инференс-цикла; метод класса делегирует сюда
+async def _global_infer_loop(self):
+        try:
+            from ultralytics import YOLO
+            self.model = YOLO(MODEL_PATH)
+            self.model_loaded = True
+            logger.info(f"YOLO model loaded: {MODEL_PATH}")
+        except Exception as e:
+            self.model_loaded = False
+            logger.error(f"Failed to load YOLO model: {e}")
+            try:
+                await STREAM_MANAGER.broadcast(self.stream_id, {"type": "status", "inference": "disabled", "error": str(e)})
+            except Exception:
+                pass
+            while self.running:
+                await asyncio.sleep(1.0)
+            return
+
+        while self.running:
+            try:
+                jpeg = await self.get_jpeg()
+                if jpeg:
+                    arr = np.frombuffer(jpeg, dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        H0, W0, _ = frame.shape
+                        y0, y1 = self._detect_black_bars_top_bottom(frame)
+                        proc = frame[y0:y1, :, :] if (0 <= y0 < y1 <= H0) else frame
+                        results = self.model.predict(proc, imgsz=640, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
+                        r = results[0] if results else None
+                        # Быстрая диагностика кадра
+                        try:
+                            frame_mean = float(np.mean(frame))
+                            frame_size = (int(W0), int(H0))
+                        except Exception:
+                            frame_mean = None
+                            frame_size = (int(W0), int(H0))
+
+                        if r and hasattr(r, "masks") and r.masks is not None:
+                            polys = r.masks.xy
+                            self.last_count = len(polys)
+                            # Build detections by bbox for simple tracking on cropped frame
+                            dets = []
+                            for m in polys:
+                                if m is None or len(m) == 0:
+                                    continue
+                                xs = [float(p[0]) for p in m]
+                                ys = [float(p[1]) for p in m]
+                                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+                                dets.append({'bbox': [x1, y1, x2, y2]})
+                            tracks = self.tracker.update(dets) if dets else []
+                            ids = [t['id'] for t in tracks] if tracks else []
+                            # Stable session numbering
+                            session_labels: List[int] = []
+                            for tid in ids:
+                                if tid not in self._session_id_map:
+                                    self._session_id_map[tid] = self._next_session_label
+                                    self._next_session_label += 1
+                                session_labels.append(self._session_id_map[tid])
+                            # centers for flow counting (normalized X)
+                            centers_x: List[float] = []
+                            centers_y: List[float] = []
+                            for d in dets:
+                                bx1, by1, bx2, by2 = d['bbox']
+                                centers_x.append(0.5 * (bx1 + bx2) / float(W0))
+                                centers_y.append(0.5 * (by1 + by2) / float(H0))
+                            self._update_line_counters(ids, centers_x, centers_y)
+                            # Normalize masks back to original frame
+                            mapped: list[list[tuple[float, float]]] = []
+                            for m in polys:
+                                pts = []
+                                for p in m:
+                                    x = float(p[0])
+                                    y = float(p[1]) + float(y0)
+                                    pts.append((x / float(W0), y / float(H0)))
+                                mapped.append(pts)
+                            self.last_masks = mapped
+                            # Update act-of-weighing metrics
+                            cur_count = len(session_labels)
+                            if cur_count > self._act_peak:
+                                self._act_peak = cur_count
+                            for lab in session_labels:
+                                self._act_seen_labels.add(int(lab))
+                        else:
+                            self.last_count = 0
+                            self.last_masks = []
+                        # Статистический максимум: окно + монотоничность
+                        wnd_max = self.window_max.update(time.time(), int(self.last_count))
+                        est = max(self.reported_count, wnd_max)
+                        self.reported_count = est
+                        payload = {
+                            "type": "count_update",
+                            "count": int(round(est)),
+                            "debug": {
+                                "masks": self.last_masks,
+                                "count_raw": int(self.last_count),
+                                "flow": {"left_in": self.left_in, "right_in": self.right_in, "left_flow": self.left_flow, "right_flow": self.right_flow},
+                                "frame_mean": frame_mean,
+                                "size": {"w": frame_size[0], "h": frame_size[1]}
+                            }
+                        }
+                        # include line positions for UI
+                        try:
+                            payload["debug"]["lines"] = {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)}
+                        except Exception:
+                            pass
+                        # include recent crossings for UI
+                        try:
+                            if getattr(self, "_recent_crossings", None):
+                                payload["debug"]["crossings"] = list(self._recent_crossings)
+                        except Exception:
+                            pass
+                        # include stable labels and act-of-weighing stats
+                        try:
+                            if session_labels:
+                                payload["debug"]["labels"] = session_labels
+                            payload["debug"]["act"] = {
+                                "seen_total": int(len(self._act_seen_labels)),
+                                "peak_concurrent": int(self._act_peak),
+                                "duration_sec": float(max(0.0, time.time() - self._act_start_ts))
+                            }
+                        except Exception:
+                            pass
+                        if self.last_count and ids:
+                            payload["debug"]["ids"] = ids
+                        await STREAM_MANAGER.broadcast(self.stream_id, payload)
+            except Exception as e:
+                logger.error(f"Infer loop error on {self.stream_id}: {e}")
+            await asyncio.sleep(0.3)
+
+    
+
 class RtspStream(VideoStream):
     def __init__(self, stream_id: str, rtsp_url: str):
         super().__init__(stream_id)
         self.rtsp_url = rtsp_url
+
+    async def start(self):
+        # Явная реализация (на случай старых базовых классов в памяти)
+        if not getattr(self, 'running', False):
+            self.running = True
+            self._stream_task = asyncio.create_task(self._stream_loop())
+            # базовый метод доступен через делегат
+            self._infer_task = asyncio.create_task(self._infer_loop())
 
     async def _stream_loop(self):
         try:
@@ -573,6 +906,29 @@ class RtspStream(VideoStream):
             ocv_close(self.stream_id)
             self.running = False
 
+    async def stop(self):
+        # Без обращения к VideoStream.stop для устойчивости к hot-reload
+        if getattr(self, 'running', False):
+            self.running = False
+        t1 = getattr(self, '_stream_task', None)
+        t2 = getattr(self, '_infer_task', None)
+        if t1:
+            try:
+                t1.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t1
+            except Exception:
+                pass
+            self._stream_task = None
+        if t2:
+            try:
+                t2.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t2
+            except Exception:
+                pass
+            self._infer_task = None
+
 class FileStream(VideoStream):
     def __init__(self, stream_id: str, file_path: str):
         super().__init__(stream_id)
@@ -582,6 +938,12 @@ class FileStream(VideoStream):
         self._seek_event = asyncio.Event()
         self._seek_time: Optional[float] = None
         self.current_time = 0.0
+
+    async def start(self):
+        if not getattr(self, 'running', False):
+            self.running = True
+            self._stream_task = asyncio.create_task(self._stream_loop())
+            self._infer_task = asyncio.create_task(self._infer_loop())
 
     async def _stream_loop(self):
         try:
@@ -617,12 +979,51 @@ class FileStream(VideoStream):
             self.current_time = self._seek_time
             self._seek_time = None
 
+    async def stop(self):
+        if getattr(self, 'running', False):
+            self.running = False
+        t1 = getattr(self, '_stream_task', None)
+        t2 = getattr(self, '_infer_task', None)
+        if t1:
+            try:
+                t1.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t1
+            except Exception:
+                pass
+            self._stream_task = None
+        if t2:
+            try:
+                t2.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t2
+            except Exception:
+                pass
+            self._infer_task = None
+
 class StreamManager:
     def __init__(self):
         self.streams: Dict[str, VideoStream] = {}
         self.websockets: Dict[str, List[WebSocket]] = {}
 
     async def get_or_create_stream(self, stream_id: str, source_uri: str) -> VideoStream:
+        # Защита от «застрявших» старых инстансов после hot-reload
+        cur = self.streams.get(stream_id)
+        if cur is not None:
+            needs_replace = False
+            try:
+                # если у объекта нет необходимого метода/базы — пересоздаём
+                if not hasattr(cur, 'start') or not isinstance(cur, VideoStream):
+                    needs_replace = True
+            except Exception:
+                needs_replace = True
+            if needs_replace:
+                try:
+                    await cur.stop()
+                except Exception:
+                    pass
+                self.streams.pop(stream_id, None)
+
         if stream_id not in self.streams:
             if source_uri.startswith("rtsp://"):
                 self.streams[stream_id] = RtspStream(stream_id, source_uri)
@@ -663,6 +1064,10 @@ app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+@app.get("/api/health")
+async def api_health():
+    return {"status": "ok"}
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     return FileResponse(STATIC_DIR / "index.html")
@@ -697,19 +1102,31 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.post("/api/stream/start")
 async def api_stream_start(stream_id: str, source_uri: str):
-    stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
-    await stream.start()
-    resp = {"status": "started", "stream_id": stream_id}
-    if isinstance(stream, FileStream):
-        # provide best-known meta immediately
-        resp.update({
-            "type": "file",
-            "duration": float(stream.duration or 0.0),
-            "fps": float(stream.fps or 0.0)
-        })
-    else:
-        resp.update({"type": "rtsp"})
-    return resp
+    try:
+        # Basic validation for file paths to give clearer errors
+        if not source_uri.startswith("rtsp://"):
+            p = Path(source_uri)
+            if not p.exists():
+                return JSONResponse({"error": f"file not found: {source_uri}"}, status_code=404)
+            if not p.is_file():
+                return JSONResponse({"error": f"not a file: {source_uri}"}, status_code=400)
+
+        stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
+        await stream.start()
+        resp = {"status": "started", "stream_id": stream_id}
+        if isinstance(stream, FileStream):
+            # provide best-known meta immediately
+            resp.update({
+                "type": "file",
+                "duration": float(stream.duration or 0.0),
+                "fps": float(stream.fps or 0.0)
+            })
+        else:
+            resp.update({"type": "rtsp"})
+        return resp
+    except Exception as e:
+        logger.error(f"Start stream error for {stream_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/stream/{stream_id}/stop")
 async def api_stream_stop(stream_id: str):
