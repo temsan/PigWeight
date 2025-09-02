@@ -410,8 +410,8 @@ async def ws_video_ultra_fast(websocket: WebSocket):
     cap = None
     
     try:
-        # Инициализируем модель
-        model_path = "models/pig_yolo11-seg.v2.pt"
+        # Инициализируем модель: берём из .env (ULTRA_MODEL или PIG_MODEL_PATH), иначе дефолт v3
+        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH") or "models/pig_yolo11-seg.v3.pt"
         await ultra_processor.init_model(model_path)
         
         # Пробуем различные источники видео
@@ -603,8 +603,8 @@ async def ws_video_file_ultra_fast(websocket: WebSocket, id: str = Query(...)):
             await websocket.close(code=1000, reason="Video capture not available")
             return
 
-        # Инициализируем модель
-        model_path = "models/pig_yolo11-seg.v2.pt"
+        # Инициализируем модель: из .env или дефолт v3
+        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH") or "models/pig_yolo11-seg.v3.pt"
         await ultra_processor.init_model(model_path)
 
         fps = session.get('fps', 25.0)
@@ -919,7 +919,7 @@ async def api_video_file_frame_ultra_fast(
                     logger.debug(f"PyAV fallback after OpenCV read fail also failed: {e}")
             return JSONResponse({"error": "Failed to read frame", "details": {"t": t, "frame": frame_number}}, status_code=500)
         # Инициализация модели и обработка как раньше
-        model_path = "models/pig_yolo11-seg.v2.pt"
+        model_path = os.getenv("ULTRA_MODEL") or os.getenv("PIG_MODEL_PATH") or "models/pig_yolo11-seg.v3.pt"
         await ultra_processor.init_model(model_path)
         processed_frame, stats = await ultra_processor.process_frame_ultra_fast(frame, id)
         stats['seek_ms'] = seek_time
