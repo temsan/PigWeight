@@ -113,12 +113,19 @@ if (LINE_RIGHT_X - LINE_LEFT_X) < 0.05:
 
 # Model config (строго .pt из каталога ./models)
 DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only").lower()
-PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.pt")
+# Новая версия весов по умолчанию. Если её нет, далее будем фоллбечить на best.pt
+PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.v2.pt")
 PIG_CLASS_ID = int(os.getenv("PIG_CLASS_ID", "0"))
 
 # Выбор эффективной модели и классов
 if DETECTION_MODE == "pig-only":
-    MODEL_PATH = PIG_MODEL_PATH
+    # Безопасный фоллбек: если указанный файл отсутствует, используем models/best.pt
+    _p = Path(PIG_MODEL_PATH)
+    if not _p.exists():
+        MODEL_PATH = str((BASE_DIR / "models" / "best.pt").as_posix()).replace("\\", "/")
+        logger.warning(f"PIG_MODEL_PATH not found: {PIG_MODEL_PATH}. Falling back to: {MODEL_PATH}")
+    else:
+        MODEL_PATH = PIG_MODEL_PATH
     TARGET_CLASS_IDS = {PIG_CLASS_ID}
 else:
     TARGET_CLASS_IDS = set(map(int, os.getenv("TARGET_CLASS_IDS", "20,17,19").split(",")))

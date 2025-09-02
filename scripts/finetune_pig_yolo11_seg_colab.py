@@ -117,11 +117,23 @@ def ensure_data_yaml(root: Path) -> Path:
     return data_yaml
 
 
-def find_latest_run(seg_root: Path) -> Path:
-    runs = sorted(seg_root.glob("train*"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not runs:
-        raise FileNotFoundError("Не найдены каталоги train* в " + str(seg_root))
-    return runs[0]
+def find_latest_run(seg_root: Path, preferred_name: str | None = None) -> Path:
+    """Возвращает каталог последнего прогона сегментации.
+    Сначала проверяет каталог по имени (например, name=pig-finetune),
+    затем выбирает самый свежий подкаталог из seg_root.
+    """
+    if preferred_name:
+        preferred = seg_root / preferred_name
+        if preferred.exists() and preferred.is_dir():
+            return preferred
+
+    # Современные версии Ultralytics создают произвольные имена (не только train*).
+    # Берём любой подкаталог, отсортированный по времени изменения.
+    candidates = [p for p in seg_root.iterdir() if p.is_dir()]
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise FileNotFoundError("Не найдены каталоги прогона в " + str(seg_root))
+    return candidates[0]
 
 
 def try_display_images(image_paths: list[Path]) -> None:
@@ -439,7 +451,7 @@ def main():
     # Поиск best.pt и результатов
     seg_dir = Path("/content/runs/segment")
     try:
-        run_dir = find_latest_run(seg_dir)
+        run_dir = find_latest_run(seg_dir, preferred_name=str(args.name))
     except FileNotFoundError as e:
         print("[ERROR]", e, file=sys.stderr)
         sys.exit(3)
@@ -493,6 +505,9 @@ def main():
             print(f"[INFO] Чекпойнт также сохранён в Google Drive: {dst}", flush=True)
         else:
             print("[WARN] Google Drive не смонтирован. Пропускаю сохранение.", flush=True)
+
+    # Сводка метрик последней эпохи
+    print_metrics_summary(results_csv)
 
     print("[DONE] Дообучение в Colab завершено.")
 

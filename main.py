@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # --- Config from environment ---
 DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only")
-PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.pt")
+PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.v2.pt")
 BALANCED_MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
 ONNX_PATH = os.getenv("ONNX_PATH", "models/yolo11n.onnx")
 MODEL_URL = os.getenv("MODEL_URL", "")

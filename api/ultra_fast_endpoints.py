@@ -84,8 +84,8 @@ class UltraFastProcessor:
         # Разрешаем переопределять путь через переменную окружения
         env_path = os.getenv("ULTRA_MODEL")
         desired_path = env_path or model_path
-        # Если путь файловый и отсутствует — пробуем публичную модель по имени
-        fallback_name = "yolo11n-seg.pt"
+        # Если путь файловый и отсутствует — пробуем локальный best.pt
+        fallback_name = "models/best.pt"
         if self.model is None or self.model_path != desired_path:
             try:
                 from ultralytics import YOLO
@@ -411,7 +411,7 @@ async def ws_video_ultra_fast(websocket: WebSocket):
     
     try:
         # Инициализируем модель
-        model_path = "models/pig_yolo11-seg.pt"
+        model_path = "models/pig_yolo11-seg.v2.pt"
         await ultra_processor.init_model(model_path)
         
         # Пробуем различные источники видео
@@ -495,13 +495,9 @@ async def ws_video_ultra_fast(websocket: WebSocket):
         while True:
             try:
                 # Чтение кадра
-                # Применяем отложенный seek, если он установлен через HTTP
-                seek_to = session.pop('seek_to_frame', None)
-                if isinstance(seek_to, int) and seek_to >= 0:
-                    try:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, seek_to)
-                    except Exception:
-                        pass
+                # В live-режиме отложенный seek не используется
+                # (зарезервировано для будущих расширений)
+                seek_to = None
 
                 ret, frame = cap.read()
                 if not ret or frame is None:
@@ -608,7 +604,7 @@ async def ws_video_file_ultra_fast(websocket: WebSocket, id: str = Query(...)):
             return
 
         # Инициализируем модель
-        model_path = "models/pig_yolo11-seg.pt"
+        model_path = "models/pig_yolo11-seg.v2.pt"
         await ultra_processor.init_model(model_path)
 
         fps = session.get('fps', 25.0)
@@ -923,7 +919,7 @@ async def api_video_file_frame_ultra_fast(
                     logger.debug(f"PyAV fallback after OpenCV read fail also failed: {e}")
             return JSONResponse({"error": "Failed to read frame", "details": {"t": t, "frame": frame_number}}, status_code=500)
         # Инициализация модели и обработка как раньше
-        model_path = "models/pig_yolo11-seg.pt"
+        model_path = "models/pig_yolo11-seg.v2.pt"
         await ultra_processor.init_model(model_path)
         processed_frame, stats = await ultra_processor.process_frame_ultra_fast(frame, id)
         stats['seek_ms'] = seek_time
