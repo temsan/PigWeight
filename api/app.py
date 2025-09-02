@@ -731,7 +731,7 @@ class VideoStream(abc.ABC):
             self._track_prev_y[tid] = cy
             self._track_is_inside[tid] = cur_inside
         try:
-            cutoff = now - 1.2
+            cutoff = now - 2.0
             if self._recent_crossings:
                 self._recent_crossings = [c for c in self._recent_crossings if c.get("ts", 0) >= cutoff]
         except Exception:
@@ -838,6 +838,7 @@ async def _global_infer_loop(self):
                             self.last_count = len(polys)
                             # Build detections by bbox for simple tracking on cropped frame
                             dets = []
+                            centroids_local: list[tuple[float, float]] = []
                             for m in polys:
                                 if m is None or len(m) == 0:
                                     continue
@@ -845,6 +846,14 @@ async def _global_infer_loop(self):
                                 ys = [float(p[1]) for p in m]
                                 x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
                                 dets.append({'bbox': [x1, y1, x2, y2]})
+                                # центроид по вершинам полигона (в координатах proc)
+                                try:
+                                    cx_m = sum(xs) / max(1, len(xs))
+                                    cy_m = sum(ys) / max(1, len(ys))
+                                except Exception:
+                                    cx_m = 0.5 * (x1 + x2)
+                                    cy_m = 0.5 * (y1 + y2)
+                                centroids_local.append((cx_m, cy_m))
                             tracks = self.tracker.update(dets) if dets else []
                             ids = [t['id'] for t in tracks] if tracks else []
                             # Stable session numbering
@@ -854,13 +863,12 @@ async def _global_infer_loop(self):
                                     self._session_id_map[tid] = self._next_session_label
                                     self._next_session_label += 1
                                 session_labels.append(self._session_id_map[tid])
-                            # centers for flow counting (normalized X)
+                            # centers for flow counting (normalized X) — по центроидам масок
                             centers_x: List[float] = []
                             centers_y: List[float] = []
-                            for d in dets:
-                                bx1, by1, bx2, by2 = d['bbox']
-                                centers_x.append(0.5 * (bx1 + bx2) / float(W0))
-                                centers_y.append(0.5 * (by1 + by2) / float(H0))
+                            for (cxm, cym) in centroids_local:
+                                centers_x.append(float(cxm) / float(W0))
+                                centers_y.append((float(cym) + float(y0)) / float(H0))
                             self._update_line_counters(ids, centers_x, centers_y)
                             # Normalize masks back to original frame
                             mapped: list[list[tuple[float, float]]] = []
@@ -927,8 +935,10 @@ async def _global_infer_loop(self):
                             }
                         except Exception:
                             pass
-                        if self.last_count and ids:
+                        if ids is not None:
                             payload["debug"]["ids"] = ids
+                        # всегда отправляем счётчики входов, даже если детекций 0
+                        payload["debug"]["flow"] = {"left_in": self.left_in, "right_in": self.right_in, "left_flow": self.left_flow, "right_flow": self.right_flow}
                         await STREAM_MANAGER.broadcast(self.stream_id, payload)
             except Exception as e:
                 logger.error(f"Infer loop error on {self.stream_id}: {e}")
