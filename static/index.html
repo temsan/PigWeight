@@ -498,10 +498,23 @@
         return { x, y, w, h };
     }
 
+    // Генерация пастельного цвета заливки по ID инстанса.
+    // Идея: фиксированный "разброс" оттенка (Hue) по модулю 360,
+    // а насыщенность/яркость держим высокими (70%/72%) и добавляем прозрачность 0.35,
+    // поэтому итог — мягкие, но заметные пастельные цвета.
+    // Множитель 57 даёт равномерное распределение оттенков для соседних ID
+    // и снижает шанс близких цветов у подряд идущих объектов.
     function colorForInstance(instId) {
+        const hue = (Number(instId) * 57) % 360; // псевдослучайное разнесение оттенков
+        return `hsla(${hue}, 70%, 72%, 0.35)`;
+    }
+
+    // Цвет шрифта, если нужен цветной текст: тот же оттенок, но темнее,
+    // чтобы читался поверх светлой пастельной маски. Сейчас цифры белые,
+    // но функция оставлена для гибкости/экспериментов.
+    function labelColorForInstance(instId) {
         const hue = (Number(instId) * 57) % 360;
-        // Более мягкая заливка без плотного контура
-        return `hsla(${hue}, 65%, 70%, 0.25)`;
+        return `hsl(${hue}, 65%, 32%)`;
     }
 
     function drawOverlay(masks, ids = null) {
@@ -591,54 +604,38 @@
             ctx.closePath();
             // Fill without expensive filters (avoid canvas blur to prevent jank)
             ctx.save();
-            // мягкая заливка
+            // мягкая, но более заметная заливка
             ctx.fillStyle = fill;
-            ctx.globalAlpha = 0.42;
+            ctx.globalAlpha = 0.60;
             ctx.fill();
-            // лёгкий внутренний контур (нежёсткий)
-            ctx.globalAlpha = 0.6;
-            ctx.lineWidth = 1.2;
-            ctx.strokeStyle = 'rgba(30,50,80,0.28)';
+            // лёгкий контур для читаемости
+            ctx.globalAlpha = 0.50;
+            ctx.lineWidth = 1.0;
+            ctx.strokeStyle = 'rgba(30,50,80,0.20)';
             ctx.stroke();
             ctx.restore();
 
-            // Numbering badge (segmentation-style) near polygon's top-left
-            let minx = Infinity, miny = Infinity;
-            poly.forEach(([nx, ny]) => {
-                const x = rect.x + nx * rect.w;
-                const y = rect.y + ny * rect.h;
-                if (x < minx) minx = x;
-                if (y < miny) miny = y;
-            });
-            // instId already computed above for color; reuse it for label
-            const label = String(idAliases[instId] ?? instId);
-            const padX = 6, padY = 3, radius = 6;
-            ctx.font = '700 12px system-ui, Segoe UI, Arial';
-            const tw = ctx.measureText(label).width;
-            const bw = Math.ceil(tw + padX * 2);
-            const bh = 20;
-            let bx = Math.max(rect.x, Math.min(minx - 8, rect.x + rect.w - bw));
-            let by = Math.max(rect.y, Math.min(miny - 8, rect.y + rect.h - bh));
-            // rounded rect
-            ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(bx + radius, by);
-            ctx.lineTo(bx + bw - radius, by);
-            ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + radius);
-            ctx.lineTo(bx + bw, by + bh - radius);
-            ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - radius, by + bh);
-            ctx.lineTo(bx + radius, by + bh);
-            ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - radius);
-            ctx.lineTo(bx, by + radius);
-            ctx.quadraticCurveTo(bx, by, bx + radius, by);
-            // subtle glassy background
-            ctx.fillStyle = 'rgba(30,50,80,0.82)';
-            ctx.fill();
-            ctx.fillStyle = '#fff';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(label, bx + bw / 2, by + bh / 2);
-            ctx.restore();
+            // Number centered inside the object, colored like the mask
+            // Compute simple centroid of polygon points (average)
+            let sx = 0, sy = 0, pc = 0;
+            poly.forEach(([nx, ny]) => { sx += nx; sy += ny; pc++; });
+            if (pc > 0) {
+                const cx = rect.x + (sx / pc) * rect.w;
+                const cy = rect.y + (sy / pc) * rect.h;
+                const label = String(idAliases[instId] ?? instId);
+                ctx.save();
+                ctx.font = '700 14px system-ui, Segoe UI, Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                // Outline for readability
+                ctx.lineWidth = 3.5;
+                ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+                ctx.strokeText(label, cx, cy);
+                // Белая цифра поверх пастельной маски
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(label, cx, cy);
+                ctx.restore();
+            }
         });
     }
 

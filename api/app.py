@@ -113,8 +113,8 @@ if (LINE_RIGHT_X - LINE_LEFT_X) < 0.05:
 
 # Model config (строго .pt из каталога ./models)
 DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only").lower()
-# Новая версия весов по умолчанию. Если её нет, далее будем фоллбечить на best.pt
-PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.v2.pt")
+# Новая версия весов по умолчанию (v3). Если её нет, далее будет fallback на best.pt
+PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH", "models/pig_yolo11-seg.v3.pt")
 PIG_CLASS_ID = int(os.getenv("PIG_CLASS_ID", "0"))
 
 # Выбор эффективной модели и классов
