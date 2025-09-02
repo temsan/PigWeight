@@ -426,7 +426,8 @@ class SimpleTracker:
             rm = []
             for tid in list(self.tracks.keys()):
                 if tid not in used_tracks and self.tracks[tid]['age'] > 0:
-                    self.tracks[tid]['age'] -= 1
+                    # Агрессивнее уменьшаем TTL, чтобы быстрее освобождались id
+                    self.tracks[tid]['age'] -= 2
                     if self.tracks[tid]['age'] <= 0:
                         rm.append(tid)
             for tid in rm:
@@ -480,6 +481,8 @@ class VideoStream(abc.ABC):
         self._act_timeline: List[Dict[str, Any]] = []
         self._act_crossings: List[Dict[str, Any]] = []
         self._act_last_cross_ts: float = 0.0
+        # таймлайн для дашборда: не писать чаще, чем раз в 0.5с
+        self._last_timeline_ts: float = time.time()
 
     def _reset_act(self):
         self._session_id_map = {}
@@ -490,6 +493,7 @@ class VideoStream(abc.ABC):
         self._act_timeline = []
         self._act_crossings = []
         self._act_last_cross_ts = 0.0
+        self._last_timeline_ts = time.time()
 
     def _finalize_act_to_files(self):
         try:
@@ -652,39 +656,76 @@ class VideoStream(abc.ABC):
                 if (not prev_inside) and cur_inside:
                     if prev < L <= cx:
                         key = (tid, 'enter_left')
-                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.6):
                             self.left_in += 1
                             self.left_flow += 1
                             self._track_last_side_time[key] = now
                             y_at = _interp_y(prev, prev_y, cx, cy, L)
                             self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
+                            # долгосрочный лог для дашборда
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "left", "mode": "enter",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(L), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
                     elif prev > R >= cx:
                         key = (tid, 'enter_right')
-                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.6):
                             self.right_in += 1
                             self.right_flow -= 1
                             self._track_last_side_time[key] = now
                             y_at = _interp_y(prev, prev_y, cx, cy, R)
                             self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "right", "mode": "enter",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(R), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
                 # exit events
                 if prev_inside and (not cur_inside):
                     if cx < L <= prev:
                         key = (tid, 'exit_left')
-                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.6):
                             # treat as -1 on left side
                             self.left_in = max(0, self.left_in - 1)
                             self.left_flow -= 1
                             self._track_last_side_time[key] = now
                             y_at = _interp_y(prev, prev_y, cx, cy, L)
                             self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "left", "mode": "exit",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(L), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
                     elif cx > R >= prev:
                         key = (tid, 'exit_right')
-                        if now - self._track_last_side_time.get(key, 0.0) >= CROSS_COOLDOWN_SEC:
+                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.6):
                             self.right_in = max(0, self.right_in - 1)
                             self.right_flow += 1
                             self._track_last_side_time[key] = now
                             y_at = _interp_y(prev, prev_y, cx, cy, R)
                             self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "right", "mode": "exit",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(R), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
 
             self._track_prev_x[tid] = cx
             self._track_prev_y[tid] = cy
@@ -844,6 +885,15 @@ async def _global_infer_loop(self):
                         wnd_max = self.window_max.update(time.time(), int(self.last_count))
                         est = max(self.reported_count, wnd_max)
                         self.reported_count = est
+                        # Логируем таймлайн для дашборда не чаще 2 раз в секунду
+                        try:
+                            now_ts = time.time()
+                            if (now_ts - getattr(self, '_last_timeline_ts', 0.0)) >= 0.5:
+                                rel_t = float(max(0.0, now_ts - float(self._act_start_ts)))
+                                self._act_timeline.append({"t": rel_t, "count_est": int(est)})
+                                self._last_timeline_ts = now_ts
+                        except Exception:
+                            pass
                         payload = {
                             "type": "count_update",
                             "count": int(round(est)),
@@ -882,7 +932,24 @@ async def _global_infer_loop(self):
                         await STREAM_MANAGER.broadcast(self.stream_id, payload)
             except Exception as e:
                 logger.error(f"Infer loop error on {self.stream_id}: {e}")
-            await asyncio.sleep(0.3)
+            # Адаптивный интервал цикла инференса для отзывчивых счётчиков
+            try:
+                now2 = time.time()
+                recent = False
+                try:
+                    if getattr(self, "_recent_crossings", None):
+                        recent = any((now2 - float(c.get("ts", 0))) < 0.8 for c in self._recent_crossings)
+                except Exception:
+                    recent = False
+                if recent:
+                    delay = 0.05
+                elif getattr(self, "last_count", 0) > 0:
+                    delay = 0.08
+                else:
+                    delay = 0.2
+            except Exception:
+                delay = 0.2
+            await asyncio.sleep(delay)
 
     
 
@@ -935,6 +1002,11 @@ class RtspStream(VideoStream):
             except Exception:
                 pass
             self._infer_task = None
+        # Сохранить акт для дашборда
+        try:
+            self._finalize_act_to_files()
+        except Exception:
+            pass
 
 class FileStream(VideoStream):
     def __init__(self, stream_id: str, file_path: str):
@@ -1007,6 +1079,11 @@ class FileStream(VideoStream):
             except Exception:
                 pass
             self._infer_task = None
+        # Сохранить акт для дашборда
+        try:
+            self._finalize_act_to_files()
+        except Exception:
+            pass
 
 class StreamManager:
     def __init__(self):
@@ -1078,6 +1155,10 @@ async def api_health():
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     return FileResponse(STATIC_DIR / "index.html")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def read_dashboard():
+    return FileResponse(STATIC_DIR / "dashboard.html")
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -1199,6 +1280,50 @@ async def api_stream_info(stream_id: str):
         }
     else:
         return {"type": "rtsp", "duration": None}
+
+# --- Records API for dashboard ---
+@app.get("/api/records")
+async def api_records_list():
+    try:
+        items = []
+        for p in sorted(RECORDS_DIR.glob("act_*.json")):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    js = json.load(f)
+                items.append({
+                    "name": p.name,
+                    "stream_id": js.get("stream_id"),
+                    "duration_sec": js.get("duration_sec"),
+                    "seen_total": js.get("seen_total"),
+                    "peak_concurrent": js.get("peak_concurrent"),
+                    "started_at": js.get("started_at"),
+                    "finished_at": js.get("finished_at")
+                })
+            except Exception:
+                continue
+        items.sort(key=lambda x: x.get("finished_at") or 0, reverse=True)
+        return {"items": items}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/records/{name}")
+async def api_records_get(name: str):
+    try:
+        safe = "".join(c for c in name if c.isalnum() or c in "._-" )
+        if not safe:
+            return JSONResponse({"error": "invalid name"}, status_code=400)
+        path = RECORDS_DIR / safe
+        if not path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        with open(path, "r", encoding="utf-8") as f:
+            js = json.load(f)
+        # прикладываем ссылку на svg, если есть
+        svg_name = safe.replace(".json", ".svg")
+        if (RECORDS_DIR / svg_name).exists():
+            js["svg"] = f"/records/{svg_name}"
+        return js
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/stream/{stream_id}/seek")
 async def api_stream_seek(stream_id: str, t: float = Query(...)):

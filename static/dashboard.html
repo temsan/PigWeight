@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Журнал актов взвешивания</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <style>
+    body{ margin:0; padding:16px; }
+    .wrap{ max-width:1200px; margin:0 auto; display:flex; gap:16px; }
+    .left{ flex:0 0 360px; }
+    .right{ flex:1 1 auto; }
+    table{ width:100%; border-collapse:collapse; }
+    th, td{ padding:8px 10px; border-bottom:1px solid rgba(30,64,175,0.12); text-align:left; }
+    tr:hover{ background: rgba(240,245,252,0.6); }
+    .card{ padding:12px; }
+    #chart{ width:100%; height:360px; }
+    .muted{ color:#51627a; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h2 class="m-0">Журнал актов взвешивания</h2>
+  <div class="wrap">
+    <div class="left card glass rounded-xl">
+      <h3 class="m-0" style="margin-bottom:8px;">Записи</h3>
+      <table id="tbl">
+        <thead><tr><th>Файл</th><th>Длительность, с</th><th>Всего</th><th>Пик</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="right card glass rounded-xl">
+      <h3 id="title" class="m-0" style="margin-bottom:8px;">Детали</h3>
+      <canvas id="chart"></canvas>
+      <div id="meta" class="muted" style="margin-top:8px;"></div>
+      <div id="svgWrap" style="margin-top:12px;"></div>
+    </div>
+  </div>
+  <script>
+    const tblBody = document.querySelector('#tbl tbody');
+    const title = document.getElementById('title');
+    const meta = document.getElementById('meta');
+    const svgWrap = document.getElementById('svgWrap');
+    let chart = null;
+
+    async function loadList(){
+      const r = await fetch('/api/records');
+      const data = await r.json();
+      tblBody.innerHTML = '';
+      (data.items||[]).forEach(item=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><a href="#" data-name="${item.name}">${item.name}</a></td>`+
+          `<td>${Number(item.duration_sec||0).toFixed(1)}</td>`+
+          `<td>${item.seen_total||0}</td>`+
+          `<td>${item.peak_concurrent||0}</td>`;
+        tr.querySelector('a').addEventListener('click', (e)=>{
+          e.preventDefault();
+          showRecord(item.name);
+        });
+        tblBody.appendChild(tr);
+      });
+    }
+
+    function renderChart(timeline){
+      const ctx = document.getElementById('chart').getContext('2d');
+      if(chart){ try{ chart.destroy(); } catch(_){} }
+      const labels = (timeline||[]).map(p=>p.t);
+      const data = (timeline||[]).map(p=>p.count_est);
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets: [{ label: 'Count', data, borderColor:'#2c7be5', fill:false, pointRadius:0 }] },
+        options: { animation:false, scales:{ x:{ title:{ display:true, text:'t, s' } }, y:{ beginAtZero:true } } }
+      });
+    }
+
+    async function showRecord(name){
+      const r = await fetch('/api/records/'+encodeURIComponent(name));
+      if(!r.ok){ return; }
+      const js = await r.json();
+      title.textContent = name + (js.stream_id?` (${js.stream_id})`:'' );
+      renderChart(js.timeline || []);
+      meta.textContent = `Длительность: ${Number(js.duration_sec||0).toFixed(1)} с · Всего: ${js.seen_total||0} · Пик: ${js.peak_concurrent||0}`;
+      svgWrap.innerHTML = '';
+      if(js.svg){
+        const img = document.createElement('img');
+        img.src = js.svg;
+        img.alt = 'Сводный график';
+        img.style.maxWidth = '100%';
+        svgWrap.appendChild(img);
+      }
+    }
+
+    loadList();
+  </script>
+</body>
+</html>
+
+

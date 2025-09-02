@@ -8,3 +8,4 @@ __pycache__
 /.venv*
 /uploads/*
 *log
+/records/

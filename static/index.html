@@ -75,7 +75,7 @@
                 <div id="avgFlow" class="flow-val">0</div>
               </div>
               <div class="flow-box">
-                <div class="flow-title">Справа (выход)</div>
+                <div class="flow-title">Справа (вход)</div>
                 <div id="rightIn" class="flow-val">0</div>
               </div>
             </div>
@@ -355,11 +355,15 @@
                 }
                 if (data.debug && data.debug.flow) {
                     const f = data.debug.flow;
-                    const lv = Number(f.left_flow ?? f.left_in ?? 0);
-                    const rv = Number(f.right_flow ?? f.right_in ?? 0);
-                    const av = Math.round((lv + rv) / 2);
-                    try { leftInEl.textContent = String(lv); rightInEl.textContent = String(rv); avgFlowEl.textContent = String(av); } catch (e) {}
-                    streamStatus.textContent = `Live | Слева: ${lv} | Справа: ${rv}`;
+                    const leftInCount = Number(f.left_in ?? 0);
+                    const rightInCount = Number(f.right_in ?? 0);
+                    const av = Math.round((leftInCount + rightInCount) / 2);
+                    try {
+                        leftInEl.textContent = String(leftInCount);
+                        rightInEl.textContent = String(rightInCount);
+                        avgFlowEl.textContent = String(av);
+                    } catch (e) {}
+                    streamStatus.textContent = `Live | Слева (вход): ${leftInCount} | Справа (вход): ${rightInCount}`;
                 }
                 if (data.debug && data.debug.act) {
                     const a = data.debug.act;
