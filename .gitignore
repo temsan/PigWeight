@@ -1,4 +1,9 @@
-/models
+/models/*
+!/models/
+/models/best.pt
+/models/yolo11n-seg.pt
+/models/yolo11n.pt
+
 /__pycache__
 __pycache__
 *.mp4
