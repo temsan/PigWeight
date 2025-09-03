@@ -1084,8 +1084,10 @@ async def _global_infer_loop(self):
                             }
                         except Exception:
                             pass
-                        if ids is not None:
-                            payload["debug"]["ids"] = ids
+                        try:
+                            payload["debug"]["ids"] = list(ids) if ids is not None else []
+                        except Exception:
+                            payload["debug"]["ids"] = []
                         # всегда отправляем счётчики входов, даже если детекций 0
                         payload["debug"]["flow"] = {"left_in": self.left_in, "right_in": self.right_in, "left_flow": self.left_flow, "right_flow": self.right_flow}
                         await STREAM_MANAGER.broadcast(self.stream_id, payload)
