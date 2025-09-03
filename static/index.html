@@ -27,10 +27,19 @@
     .flow-box { flex:1 1 0; display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; background:rgba(240,245,252,0.85); border:1px solid rgba(60,90,140,.12); text-align:center; }
     .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
     .flow-title { font-size:12px; color:#2f5078; opacity:.8; }
+    /* Fullscreen video mode */
+    body.fs, html.fs { overflow:hidden; }
+    body.fs #main-container { padding-top:0; }
+    body.fs #videoWrapper { position: fixed !important; inset: 0 !important; margin:0 !important; border-radius:0 !important; width:100% !important; max-width:100% !important; }
+    body.fs #overlayCanvas { border-radius:0 !important; }
+    body.fs .top-toolbar { position: fixed !important; top:12px; left:12px; right:12px; z-index: 1002; background: rgba(255,255,255,0.56); }
+    body.fs .right-col { display:none !important; }
+    body.fs .left-col { min-width:0 !important; }
+    body.fs .main-flex { justify-content:stretch !important; }
   </style>
 </head>
 <body style="overflow:auto;">
-  <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:auto;">
+  <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden;">
     <div class="top-toolbar minimal glass sticky-top" id="topToolbar">
       <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight Monitor</h2>
@@ -42,17 +51,21 @@
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
         <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Старт</button>
-        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 220px; min-width:220px; max-width:380px;">
+        <button id="fullscreenBtn" class="pill nowrap" aria-label="На весь экран" title="На весь экран"
+                style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center;">
+          <!-- icon injected by JS -->
+        </button>
+        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 420px; min-width:220px; max-width:100%;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
         <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto;"></span>
       </div>
     </div>
-    <div class="main-flex" style="display:flex; justify-content:center;">
-      <div class="container" style="display:flex; gap:16px; width:100%; max-width:100%; align-items:flex-start;">
-        <div class="left-col" style="flex:1 1 auto; min-width:560px; order:0;">
-          <div id="videoWrapper" class="video-wrapper card glass video-surface rounded-xl" style="width:100%; max-width:100%; overflow:hidden; margin:0 auto;">
+    <div class="main-flex" style="display:flex; justify-content:stretch;">
+      <div class="container" style="display:flex; gap:0; width:100%; max-width:100%; align-items:stretch; padding:0; margin:0;">
+        <div class="left-col" style="flex:1 1 auto; min-width:0; order:0;">
+          <div id="videoWrapper" class="video-wrapper" style="position:fixed; inset:0; width:100%; height:100vh; margin:0; border-radius:0; background:#000;">
             <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
             <canvas id="overlayCanvas"></canvas>
             <div id="loadingOverlay" aria-live="polite">
@@ -144,6 +157,8 @@
     const streamSources = {}; // id -> sourceUri (predefined + uploads)
     let seekTimer = null;
     let seekDebounce = null;
+    let seekTargetTime = null; // целевое время после drag
+    let seekLockUntil = 0;     // блок приёма t от сервера, пока не дойдём до цели/не истечёт
     let overlayEnabled = false;
     let idAliases = {}; // instanceId -> user-defined label
     let lastIds = null; // last ids from WS
@@ -155,19 +170,16 @@
     const actSeenEl = document.getElementById('actSeen');
     const actPeakEl = document.getElementById('actPeak');
     const actDurEl = document.getElementById('actDur');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
 
     function aliasesKey(streamId) { return `aliases:${streamId}`; }
     function loadAliases(streamId) { try { return JSON.parse(localStorage.getItem(aliasesKey(streamId)) || '{}'); } catch { return {}; } }
     function saveAliases(streamId) { try { localStorage.setItem(aliasesKey(streamId), JSON.stringify(idAliases || {})); } catch {} }
 
     function updateVideoLayout() {
-        const top = document.getElementById('topToolbar');
         const wrapper = document.getElementById('videoWrapper');
-        if (!wrapper || !top) return;
-        const toolbarH = top.offsetHeight || 64;
-        const padding = 24; // bottom spacing
-        const avail = Math.max(320, window.innerHeight - toolbarH - padding);
-        wrapper.style.height = avail + 'px';
+        if (!wrapper) return;
+        wrapper.style.height = window.innerHeight + 'px';
         syncOverlaySize();
     }
 
@@ -281,6 +293,13 @@
                     const t = Number(info.current_time || 0);
                     if (!Number.isNaN(dur)) { seekRange.max = dur; durTime.textContent = dur.toFixed(1); }
                     if (!Number.isNaN(t)) {
+                        const now = performance.now();
+                        if (seekTargetTime != null) {
+                            const stepTol = Math.max(0.05, parseFloat(seekRange.step || '0.1') || 0.1) * 2;
+                            const arrived = Math.abs(t - seekTargetTime) <= stepTol;
+                            if (arrived || now > seekLockUntil) { seekTargetTime = null; seekLockUntil = 0; }
+                            else { return; }
+                        }
                         if (!isSeeking) {
                             seekRange.value = t;
                             curTime.textContent = t.toFixed(1);
@@ -359,8 +378,11 @@
                         cr.forEach(c => {
                             const tsMs = Number(c.ts || 0) * 1000;
                             if (tsMs > prevTs) {
-                                const text = c.mode === 'exit' ? '-1' : '+1';
-                                const color = c.side === 'left' ? '#2c7be5' : '#51cf66';
+                                const side = String(c.side || 'left');
+                                const mode = String(c.mode || 'enter');
+                                const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
+                                const text = isPositive ? '+1' : '-1';
+                                const color = isPositive ? '#51cf66' : '#ff6b6b';
                                 window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
                             }
                             if (tsMs > maxTs) maxTs = tsMs;
@@ -386,7 +408,10 @@
                     try {
                         const m = data.debug && data.debug.model ? data.debug.model : null;
                         const imgsz = data.debug && data.debug.imgsz ? `, ${data.debug.imgsz}` : '';
-                        if (m && m.name) modelInfo = ` | Модель: ${m.name}${imgsz}`;
+                        if (m && m.name) {
+                            const dev = m.device ? `, ${m.device}${m.half?'/fp16':''}` : '';
+                            modelInfo = ` | GPU: ${dev || 'cpu'} | Модель: ${m.name}${imgsz}`;
+                        }
                     } catch (_) {}
                     streamStatus.textContent = `Live | Слева (вход): ${leftInCount} | Справа (вход): ${rightInCount}${modelInfo}`;
                 }
@@ -825,6 +850,44 @@
         drawOverlay(lastMasks, lastIds);
     });
 
+    // Keyboard seek (Left/Right arrows). Shift=±1s, Ctrl=±5s, иначе ±step
+    function setSeekUIVal(t) {
+        let max = Number(seekRange.max || 0);
+        let clamped = Math.max(0, Math.min(max, Number(t) || 0));
+        seekRange.value = clamped;
+        try { curTime.textContent = clamped.toFixed(1); } catch (_) {}
+        return clamped;
+    }
+    async function requestSeekTo(t) {
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        // блокируем приём времени до прихода к цели
+        seekTargetTime = Number(t) || 0;
+        seekLockUntil = performance.now() + 1200;
+        overlayBlockUntil = performance.now() + 180;
+        if (!/^rtsp:\/\//i.test(src)) {
+            try { await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(seekTargetTime)}`); } catch (_) {}
+        }
+    }
+    document.addEventListener('keydown', (e) => {
+        const ae = document.activeElement;
+        const tag = (ae && ae.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || (ae && ae.isContentEditable)) return;
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            const id = activeStreamId;
+            const src = streamSources[id] || '';
+            // Только для файловых источников
+            if (/^rtsp:\/\//i.test(src)) return;
+            e.preventDefault();
+            const base = Math.max(0.05, parseFloat(seekRange.step || '0.1') || 0.1);
+            const step = e.ctrlKey ? 5.0 : (e.shiftKey ? 1.0 : base);
+            const cur = Number(seekRange.value || 0);
+            const dir = (e.key === 'ArrowRight') ? 1 : -1;
+            const target = setSeekUIVal(cur + dir * step);
+            requestSeekTo(target);
+        }
+    });
+
     // Note: reset button removed per request
 
     function destroyChart() {
@@ -892,6 +955,24 @@
                 await startStream(activeStreamId, sourceUri);
             }
         }
+    });
+
+    // Fullscreen toggle (overlay UI over video)
+    function setFsState(on) {
+        if (on) { document.body.classList.add('fs'); document.documentElement.classList.add('fs'); }
+        else { document.body.classList.remove('fs'); document.documentElement.classList.remove('fs'); }
+        // update icon
+        fullscreenBtn.innerHTML = on
+          ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/><path d="M10 14l-4 4M14 10l4-4" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/></svg>'
+          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h4V5H5v6h2V7ZM13 7h4v4h2V5h-6v2ZM7 13H5v6h6v-2H7v-4ZM17 17h-4v2h6v-6h-2v4Z" fill="#1f3d6b"/></svg>';
+        updateVideoLayout();
+    }
+    fullscreenBtn.addEventListener('click', () => {
+        const on = !document.body.classList.contains('fs');
+        setFsState(on);
+    });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.body.classList.contains('fs')) setFsState(false);
     });
 
     function shortenFileName(name, max = 28) {
@@ -973,20 +1054,22 @@
         e.stopPropagation();
         const t = Number(e.target.value || 0);
         curTime.textContent = t.toFixed(1);
-        // Debounce requests during slider movement
         const id = activeStreamId;
         const src = streamSources[id] || '';
-        if (!/^rtsp:\/\//i.test(src)) {
-            if (seekDebounce) clearTimeout(seekDebounce);
-            seekDebounce = setTimeout(async () => {
-                try {
-                    overlayBlockUntil = performance.now() + 120;
-                    // Помечаем, что пользователь активно тянет ползунок
-                    isSeeking = true;
-                    await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
-                } catch (_) {}
-            }, 150);
+        if (/^rtsp:\/\//i.test(src)) return;
+        // Во время drag отправляем только на pointerup — не дёргаем бекенд из input
+        if (isSeeking) {
+            if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
+            return;
         }
+        // Клавиатурная/программная смена — мягкий дебаунс
+        if (seekDebounce) clearTimeout(seekDebounce);
+        seekDebounce = setTimeout(async () => {
+            try {
+                overlayBlockUntil = performance.now() + 120;
+                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
+            } catch (_) {}
+        }, 150);
     });
     // Manage pointer drag to avoid duplicate change/pointerup seeks
     seekRange.addEventListener('pointerdown', (e) => {
@@ -999,18 +1082,22 @@
         const id = activeStreamId;
         const src = streamSources[id] || '';
         const t = Number(seekRange.value || 0);
+        const finishDrag = () => { isSeeking = false; };
+        // блокируем приём серверного t, пока не дойдём до цели
+        seekTargetTime = t;
+        seekLockUntil = performance.now() + 1200;
         if (!/^rtsp:\/\//i.test(src)) {
             try {
                 if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
                 overlayBlockUntil = performance.now() + 180;
                 await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
-                // Завершаем режим ручного перемещения только после ответа
-                isSeeking = false;
-            } catch (_) {}
-        }
-        if (/^rtsp:\/\//i.test(src)) {
+            } catch (_) {
+            } finally {
+                finishDrag();
+            }
+        } else {
             // Для RTSP ничего не дергаем на бек — просто выходим из режима
-            isSeeking = false;
+            finishDrag();
         }
     });
 

@@ -94,6 +94,22 @@ class UltraFastProcessor:
                     logger.warning(f"Ultra-fast: weights not found at '{load_path}', falling back to '{fallback_name}'")
                     load_path = fallback_name
                 self.model = YOLO(load_path)
+                # GPU/half if available
+                try:
+                    import os as _os
+                    dev = _os.getenv("DEVICE") or "cuda:0"
+                    use_half = (_os.getenv("USE_HALF", "true").lower() == "true")
+                    try:
+                        self.model.to(dev)
+                    except Exception:
+                        pass
+                    if use_half and hasattr(self.model, 'model'):
+                        try:
+                            self.model.model.half()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 self.model_path = load_path
                 logger.info(f"Ultra-fast model loaded: {load_path}")
             except Exception as e:

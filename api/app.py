@@ -138,8 +138,18 @@ else:
         raise RuntimeError(f"Файл модели не найден: {_ENV_MODEL_PATH}")
     MODEL_PATH = _ENV_MODEL_PATH
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))
+ANTI_LETTERBOX = os.getenv("ANTI_LETTERBOX", "false").lower() == "true"
 AVG_WINDOW = int(os.getenv("AVG_WINDOW", "20"))
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
+
+# Inference device (GPU/CPU)
+try:
+    import torch as _torch
+    _cuda_ok = bool(getattr(_torch, 'cuda', None) and _torch.cuda.is_available())
+except Exception:
+    _cuda_ok = False
+DEVICE = os.getenv("DEVICE") or ("cuda:0" if _cuda_ok else "cpu")
+USE_HALF = (os.getenv("USE_HALF", "true").lower() == "true") and DEVICE.startswith("cuda")
 
 # --- Counting/estimation parameters ---
 COUNT_WINDOW_SEC = float(os.getenv("COUNT_WINDOW_SEC", "10.0"))
@@ -485,6 +495,9 @@ class VideoStream(abc.ABC):
         self._arrival_counter: int = 1
         self._left_cross_rank: Dict[int, int] = {}
         self._left_cross_counter: int = 1
+        # Стабильная отображаемая метка для каждого track id (не прыгает)
+        self._display_label_map: Dict[int, int] = {}
+        self._next_display_label: int = 1
         # Session numbering and act-of-weighing metrics
         self._session_id_map: Dict[int, int] = {}
         self._next_session_label: int = 1
@@ -511,6 +524,8 @@ class VideoStream(abc.ABC):
         self._arrival_counter = 1
         self._left_cross_rank = {}
         self._left_cross_counter = 1
+        self._display_label_map = {}
+        self._next_display_label = 1
 
     def _finalize_act_to_files(self):
         try:
@@ -582,6 +597,33 @@ class VideoStream(abc.ABC):
                 ]
                 with open(RECORDS_DIR / f"{base}.svg", "w", encoding="utf-8") as fsvg:
                     fsvg.write("\n".join(svg))
+            except Exception:
+                pass
+            # Markdown отчёт
+            try:
+                md_lines = []
+                md_lines.append(f"# Отчёт акта взвешивания — {self.stream_id}")
+                md_lines.append("")
+                md_lines.append(f"- Начало: {datetime.fromtimestamp(summary['started_at']).isoformat(sep=' ', timespec='seconds')}")
+                md_lines.append(f"- Окончание: {datetime.fromtimestamp(summary['finished_at']).isoformat(sep=' ', timespec='seconds')}")
+                md_lines.append(f"- Длительность: {summary['duration_sec']:.1f} с")
+                md_lines.append("")
+                md_lines.append("## Показатели")
+                md_lines.append("")
+                md_lines.append(f"- Вход слева: {summary['flow']['left_in']}")
+                md_lines.append(f"- Выход справа: {summary['flow']['right_in']}")
+                md_lines.append(f"- Пиковое количество одновременно: {summary['peak_concurrent']}")
+                md_lines.append(f"- Всего уникально замечено: {summary['seen_total']}")
+                md_lines.append("")
+                md_lines.append("## График количества по времени")
+                md_lines.append("")
+                md_lines.append(f"![timeline]({base}.svg)")
+                md_lines.append("")
+                md_lines.append("## Данные")
+                md_lines.append("")
+                md_lines.append(f"`{base}.json`")
+                with open(RECORDS_DIR / f"{base}.md", "w", encoding="utf-8") as fmd:
+                    fmd.write("\n".join(md_lines))
             except Exception:
                 pass
         except Exception as e:
@@ -821,6 +863,16 @@ async def _global_infer_loop(self):
         try:
             from ultralytics import YOLO
             self.model = YOLO(MODEL_PATH)
+            try:
+                if DEVICE:
+                    self.model.to(DEVICE)
+                if USE_HALF and hasattr(self.model, 'model'):
+                    try:
+                        self.model.model.half()
+                    except Exception:
+                        pass
+            except Exception as _e:
+                logger.warning(f"Model device/half setup warning: {_e}")
             self.model_loaded = True
             logger.info(f"YOLO model loaded: {MODEL_PATH}")
         except Exception as e:
@@ -842,8 +894,19 @@ async def _global_infer_loop(self):
                     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if frame is not None:
                         H0, W0, _ = frame.shape
-                        y0, y1 = self._detect_black_bars_top_bottom(frame)
-                        proc = frame[y0:y1, :, :] if (0 <= y0 < y1 <= H0) else frame
+                        if ANTI_LETTERBOX:
+                            try:
+                                _y0, _y1 = self._detect_black_bars_top_bottom(frame)
+                                if isinstance(_y0, (int, float)) and isinstance(_y1, (int, float)) and 0 <= _y0 < _y1 <= H0:
+                                    y0, y1 = int(_y0), int(_y1)
+                                else:
+                                    y0, y1 = 0, H0
+                            except Exception:
+                                y0, y1 = 0, H0
+                            proc = frame[y0:y1, :, :] if (0 <= y0 < y1 <= H0) else frame
+                        else:
+                            y0, y1 = 0, H0
+                            proc = frame
                         # imgsz из переменной окружения (по умолчанию 960)
                         try:
                             _IMG_SIZE = int(os.getenv("IMG_SIZE", "960"))
@@ -907,14 +970,23 @@ async def _global_infer_loop(self):
                                         self._next_session_label += 1
                             # Собираем последовательность меток по трекам текущего кадра
                             session_labels: List[int] = [self._session_id_map.get(tid, 0) for tid in ids]
-                            # Дополнительно подготовим «человеческий» порядок: по порядку пересечения ЛЕВОЙ линии,
-                            # если объект её ещё не пересёк — по времени входа (первого появления),
-                            # при равенстве — правее раньше (справа-налево), чтобы слои масок были читаемы
+                            # Подготовим стабильные отображаемые метки:
+                            # 1) Для новых треков выдаём следующий номер (_next_display_label) и запоминаем в карте
+                            # 2) Для уже виденных всегда используем прежнюю метку (не прыгает)
+                            # 3) Для удобства человека дополнительно формируем ordered_labels,
+                            #    но не подменяем стабильную карту (используем ordered_labels только если нужно)
                             try:
                                 n = len(centroids_local)
                                 ordered_labels = [0] * n
+                                display_labels = [0] * n
+                                # Назначаем стабильные метки
+                                for i, tid in enumerate(ids):
+                                    if tid not in self._display_label_map:
+                                        self._display_label_map[tid] = self._next_display_label
+                                        self._next_display_label += 1
+                                    display_labels[i] = self._display_label_map.get(tid, 0)
+                                # Дополнительно сформируем человеко-порядок по левому пересечению / первому появлению
                                 order_idx = list(range(n))
-                                # Привязать индекс i к track id
                                 def left_rank(i: int) -> int:
                                     try:
                                         tid = ids[i]
@@ -928,6 +1000,7 @@ async def _global_infer_loop(self):
                                     ordered_labels[idx_i] = rank
                             except Exception:
                                 ordered_labels = list(range(1, len(centroids_local) + 1))
+                                display_labels = ordered_labels[:]
                             self._update_line_counters(ids, centers_x, centers_y)
                             # Normalize masks back to original frame
                             mapped: list[list[tuple[float, float]]] = []
@@ -977,6 +1050,8 @@ async def _global_infer_loop(self):
                             payload["debug"]["model"] = {
                                 "path": str(MODEL_PATH),
                                 "name": os.path.basename(str(MODEL_PATH)),
+                                "device": str(DEVICE) if 'DEVICE' in globals() else 'cpu',
+                                "half": bool(USE_HALF) if 'USE_HALF' in globals() else False,
                             }
                         except Exception:
                             pass
@@ -999,8 +1074,9 @@ async def _global_infer_loop(self):
                             pass
                         # include stable labels and act-of-weighing stats
                         try:
-                            if 'ordered_labels' in locals() and ordered_labels:
-                                payload["debug"]["labels"] = ordered_labels
+                            # По умолчанию отдаём стабильные метки (не прыгают)
+                            if 'display_labels' in locals() and display_labels:
+                                payload["debug"]["labels"] = display_labels
                             payload["debug"]["act"] = {
                                 "seen_total": int(len(self._act_seen_labels)),
                                 "peak_concurrent": int(self._act_peak),

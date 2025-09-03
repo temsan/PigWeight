@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 # --- Config from environment ---
 DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only")
+# Единый путь до модели берём из MODEL_PATH; PIG_MODEL_PATH поддерживается как Legacy
+MODEL_PATH_ENV = os.getenv("MODEL_PATH")
 PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH")
 BALANCED_MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
 ONNX_PATH = os.getenv("ONNX_PATH", "models/yolo11n.onnx")
@@ -29,9 +31,9 @@ RELOAD = os.getenv("RELOAD", "true" if DEBUG else "false").lower() == "true"
 
 # Set model path based on detection mode
 if DETECTION_MODE == "pig-only":
-    if not PIG_MODEL_PATH:
-        raise RuntimeError("PIG_MODEL_PATH не задан в .env")
-    MODEL_PATH = PIG_MODEL_PATH
+    MODEL_PATH = MODEL_PATH_ENV or PIG_MODEL_PATH
+    if not MODEL_PATH:
+        raise RuntimeError("MODEL_PATH не задан в .env (или укажите Legacy PIG_MODEL_PATH)")
 else:
     MODEL_PATH = BALANCED_MODEL_PATH
 

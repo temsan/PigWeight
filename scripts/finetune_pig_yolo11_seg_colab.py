@@ -410,6 +410,7 @@ def main():
     ap.add_argument("--name", type=str, default="pig-finetune", help="Имя прогона (runs/segment/<name>)")
     ap.add_argument("--out", type=str, default="/content/pig_yolo11-seg-finetuned.pt", help="Куда скопировать итоговый best.pt")
     ap.add_argument("--save_to_drive", action="store_true", help="Скопировать чекпойнт на Google Drive, если смонтирован")
+    ap.add_argument("--anti_letterbox", action="store_true", help="Включить такой же anti-letterbox кроп при валидации, как в инференсе")
     # В среде Jupyter/Colab ядро может передавать служебный флаг -f <kernel.json>.
     # Используем parse_known_args(), чтобы игнорировать такие посторонние аргументы.
     args, _ = ap.parse_known_args()
