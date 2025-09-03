@@ -14,6 +14,10 @@ import abc
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, HTMLResponse, Response, JSONResponse, FileResponse
+try:
+    from fastapi.responses import ORJSONResponse
+except Exception:
+    ORJSONResponse = JSONResponse  # fallback
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -37,19 +41,19 @@ except Exception:
     AsyncIOScheduler = None
     CronTrigger = None
 
-# Изолированный воркер для OpenCV (устойчивый импорт как пакетом, так и отдельным скриптом)
+# Изолированные воркеры: PyAV (предпочтительно) и OpenCV (fallback)
 import sys as _sys
 _CUR_DIR = Path(__file__).resolve().parent
 _ROOT_DIR = _CUR_DIR.parent
 if str(_ROOT_DIR) not in _sys.path:
     _sys.path.insert(0, str(_ROOT_DIR))
 try:
-    from api.opencv_worker import OpenCVIsolate  # запуск как пакет: python -m api.app
+    from api.av_worker import AVIsolate  # запуск как пакет: python -m api.app
 except Exception:
     try:
-        from .opencv_worker import OpenCVIsolate  # относительный импорт внутри пакета
+            from .av_worker import AVIsolate  # относительный импорт внутри пакета
     except Exception:
-        from opencv_worker import OpenCVIsolate   # запуск как файл: python api/app.py
+        from av_worker import AVIsolate   # запуск как файл: python api/app.py
 
 from logging.handlers import RotatingFileHandler
 
@@ -151,6 +155,24 @@ except Exception:
 DEVICE = os.getenv("DEVICE") or ("cuda:0" if _cuda_ok else "cpu")
 USE_HALF = (os.getenv("USE_HALF", "true").lower() == "true") and DEVICE.startswith("cuda")
 
+# Inference device (GPU/CPU) and torch settings
+try:
+    import torch as _torch
+    if hasattr(_torch.backends, 'cudnn'):
+        try:
+            _torch.backends.cudnn.benchmark = True
+        except Exception:
+            pass
+    try:
+        _torch.set_grad_enabled(False)
+    except Exception:
+        pass
+    _cuda_ok = bool(getattr(_torch, 'cuda', None) and _torch.cuda.is_available())
+except Exception:
+    _cuda_ok = False
+DEVICE = os.getenv("DEVICE") or ("cuda:0" if _cuda_ok else "cpu")
+USE_HALF = (os.getenv("USE_HALF", "true").lower() == "true") and DEVICE.startswith("cuda")
+
 # --- Counting/estimation parameters ---
 COUNT_WINDOW_SEC = float(os.getenv("COUNT_WINDOW_SEC", "10.0"))
 COUNT_DECAY_HALFLIFE_SEC = float(os.getenv("COUNT_DECAY_HALFLIFE_SEC", "4.0"))
@@ -236,56 +258,56 @@ def _open_file_cap_local(path: str):
             continue
     return None, {"error": last_err or "all backends failed"}
 
-OCV: Optional[OpenCVIsolate] = None
-def get_ocv() -> OpenCVIsolate:
-    global OCV
-    if OCV is None:
-        OCV = OpenCVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
-    return OCV
+AVW: Optional[AVIsolate] = None
+def get_av() -> AVIsolate:
+    global AVW
+    if AVW is None:
+        AVW = AVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+    return AVW
 
-def _ocv_safe_call(method_name: str, *args, **kwargs):
+def _av_safe_call(method_name: str, *args, **kwargs):
     try:
-        ocv = get_ocv()
-        method = getattr(ocv, method_name, None)
+        avw = get_av()
+        method = getattr(avw, method_name, None)
         if not method:
-            raise AttributeError(f"OpenCVIsolate lacks {method_name}")
+            raise AttributeError(f"AVIsolate lacks {method_name}")
         return method(*args, **kwargs)
     except Exception:
         try:
-            global OCV
-            OCV = OpenCVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
-            method = getattr(OCV, method_name, None)
+            global AVW
+            AVW = AVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+            method = getattr(AVW, method_name, None)
             if not method:
-                raise AttributeError(f"OpenCVIsolate lacks {method_name}")
+                raise AttributeError(f"AVIsolate lacks {method_name}")
             return method(*args, **kwargs)
         except Exception as e2:
             raise e2
 
-def ocv_open_rtsp(stream_id: str, url: str) -> Dict[str, Any]:
-    return _ocv_safe_call('open_rtsp', stream_id, url, timeout=8.0)
+def av_open_rtsp(stream_id: str, url: str) -> Dict[str, Any]:
+    return _av_safe_call('open_rtsp', stream_id, url)
 
-def ocv_open_file(stream_id: str, path: str) -> Dict[str, Any]:
-    return _ocv_safe_call('open_file', stream_id, path, timeout=3.0)
+def av_open_file(stream_id: str, path: str) -> Dict[str, Any]:
+    return _av_safe_call('open_file', stream_id, path)
 
-def ocv_close(stream_id: str) -> None:
+def av_close(stream_id: str) -> None:
     try:
-        _ocv_safe_call('close', stream_id)
+        _av_safe_call('close', stream_id)
     except Exception:
         pass
 
-def ocv_read_jpeg(stream_id: str, timeout: float = 1.0) -> Optional[bytes]:
-    return _ocv_safe_call('read_jpeg', stream_id, timeout=timeout)
+def av_read_jpeg(stream_id: str, timeout: float = 1.0) -> Optional[bytes]:
+    return _av_safe_call('read_jpeg', stream_id, timeout=timeout)
 
-def ocv_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Optional[bytes]:
-    return _ocv_safe_call('seek_read_jpeg', stream_id, t, timeout=timeout)
-def ocv_meta(stream_id: str) -> Dict[str, Any]:
-    return _ocv_safe_call('meta', stream_id)
+def av_seek_read_jpeg(stream_id: str, t: float, timeout: float = 2.0) -> Optional[bytes]:
+    return _av_safe_call('seek_read_jpeg', stream_id, t, timeout=timeout)
+def av_meta(stream_id: str) -> Dict[str, Any]:
+    return _av_safe_call('meta', stream_id)
 
 def ocv_probe_file(path: str) -> Dict[str, Any]:
     """Open a file temporarily in the worker to fetch meta, then close it."""
     tmp_id = f"probe_{int(time.time()*1000)}"
     try:
-        meta = ocv_open_file(tmp_id, path)
+        meta = av_open_file(tmp_id, path)
         # ensure meta returns expected keys
         fps = float(meta.get("fps", 0.0) or 0.0)
         dur = float(meta.get("duration", 0.0) or 0.0)
@@ -299,7 +321,7 @@ def ocv_probe_file(path: str) -> Dict[str, Any]:
         except Exception:
             pass
 def ocv_meta(stream_id: str) -> Dict[str, Any]:
-    return _ocv_safe_call('meta', stream_id)
+    return _av_safe_call('meta', stream_id)
 
 class SimpleTracker:
     def __init__(self, iou_threshold=0.3, max_age=30, dist_weight=0.2):
@@ -1129,16 +1151,16 @@ class RtspStream(VideoStream):
 
     async def _stream_loop(self):
         try:
-            ocv_open_rtsp(self.stream_id, self.rtsp_url)
+            av_open_rtsp(self.stream_id, self.rtsp_url)
             while self.running:
-                jpeg = ocv_read_jpeg(self.stream_id, timeout=1.0)
+                jpeg = av_read_jpeg(self.stream_id, timeout=1.0)
                 async with self.lock:
                     self.last_jpeg = jpeg
                 await asyncio.sleep(1.0 / TARGET_FPS)
         except Exception as e:
             logger.error(f"RTSP stream {self.stream_id} error: {e}")
         finally:
-            ocv_close(self.stream_id)
+            av_close(self.stream_id)
             self.running = False
 
     async def stop(self):
@@ -1187,14 +1209,14 @@ class FileStream(VideoStream):
 
     async def _stream_loop(self):
         try:
-            meta = ocv_open_file(self.stream_id, self.file_path)
+            meta = av_open_file(self.stream_id, self.file_path)
             self.duration = meta.get("duration", 0.0)
             self.fps = meta.get("fps", 25.0)
             while self.running:
                 if self._seek_event.is_set():
                     await self._perform_seek()
                 
-                jpeg = ocv_read_jpeg(self.stream_id, timeout=1.0)
+                jpeg = av_read_jpeg(self.stream_id, timeout=1.0)
                 if jpeg:
                     async with self.lock:
                         self.last_jpeg = jpeg
@@ -1213,7 +1235,7 @@ class FileStream(VideoStream):
     async def _perform_seek(self):
         self._seek_event.clear()
         if self._seek_time is not None:
-            jpeg = ocv_seek_read_jpeg(self.stream_id, self._seek_time)
+            jpeg = av_seek_read_jpeg(self.stream_id, self._seek_time)
             async with self.lock:
                 self.last_jpeg = jpeg
             self.current_time = self._seek_time
@@ -1305,7 +1327,7 @@ async def lifespan(app: FastAPI):
     for stream in list(STREAM_MANAGER.streams.values()):
         await stream.stop()
 
-app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan)
+app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan, default_response_class=ORJSONResponse)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -1412,7 +1434,13 @@ async def api_stream_feed(stream_id: str):
     stream = STREAM_MANAGER.streams.get(stream_id)
     if not stream or not stream.running:
         return JSONResponse({"error": "stream not found or not running"}, status_code=404)
-    return StreamingResponse(mjpeg_generator(stream), media_type="multipart/x-mixed-replace; boundary=frame")
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Accel-Buffering": "no"
+    }
+    return StreamingResponse(mjpeg_generator(stream), media_type="multipart/x-mixed-replace; boundary=frame", headers=headers)
 
 @app.get("/api/cameras")
 async def api_cameras():
@@ -1428,7 +1456,7 @@ async def api_stream_info(stream_id: str):
         # Refresh meta lazily if duration is unknown
         if not stream.duration or stream.duration <= 0.0:
             try:
-                meta = ocv_meta(stream.stream_id)
+                meta = av_meta(stream.stream_id)
                 stream.duration = float(meta.get("duration", stream.duration or 0.0) or 0.0)
                 stream.fps = float(meta.get("fps", stream.fps or 0.0) or 0.0)
             except Exception:

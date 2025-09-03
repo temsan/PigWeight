@@ -112,6 +112,8 @@ def main():
         ensure_dir('stream')
         ensure_dir('uploads')
 
+        install_requirements()
+
         # Import ASGI app and start server
         logger.info(f'Starting server at http://{HOST}:{PORT}')
         logger.info(f'API Health Check: http://{HOST}:{PORT}/api/health')
