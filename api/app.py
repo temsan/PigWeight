@@ -17,7 +17,12 @@ from fastapi.responses import StreamingResponse, HTMLResponse, Response, JSONRes
 try:
     from fastapi.responses import ORJSONResponse
 except Exception:
-    ORJSONResponse = JSONResponse  # fallback
+    ORJSONResponse = JSONResponse  # type: ignore
+try:
+    import orjson as _orjson  # noqa: F401
+    _HAVE_ORJSON = True
+except Exception:
+    _HAVE_ORJSON = False
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -1327,7 +1332,8 @@ async def lifespan(app: FastAPI):
     for stream in list(STREAM_MANAGER.streams.values()):
         await stream.stop()
 
-app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan, default_response_class=ORJSONResponse)
+_DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
+app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

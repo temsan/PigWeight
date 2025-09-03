@@ -4,6 +4,7 @@ uvicorn[standard]==0.30.0
 python-multipart==0.0.9
 # Разрешаем актуальную установленную версию python-dotenv (снятый пин)
 python-dotenv
+orjson>=3.10.0
 
 # Scheduling / Timezone
 APScheduler==3.10.4
@@ -15,8 +16,8 @@ numpy>=2.0.0,<3
 opencv-python-headless>=4.10.0.84
 # Стабильный декодер и seek для файлов/RTSP (низкая задержка)
 av>=12.2.0
-# Быстрый JPEG энкодер (опционально, но крайне желательно)
-PyTurboJPEG>=1.7.6
+# Быстрый JPEG энкодер (опционально, ставится вручную при наличии libturbojpeg)
+# PyTurboJPEG>=1.7.6
 # Фоллбек JPEG-энкодинга через Pillow
 pillow>=10.0.0
 
