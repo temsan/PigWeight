@@ -256,4 +256,4 @@ def setup_endpoints(app: FastAPI):
             logger.error(f"❌ Error uploading video: {e}")
             return JSONResponse({"error": str(e)}, status_code=500)
     
-    logger.info("[OK] Simplified endpoints configured")
+    logger.info("✅ Simplified endpoints configured")

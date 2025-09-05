@@ -17,7 +17,7 @@ import subprocess
 try:
     from core.processor import get_processor, ProcessingOptions, FrameResult
     HAVE_UNIFIED_PROCESSOR = True
-    logging.info("[OK] Unified processor available")
+    logging.info("✅ Unified processor available")
 except ImportError as e:
     HAVE_UNIFIED_PROCESSOR = False
     logging.warning(f"⚠️ Unified processor not available: {e}, using legacy processors")

@@ -422,7 +422,7 @@
         try { videoStream.style.opacity = '1'; } catch (e) {}
         await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
 
-        const transport = document.getElementById('transportSelect') ? document.getElementById('transportSelect').value : 'webrtc';
+        const transport = document.getElementById('transportSelect') ? document.getElementById('transportSelect').value : 'mjpeg';
         if (transport === 'webrtc') {
             // start webrtc client
             try { videoStream.style.display = 'none'; } catch (e) {}
@@ -431,29 +431,12 @@
                 showLoader('Подключение WebRTC…');
                 await startWebRTCClient(streamId);
             } catch (err) {
-                console.error('WebRTC failed, attempting retry before fallback to MJPEG', err);
-                
-                // Пытаемся переподключиться к WebRTC еще раз
-                let retrySuccess = false;
-                try {
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Пауза 1 сек
-                    await stopWebRTCClient();
-                    showLoader('Повторное подключение WebRTC…');
-                    await startWebRTCClient(streamId);
-                    retrySuccess = true;
-                    console.log('✅ WebRTC retry successful');
-                } catch (retryErr) {
-                    console.warn('⚠️ WebRTC retry failed, falling back to MJPEG:', retryErr);
-                }
-                
-                if (!retrySuccess) {
-                    try { await stopWebRTCClient(); } catch(_) {}
-                    try { document.getElementById('webrtcVideo').style.display = 'none'; } catch (e) {}
-                    try { videoStream.style.display = 'block'; } catch (e) {}
-                    videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
-                    setupFirstFrameWatch();
-                    console.log('😢 Fallback to MJPEG activated');
-                }
+                console.error('WebRTC failed, fallback to MJPEG', err);
+                try { await stopWebRTCClient(); } catch(_) {}
+                try { document.getElementById('webrtcVideo').style.display = 'none'; } catch (e) {}
+                try { videoStream.style.display = 'block'; } catch (e) {}
+                videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+                setupFirstFrameWatch();
             }
         } else {
             // classic MJPEG
@@ -536,14 +519,7 @@
             pc.ontrack = (evt) => {
                 const v = document.getElementById('webrtcVideo');
                 if (v) {
-                    try { 
-                        v.style.display = 'block'; 
-                        v.style.opacity = '1'; 
-                        v.style.zIndex = '1'; 
-                        // Уберите MJPEG когда WebRTC активно
-                        const mjpegEl = document.getElementById('videoStream');
-                        if (mjpegEl) mjpegEl.style.display = 'none';
-                    } catch(e){}
+                    try { v.style.display = 'block'; v.style.opacity = '1'; v.style.zIndex = '0'; } catch(e){}
                     v.srcObject = evt.streams[0];
                     // hide loader immediately when remote track arrives
                     hideLoader();
