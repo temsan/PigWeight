@@ -11,11 +11,8 @@ from pathlib import Path
 import logging
 import argparse
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Простая настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 logger = logging.getLogger('clean_uploads')
 
 

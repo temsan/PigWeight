@@ -1,45 +1,19 @@
 # Конфигурация и логирование PigWeight
 
-## 📊 Новый формат логов производительности
+## 📊 Упрощенное логирование
 
-Система теперь записывает детальные метрики в human-readable формате:
+Система использует простое логирование без лишних деталей:
 
-### Формат записей batch performance:
-```json
-{
-  "timestamp": 1756906880.215,
-  "datetime": "2025-09-03 16:41:20.215",
-  "stream_id": "cam101",
-  "batch_size": 8,
-  "detections": 5,
-  "batch_time_ms": 250.5,
-  "preprocess_time_ms": 15.3,
-  "inference_time_ms": 180.2,
-  "postprocess_time_ms": 55.0,
-  "fps": 32.0
-}
+### Логирование производительности:
+```
+cam101: размер=8, обнаружено=5, fps=32.1, инференс=180мс
+Сводка для cam101: батчей=150, средний_fps=31.5, средний_инференс=175мс
 ```
 
-### Формат summary записей:
-```json
-{
-  "timestamp": 1756906880.215,
-  "datetime": "2025-09-03 16:41:20.215",
-  "type": "performance_summary",
-  "stream_id": "cam101",
-  "total_batches": 150,
-  "avg_batch_time_ms": 245.8,
-  "avg_inference_time_ms": 175.2,
-  "avg_preprocess_time_ms": 14.8,
-  "avg_postprocess_time_ms": 55.8,
-  "batch_size": 8,
-  "throughput_fps": 31.5
-}
+### Общие логи:
 ```
-
-### Консольный вывод:
-```
-[16:41:20] cam101: batch_size=8, detections=5, fps=32.0, inference=180.2ms
+2025-01-15 16:41:20 - INFO - Запуск сервера на http://0.0.0.0:8000
+2025-01-15 16:41:20 - INFO - Режим отладки: False, Горячая перезагрузка: False
 ```
 
 ## Конфигурация (.env)
@@ -125,23 +99,9 @@ python scripts/convert_to_onnx.py --model_path models/pig_yolo11-seg.v4.pt --out
 
 ## Мониторинг производительности
 
-После запуска система будет логировать перформанс в `logs/perf.log`:
+Система логирует производительность в простом формате в консоль и файл `logs/app.log`.
 
-```json
-{
-  "timestamp": 1703123456.789,
-  "stream_id": "cam101",
-  "batch_size": 8,
-  "detections": 3,
-  "batch_time_ms": 450.5,
-  "inference_time_ms": 380.2,
-  "preprocess_time_ms": 45.3,
-  "postprocess_time_ms": 25.0,
-  "fps": 17.8
-}
-```
-
-Используйте анализатор для разбора логов:
+Для анализа производительности используйте:
 ```bash
-python scripts/analyze_pipeline.py --log_file logs/perf.log
+python scripts/analyze_pipeline.py --log_file logs/app.log
 ```

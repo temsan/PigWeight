@@ -31,12 +31,9 @@ class InferenceWorker:
         self._task: Optional[asyncio.Task] = None
         self._running = False
 
-        # Performance tracking
-        self._perf_log = []
+        # Performance tracking (упрощено)
         self._batch_times = []
         self._inference_times = []
-        self._preprocess_times = []
-        self._postprocess_times = []
 
         # model loading deferred
         model_path = os.getenv('MODEL_PATH', '')
@@ -57,71 +54,31 @@ class InferenceWorker:
         self._log_performance_summary()
 
     def _log_performance_summary(self):
-        """Log final performance summary"""
+        """Простая сводка производительности"""
         if not self._batch_times:
             return
 
-        summary = {
-            "timestamp": time.time(),
-            "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-            "type": "performance_summary",
-            "stream_id": self.stream_id,
-            "total_batches": len(self._batch_times),
-            "avg_batch_time_ms": sum(self._batch_times) / len(self._batch_times) * 1000,
-            "avg_inference_time_ms": sum(self._inference_times) / len(self._inference_times) * 1000 if self._inference_times else 0,
-            "avg_preprocess_time_ms": sum(self._preprocess_times) / len(self._preprocess_times) * 1000 if self._preprocess_times else 0,
-            "avg_postprocess_time_ms": sum(self._postprocess_times) / len(self._postprocess_times) * 1000 if self._postprocess_times else 0,
-            "batch_size": self.batch_size,
-            "throughput_fps": (len(self._batch_times) * self.batch_size) / sum(self._batch_times) if self._batch_times else 0
-        }
+        total_batches = len(self._batch_times)
+        avg_batch_time = sum(self._batch_times) / total_batches
+        avg_inference_time = sum(self._inference_times) / len(self._inference_times) if self._inference_times else 0
+        throughput_fps = (total_batches * self.batch_size) / sum(self._batch_times) if self._batch_times else 0
 
-        logger.info(f"Performance summary for {self.stream_id}: {json.dumps(summary)}")
-
-        # Write to perf log file
-        try:
-            with open("logs/perf.log", "a", encoding="utf-8") as f:
-                f.write(f"{time.time()}: {json.dumps(summary)}\n")
-        except Exception as e:
-            logger.warning(f"Failed to write perf log: {e}")
+        logger.info(f"Сводка для {self.stream_id}: батчей={total_batches}, средний_fps={throughput_fps:.1f}, средний_инференс={avg_inference_time*1000:.0f}мс")
 
     def _log_batch_performance(self, batch_start: float, inference_start: float,
                               postprocess_start: float, batch_end: float,
                               batch_size: int, detections: int):
-        """Log detailed batch performance"""
+        """Упрощенное логирование производительности батча"""
         batch_time = batch_end - batch_start
-        preprocess_time = inference_start - batch_start
         inference_time = postprocess_start - inference_start
-        postprocess_time = batch_end - postprocess_start
+        fps = batch_size / batch_time if batch_time > 0 else 0
 
         # Store for summary
         self._batch_times.append(batch_time)
-        self._preprocess_times.append(preprocess_time)
         self._inference_times.append(inference_time)
-        self._postprocess_times.append(postprocess_time)
 
-        # Log to file in new format
-        perf_entry = {
-            "timestamp": time.time(),
-            "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],  # Human-readable datetime
-            "stream_id": self.stream_id,
-            "batch_size": batch_size,
-            "detections": detections,
-            "batch_time_ms": batch_time * 1000,
-            "preprocess_time_ms": preprocess_time * 1000,
-            "inference_time_ms": inference_time * 1000,
-            "postprocess_time_ms": postprocess_time * 1000,
-            "fps": batch_size / batch_time if batch_time > 0 else 0
-        }
-
-        try:
-            with open("logs/perf.log", "a", encoding="utf-8") as f:
-                f.write(f"{json.dumps(perf_entry)}\n")
-        except Exception as e:
-            logger.warning(f"Failed to write perf log: {e}")
-
-        # Also log to console for monitoring
-        human_time = datetime.now().strftime("%H:%M:%S")
-        logger.info(f"[{human_time}] {self.stream_id}: batch_size={batch_size}, detections={detections}, fps={batch_size / batch_time:.2f}, inference={inference_time*1000:.1f}ms")
+        # Простое логирование в консоль
+        logger.info(f"{self.stream_id}: размер={batch_size}, обнаружено={detections}, fps={fps:.1f}, инференс={inference_time*1000:.0f}мс")
 
     async def _run(self):
         q = FRAME_BROKER.subscribe(self.stream_id, max_queue=32)

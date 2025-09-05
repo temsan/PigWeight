@@ -73,36 +73,20 @@ except Exception:
     except Exception:
         from av_worker import AVIsolate   # запуск как файл: python api/app.py
 
-from logging.handlers import RotatingFileHandler
-
 # --- Bootstrap ---
 BASE_DIR = Path(__file__).parent.parent
 if load_dotenv:
     load_dotenv(BASE_DIR / ".env")
 
-# --- Logging Configuration ---
-LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-log_file = LOG_DIR / "api.log"
-
-# Configure root logger for file logging and rotation
-log_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-# Rotating file handler
-file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5) # 10MB per file, 5 backups
-file_handler.setFormatter(log_formatter)
-
-# Console handler
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(log_formatter)
-
-# Get root logger and add handlers
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-root_logger.addHandler(file_handler)
-root_logger.addHandler(console_handler)
-
-logger = logging.getLogger("api")
+# Импорт упрощенной системы логирования
+try:
+    from core.config import setup_logging
+    logger = setup_logging(debug=os.getenv("DEBUG", "false").lower() == "true")
+except ImportError:
+    # Fallback если core.config недоступен
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("api")
 
 # --- Config from environment ---
 CAM_DEFAULT = os.getenv("CAM_DEFAULT", "rtsp://admin:Qwerty.123@10.15.6.24/1/1")

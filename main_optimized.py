@@ -23,18 +23,9 @@ try:
 except Exception as e:
     print(f"[WARNING] Ошибка загрузки .env: {e}")
 
-# Настройка логирования
-log_level = logging.DEBUG if os.getenv("DEBUG", "false").lower() == "true" else logging.INFO
-logging.basicConfig(
-    level=log_level,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('logs/optimized.log', mode='a') if Path('logs').exists() else logging.NullHandler()
-    ]
-)
-
-logger = logging.getLogger(__name__)
+# Импорт упрощенной системы логирования
+from core.config import setup_logging
+logger = setup_logging(debug=os.getenv("DEBUG", "false").lower() == "true")
 
 # Импорт оптимизированных компонентов
 try:

@@ -12,9 +12,8 @@ try:
 except Exception:
     pass
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Import unified logging setup
+from core.config import setup_logging
 
 # --- Config from environment ---
 DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only")
@@ -118,6 +117,9 @@ def convert_to_onnx():
 
 def main():
     try:
+        # Настройка логирования
+        logger = setup_logging(debug=DEBUG)
+        
         # Ensure required directories exist
         ensure_dir('models')
         ensure_dir('stream')
@@ -126,9 +128,9 @@ def main():
         # install_requirements()       
 
         # Import ASGI app and start server
-        logger.info(f'Starting server at http://{HOST}:{PORT}')
-        logger.info(f'API Health Check: http://{HOST}:{PORT}/api/health')
-        logger.info(f'Debug mode: {DEBUG}, Hot-reload: {RELOAD}')
+        logger.info(f'Запуск сервера на http://{HOST}:{PORT}')
+        logger.info(f'Проверка здоровья API: http://{HOST}:{PORT}/api/health')
+        logger.info(f'Режим отладки: {DEBUG}, Горячая перезагрузка: {RELOAD}')
 
         try:
             import uvicorn
@@ -158,10 +160,10 @@ def main():
                 ]
             )
         except Exception as e:
-            logger.error(f'Error starting server via uvicorn: {str(e)}')
+            logger.error(f'Ошибка запуска сервера через uvicorn: {str(e)}')
             raise
     except Exception as e:
-        logger.error(f'Error starting server: {str(e)}')
+        logger.error(f'Ошибка запуска сервера: {str(e)}')
         sys.exit(1)
 
 def main_with_args():

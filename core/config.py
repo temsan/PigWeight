@@ -1,6 +1,8 @@
 """Configuration constants for the PigWeight application."""
 
 import os
+import logging
+from pathlib import Path
 from typing import Dict, Any
 
 # Model configuration
@@ -82,6 +84,37 @@ def load_config() -> Dict[str, Any]:
         config["USE_HALF"] = False
 
     return config
+
+def setup_logging(debug: bool = False) -> logging.Logger:
+    """Настройка простого единого логирования для всего проекта."""
+    # Создаем директорию для логов
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    # Определяем уровень логирования
+    level = logging.DEBUG if debug else logging.INFO
+    
+    # Простой формат без лишних деталей
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # Настраиваем root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Очищаем существующие обработчики
+    root_logger.handlers.clear()
+    
+    # Консольный вывод
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    # Файловый вывод (простой, без ротации)
+    file_handler = logging.FileHandler(log_dir / "app.log", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    
+    return logging.getLogger("pigweight")
 
 # Load configuration on import
 CONFIG = load_config()

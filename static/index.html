@@ -120,22 +120,20 @@
                 </div>
               </div>
             </div>
-            <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
-              <label for="manualCount" class="stat-title" style="min-width:150px; color:#2f5078;">Количество</label>
-              <input type="number" id="manualCount" min="0" style="flex:1 1 auto; min-width:0; font-size:32px; padding:12px 14px; font-weight:600;">
-              <span class="unit-label" style="color:#2f5078;">шт.</span>
+            <!-- Простая форма записи -->
+            <div class="simple-weighing-form" style="display:flex; flex-direction:column; gap:12px;">
+              <div style="display:flex; gap:10px; align-items:center;">
+                <label style="min-width:80px; color:#2f5078;">Количество:</label>
+                <input type="number" id="manualCount" min="0" style="flex:1; font-size:24px; padding:8px;">
+                <span style="color:#2f5078;">шт.</span>
+              </div>
+              <div style="display:flex; gap:10px; align-items:center;">
+                <label style="min-width:80px; color:#2f5078;">Общий вес:</label>
+                <input type="number" id="manualTotalWeight" min="0" step="0.1" style="flex:1; font-size:20px; padding:8px;">
+                <span style="color:#2f5078;">кг</span>
+              </div>
+              <button id="saveManualBtn" class="pill primary" style="height:40px; font-size:16px;">💾 Сохранить акт</button>
             </div>
-            <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
-              <label for="manualTotalWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Общий вес</label>
-              <input type="number" id="manualTotalWeight" min="0" step="0.1" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
-              <span class="unit-label" style="color:#2f5078;">кг</span>
-            </div>
-            <div class="stat-row" style="display:flex; gap:10px; align-items:center;">
-              <label for="manualAvgWeight" class="stat-title" style="min-width:150px; color:#2f5078;">Средний вес</label>
-              <input type="number" id="manualAvgWeight" min="0" step="0.01" style="flex:1 1 auto; min-width:0; font-size:28px; padding:12px 14px;">
-              <span class="unit-label" style="color:#2f5078;">кг</span>
-            </div>
-            <button id="saveManualBtn" class="pill primary" style="height:48px; font-size:18px;">Сохранить</button>
             <canvas id="liveCountChart" height="160" style="width:100%; height:160px; flex:0 0 auto; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
           </div>
 
@@ -225,45 +223,34 @@
             <button id="refreshLogsBtn" class="pill secondary" style="height:32px; font-size:12px;">🔄 Обновить</button>
           </div>
 
-          <!-- Панель Сверки -->
-          <div id="verificationPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px; display:none;">
-            <h3 style="margin:0 0 12px 0; color:#1f3d6b;">Сверка с файлом замеров</h3>
+          <!-- Панель Сверки (упрощенная) -->
+          <div id="verificationPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:12px; display:none;">
+            <h3 style="margin:0; color:#1f3d6b;">📊 Сверка с Excel</h3>
 
-            <!-- Загрузка файла для сверки -->
-            <div class="upload-section" style="margin-bottom:12px;">
-              <div class="upload-area" id="verificationUploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.3s ease; background: rgba(255,255,255,0.5);">
-                <div>
-                  <div style="font-size:13px; color:#666; margin-bottom:4px;">📎 Загрузить файл замеров</div>
-                  <div style="font-size:11px; color:#999;">Excel (.xlsx, .xls) или CSV</div>
-                </div>
-                <input type="file" id="verificationFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+            <!-- Простая загрузка файла -->
+            <div style="border: 2px dashed #ccc; border-radius: 6px; padding: 12px; text-align: center; cursor: pointer;" id="verificationUploadArea">
+              <div style="font-size:14px; color:#666;">📎 Выбрать Excel файл</div>
+              <input type="file" id="verificationFileInput" accept=".xlsx,.xls" style="display: none;">
+            </div>
+
+            <!-- Простая статистика -->
+            <div style="display:flex; gap:8px;">
+              <div style="flex:1; text-align:center; padding:8px; background:rgba(40,167,69,0.1); border-radius:4px;">
+                <div style="font-size:18px; font-weight:bold; color:#28a745;" id="verificationMatches">0</div>
+                <div style="font-size:11px;">Совпадений</div>
+              </div>
+              <div style="flex:1; text-align:center; padding:8px; background:rgba(255,193,7,0.1); border-radius:4px;">
+                <div style="font-size:18px; font-weight:bold; color:#ffc107;" id="verificationDiffs">0</div>
+                <div style="font-size:11px;">Расхождений</div>
               </div>
             </div>
 
-            <!-- Статистика сверки -->
-            <div class="verification-stats" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; margin-bottom:12px;">
-              <div class="stat-box" style="background:rgba(40,167,69,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#28a745;" id="verificationMatches">0</div>
-                <div style="font-size:10px; color:#155724;">Совпадений</div>
-              </div>
-              <div class="stat-box" style="background:rgba(255,193,7,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#ffc107;" id="verificationDiffs">0</div>
-                <div style="font-size:10px; color:#856404;">Расхождений</div>
-              </div>
-              <div class="stat-box" style="background:rgba(220,53,69,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#dc3545;" id="verificationMissing">0</div>
-                <div style="font-size:10px; color:#721c24;">Не найдено</div>
-              </div>
+            <!-- Результаты -->
+            <div id="verificationResults" style="flex:1; overflow-y:auto; max-height:150px; font-size:12px;">
+              <!-- Результаты сверки -->
             </div>
 
-            <!-- Результаты сверки -->
-            <div class="verification-results" style="flex:1; overflow-y:auto; max-height:200px;">
-              <div id="verificationResults" style="display:flex; flex-direction:column; gap:4px;">
-                <!-- Результаты сверки будут добавлены сюда -->
-              </div>
-            </div>
-
-            <button id="startVerificationBtn" class="pill success" style="height:36px; font-size:14px;" disabled>🔍 Начать сверку</button>
+            <button id="startVerificationBtn" class="pill success" style="height:32px; font-size:13px;" disabled>▶ Проверить</button>
           </div>
         </div>
       </div>

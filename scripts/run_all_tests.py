@@ -12,8 +12,8 @@ from pathlib import Path
 import subprocess
 import argparse
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Простая настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class TestSuite:
