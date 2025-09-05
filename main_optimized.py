@@ -181,9 +181,19 @@ class OptimizedPigWeightServer:
                 else:
                     logger.warning("[WARNING] CUDA недоступен, переключаемся на CPU")
                     self.config.cuda_enabled = False
+                    # Автоматическое переключение на ONNX Runtime при отсутствии GPU
+                    if hasattr(self.config, 'auto_fallback_to_onnx') and self.config.auto_fallback_to_onnx:
+                        await self._setup_onnx_runtime()
             except ImportError:
                 logger.warning("[WARNING] PyTorch не установлен, отключаем CUDA")
                 self.config.cuda_enabled = False
+                # Автоматическое переключение на ONNX Runtime
+                if hasattr(self.config, 'auto_fallback_to_onnx') and self.config.auto_fallback_to_onnx:
+                    await self._setup_onnx_runtime()
+        
+        # Проверка ONNX Runtime если настроен
+        if hasattr(self.config, 'use_onnx_runtime') and self.config.use_onnx_runtime:
+            await self._setup_onnx_runtime()
                 
         # Проверка доступности GPU мониторинга
         try:
@@ -199,6 +209,42 @@ class OptimizedPigWeightServer:
             import aiortc
             logger.info("[WEBRTC] aiortc доступен для WebRTC")
         except ImportError:
+            logger.warning("[WARNING] aiortc недоступен, WebRTC отключен")
+    
+    async def _setup_onnx_runtime(self):
+        """Настройка ONNX Runtime для CPU оптимизации"""
+        try:
+            import onnxruntime as ort
+            available_providers = ort.get_available_providers()
+            
+            # Настройка провайдеров
+            providers = []
+            if 'CUDAExecutionProvider' in available_providers and self.config.cuda_enabled:
+                providers.append('CUDAExecutionProvider')
+                logger.info("[ONNX] ONNX Runtime с CUDA провайдером готов")
+            
+            if 'CPUExecutionProvider' in available_providers:
+                providers.append('CPUExecutionProvider')
+                logger.info("[ONNX] ONNX Runtime с CPU провайдером готов")
+            
+            if not providers:
+                logger.error("[ONNX] Нет доступных провайдеров ONNX Runtime")
+                return False
+            
+            # Обновляем конфигурацию
+            if hasattr(self.config, 'onnx_providers'):
+                self.config.onnx_providers = providers
+                self.config.use_onnx_runtime = True
+                logger.info(f"[ONNX] Активные провайдеры: {providers}")
+            
+            return True
+            
+        except ImportError:
+            logger.error("[ERROR] ONNX Runtime не установлен")
+            return False
+        except Exception as e:
+            logger.error(f"[ERROR] Ошибка настройки ONNX Runtime: {e}")
+            return False
             logger.warning("[WARNING] aiortc недоступен, WebRTC функции ограничены")
             
     def _ensure_directories(self):

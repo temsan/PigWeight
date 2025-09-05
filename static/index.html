@@ -13,7 +13,7 @@
     #main-container { padding-top: 64px; }
     .video-wrapper { position: relative; }
     #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:auto; z-index: 10; background-color: transparent; cursor: crosshair; }
-    #videoStream { display: block; width: 100%; height: auto; object-fit: contain; z-index: 1; }
+    #videoStream { display: block; width: 100%; height: auto; object-fit: contain; z-index: 1; opacity: 1 !important; }
     /* Align numeric inputs on the weights panel to the right */
     .panel-body input[type="number"] { text-align: right; }
     .stream-status { display:inline-block; min-width:64px; text-align:right; }
@@ -419,10 +419,10 @@
         streamSources[streamId] = sourceUri;
         hasFirstFrame = false;
         showLoader('Запуск…');
-        try { videoStream.style.opacity = '0'; } catch (e) {}
+        try { videoStream.style.opacity = '1'; } catch (e) {}
         await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
 
-        const transport = document.getElementById('transportSelect') ? document.getElementById('transportSelect').value : 'mjpeg';
+        const transport = document.getElementById('transportSelect') ? document.getElementById('transportSelect').value : 'webrtc';
         if (transport === 'webrtc') {
             // start webrtc client
             try { videoStream.style.display = 'none'; } catch (e) {}
@@ -431,12 +431,29 @@
                 showLoader('Подключение WebRTC…');
                 await startWebRTCClient(streamId);
             } catch (err) {
-                console.error('WebRTC failed, fallback to MJPEG', err);
-                try { await stopWebRTCClient(); } catch(_) {}
-                try { document.getElementById('webrtcVideo').style.display = 'none'; } catch (e) {}
-                try { videoStream.style.display = 'block'; } catch (e) {}
-                videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
-                setupFirstFrameWatch();
+                console.error('WebRTC failed, attempting retry before fallback to MJPEG', err);
+                
+                // Пытаемся переподключиться к WebRTC еще раз
+                let retrySuccess = false;
+                try {
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // Пауза 1 сек
+                    await stopWebRTCClient();
+                    showLoader('Повторное подключение WebRTC…');
+                    await startWebRTCClient(streamId);
+                    retrySuccess = true;
+                    console.log('✅ WebRTC retry successful');
+                } catch (retryErr) {
+                    console.warn('⚠️ WebRTC retry failed, falling back to MJPEG:', retryErr);
+                }
+                
+                if (!retrySuccess) {
+                    try { await stopWebRTCClient(); } catch(_) {}
+                    try { document.getElementById('webrtcVideo').style.display = 'none'; } catch (e) {}
+                    try { videoStream.style.display = 'block'; } catch (e) {}
+                    videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+                    setupFirstFrameWatch();
+                    console.log('😢 Fallback to MJPEG activated');
+                }
             }
         } else {
             // classic MJPEG
@@ -519,7 +536,14 @@
             pc.ontrack = (evt) => {
                 const v = document.getElementById('webrtcVideo');
                 if (v) {
-                    try { v.style.display = 'block'; v.style.opacity = '1'; v.style.zIndex = '0'; } catch(e){}
+                    try { 
+                        v.style.display = 'block'; 
+                        v.style.opacity = '1'; 
+                        v.style.zIndex = '1'; 
+                        // Уберите MJPEG когда WebRTC активно
+                        const mjpegEl = document.getElementById('videoStream');
+                        if (mjpegEl) mjpegEl.style.display = 'none';
+                    } catch(e){}
                     v.srcObject = evt.streams[0];
                     // hide loader immediately when remote track arrives
                     hideLoader();
@@ -618,8 +642,8 @@
             overlayCanvas.style.cursor = 'default';
             overlayCanvas.style.opacity = '0';
         } catch (e) {}
-        // Сброс счётчиков потоков
-        try { leftInEl.textContent = '0'; rightInEl.textContent = '0'; avgFlowEl.textContent = '0'; } catch (e) {}
+        // Не сбрасываем счётчики потоков при переключении режимов
+        // try { leftInEl.textContent = '0'; rightInEl.textContent = '0'; avgFlowEl.textContent = '0'; } catch (e) {}
         setPlaceholder();
         isVideoPlaying = false;
         videoPlayPauseBtn.textContent = 'Старт';
@@ -674,7 +698,13 @@
                     const f = data.debug.flow;
                     const leftInCount = Number(f.left_in ?? 0);
                     const rightInCount = Number(f.right_in ?? 0);
-                    const av = Math.round((leftInCount + rightInCount) / 2);
+                    // Если справа = 0, то для расчета среднего используем значение слева
+                    let av;
+                    if (rightInCount === 0) {
+                        av = leftInCount;
+                    } else {
+                        av = Math.round((leftInCount + rightInCount) / 2);
+                    }
                     try {
                         leftInEl.textContent = String(leftInCount);
                         rightInEl.textContent = String(rightInCount);
@@ -1425,6 +1455,17 @@
     });
 
     document.addEventListener('DOMContentLoaded', async () => {
+        // Принудительно устанавливаем WebRTC как приоритетный транспорт
+        const transportSelect = document.getElementById('transportSelect');
+        if (transportSelect) {
+            transportSelect.value = 'webrtc';
+            // Убеждаемся что WebRTC выбран по умолчанию
+            const webrtcOption = transportSelect.querySelector('option[value="webrtc"]');
+            if (webrtcOption) {
+                webrtcOption.selected = true;
+            }
+        }
+        
         populateStreams();
         updateVideoLayout();
         window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });

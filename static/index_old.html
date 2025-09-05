@@ -592,7 +592,13 @@
                     const f = data.debug.flow;
                     const leftInCount = Number(f.left_in ?? 0);
                     const rightInCount = Number(f.right_in ?? 0);
-                    const av = Math.round((leftInCount + rightInCount) / 2);
+                    // Если справа = 0, то для расчета среднего используем значение слева
+                    let av;
+                    if (rightInCount === 0) {
+                        av = leftInCount;
+                    } else {
+                        av = Math.round((leftInCount + rightInCount) / 2);
+                    }
                     try {
                         leftInEl.textContent = String(leftInCount);
                         rightInEl.textContent = String(rightInCount);

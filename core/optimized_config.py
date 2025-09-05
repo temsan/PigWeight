@@ -18,6 +18,40 @@ from core.h264_direct_track import H264Config
 
 logger = logging.getLogger(__name__)
 
+# Автоматическое определение доступности CUDA и ONNX
+def _check_gpu_availability() -> tuple[bool, bool]:
+    """Проверяет доступность GPU (CUDA) и ONNX Runtime"""
+    cuda_available = False
+    onnx_available = False
+    
+    # Проверка CUDA
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            logger.info(f"[OK] CUDA доступна: {torch.cuda.get_device_name(0)}")
+        else:
+            logger.warning("[WARNING] CUDA недоступна, используем CPU")
+    except ImportError:
+        logger.warning("[WARNING] PyTorch не установлен")
+    
+    # Проверка ONNX Runtime
+    try:
+        import onnxruntime as ort
+        onnx_available = True
+        providers = ort.get_available_providers()
+        if 'CUDAExecutionProvider' in providers and cuda_available:
+            logger.info("[OK] ONNX Runtime с CUDA поддержкой доступен")
+        elif 'CPUExecutionProvider' in providers:
+            logger.info("[OK] ONNX Runtime с CPU доступен")
+        else:
+            logger.warning("[WARNING] ONNX Runtime недоступен")
+            onnx_available = False
+    except ImportError:
+        logger.warning("[WARNING] ONNX Runtime не установлен")
+    
+    return cuda_available, onnx_available
+
 @dataclass
 class OptimizedConfig:
     """Централизованная конфигурация для оптимизированной системы"""
@@ -27,6 +61,11 @@ class OptimizedConfig:
     cuda_device: int = 0
     use_half_precision: bool = True
     enable_h264_direct: bool = True
+    
+    # ONNX Runtime настройки
+    use_onnx_runtime: bool = False
+    onnx_providers: list = field(default_factory=list)
+    auto_fallback_to_onnx: bool = True
     
     # Компонентные конфигурации
     decoder_config: DecoderConfig = field(default_factory=DecoderConfig)
@@ -58,13 +97,38 @@ class OptimizedConfig:
             
         config = cls()
         
+        # Автоматическое определение доступности GPU и ONNX
+        cuda_available, onnx_available = _check_gpu_availability()
+        
         # Глобальные настройки
-        config.cuda_enabled = _get_env_bool('CUDA_ENABLED', config.cuda_enabled)
+        config.cuda_enabled = _get_env_bool('CUDA_ENABLED', cuda_available)
         config.cuda_device = _get_env_int('CUDA_DEVICE', config.cuda_device)
-        config.use_half_precision = _get_env_bool('USE_HALF_PRECISION', config.use_half_precision)
+        config.use_half_precision = _get_env_bool('USE_HALF_PRECISION', config.use_half_precision and cuda_available)
         config.enable_h264_direct = _get_env_bool('ENABLE_H264_DIRECT', config.enable_h264_direct)
         config.target_fps = _get_env_float('TARGET_FPS', config.target_fps)
         config.max_concurrent_streams = _get_env_int('MAX_CONCURRENT_STREAMS', config.max_concurrent_streams)
+        
+        # ONNX Runtime настройки
+        config.auto_fallback_to_onnx = _get_env_bool('AUTO_FALLBACK_TO_ONNX', True)
+        
+        # Автоматическое переключение на ONNX при отсутствии GPU
+        if not cuda_available and onnx_available and config.auto_fallback_to_onnx:
+            config.use_onnx_runtime = True
+            config.cuda_enabled = False
+            config.use_half_precision = False
+            
+            # Настройка ONNX providers
+            try:
+                import onnxruntime as ort
+                available_providers = ort.get_available_providers()
+                if 'CPUExecutionProvider' in available_providers:
+                    config.onnx_providers = ['CPUExecutionProvider']
+                    logger.info("[OK] Настроен ONNX Runtime с CPU provider")
+            except ImportError:
+                config.use_onnx_runtime = False
+                logger.error("[ERROR] ONNX Runtime недоступен")
+        else:
+            config.use_onnx_runtime = _get_env_bool('USE_ONNX_RUNTIME', False)
         
         # AsyncRTSPDecoder
         config.decoder_config.use_cuda = config.cuda_enabled
@@ -142,6 +206,9 @@ class OptimizedConfig:
             'cuda_device': self.cuda_device,
             'use_half_precision': self.use_half_precision,
             'enable_h264_direct': self.enable_h264_direct,
+            'use_onnx_runtime': self.use_onnx_runtime,
+            'onnx_providers': self.onnx_providers,
+            'auto_fallback_to_onnx': self.auto_fallback_to_onnx,
             'target_fps': self.target_fps,
             'max_concurrent_streams': self.max_concurrent_streams,
             'decoder_config': {
@@ -318,3 +385,27 @@ def apply_performance_profile(profile_name: str):
     # Перезагружаем конфигурацию
     reload_config()
     logger.info(f"Применен профиль производительности: {profile_name}")
+
+# Вспомогательные функции для парсинга переменных окружения
+def _get_env_bool(key: str, default: bool) -> bool:
+    """Получение boolean значения из переменной окружения"""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value.lower() in ('true', '1', 'yes', 'on')
+
+def _get_env_int(key: str, default: int) -> int:
+    """Получение int значения из переменной окружения"""
+    try:
+        value = os.getenv(key)
+        return int(value) if value is not None else default
+    except (ValueError, TypeError):
+        return default
+
+def _get_env_float(key: str, default: float) -> float:
+    """Получение float значения из переменной окружения"""
+    try:
+        value = os.getenv(key)
+        return float(value) if value is not None else default
+    except (ValueError, TypeError):
+        return default

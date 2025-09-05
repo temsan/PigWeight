@@ -17,7 +17,7 @@ import subprocess
 try:
     from core.processor import get_processor, ProcessingOptions, FrameResult
     HAVE_UNIFIED_PROCESSOR = True
-    logging.info("✅ Unified processor available")
+    logging.info("[OK] Unified processor available")
 except ImportError as e:
     HAVE_UNIFIED_PROCESSOR = False
     logging.warning(f"⚠️ Unified processor not available: {e}, using legacy processors")
@@ -1386,6 +1386,111 @@ class FileStream(VideoStream):
         except Exception:
             pass
 
+import asyncio
+import logging
+import threading
+import time
+import numpy as np
+from typing import Optional, Dict, Any
+from core.demo_generator import DemoVideoGenerator
+
+class DemoStream(VideoStream):
+    """Демо поток с генерируемым видео"""
+    
+    def __init__(self, stream_id: str, source_uri: str):
+        super().__init__(stream_id)
+        self.source_uri = source_uri
+        self.demo_generator = None
+        
+    async def start(self):
+        if self.running:
+            return
+        
+        logger.info(f"🎬 Starting demo stream {self.stream_id}")
+        self.running = True
+        self._reset_act()
+        
+        # Создаем демо генератор
+        self.demo_generator = DemoVideoGenerator()
+        
+        # Запускаем задачу генерации кадров
+        self._stream_task = asyncio.create_task(self._demo_loop())
+        
+        # Запускаем инференс
+        if start_global_worker_for and FRAME_BROKER:
+            self._infer_task = asyncio.create_task(start_global_worker_for(self.stream_id))
+    
+    async def _demo_loop(self):
+        """Основной цикл генерации демо кадров"""
+        try:
+            while self.running:
+                if self.demo_generator:
+                    # Генерируем кадр
+                    frame = self.demo_generator.generate_frame()
+                    
+                    # Конвертируем в JPEG
+                    jpeg_data = encode_jpeg(frame, JPEG_QUALITY)
+                    if jpeg_data:
+                        self.last_jpeg = jpeg_data
+                        
+                        # Отправляем в frame broker
+                        if FRAME_BROKER:
+                            try:
+                                # Используем правильный метод API
+                                FRAME_BROKER.add_frame(self.stream_id, {
+                                    'frame': frame,
+                                    'jpeg': jpeg_data,
+                                    'timestamp': time.time(),
+                                    'frame_number': self.demo_generator.frame_count
+                                })
+                            except Exception as e:
+                                logger.debug(f"Demo stream {self.stream_id} frame broker error: {e}")
+                
+                # Ждем до следующего кадра
+                await asyncio.sleep(1.0 / self.demo_generator.fps)
+                
+        except Exception as e:
+            logger.error(f"Demo stream {self.stream_id} loop error: {e}")
+        finally:
+            logger.info(f"Demo stream {self.stream_id} loop ended")
+    
+    async def get_jpeg(self) -> Optional[bytes]:
+        return self.last_jpeg
+    
+    async def stop(self):
+        if not self.running:
+            return
+        
+        logger.info(f"🛑 Stopping demo stream {self.stream_id}")
+        self.running = False
+        
+        # Останавливаем задачи
+        if self._stream_task:
+            try:
+                self._stream_task.cancel()
+                await self._stream_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            self._stream_task = None
+        
+        if self._infer_task:
+            try:
+                self._infer_task.cancel()
+                await self._infer_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            self._infer_task = None
+        
+        # Сохраняем акт для дашборда
+        try:
+            self._finalize_act_to_files()
+        except Exception:
+            pass
+
 class StreamManager:
     def __init__(self):
         self.streams: Dict[str, VideoStream] = {}
@@ -1410,7 +1515,11 @@ class StreamManager:
                 self.streams.pop(stream_id, None)
 
         if stream_id not in self.streams:
-            if source_uri.startswith("rtsp://"):
+            if source_uri.startswith("demo://"):
+                # Создаем демо поток
+                from core.demo_generator import create_demo_stream
+                self.streams[stream_id] = DemoStream(stream_id, source_uri)
+            elif source_uri.startswith("rtsp://"):
                 self.streams[stream_id] = RtspStream(stream_id, source_uri)
             else:
                 self.streams[stream_id] = FileStream(stream_id, source_uri)
@@ -1736,7 +1845,7 @@ async def api_stream_start(stream_id: str, source_uri: str):
         perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Starting stream {stream_id} with source {source_uri}")
 
         # Basic validation for file paths to give clearer errors
-        if not source_uri.startswith("rtsp://"):
+        if not source_uri.startswith("rtsp://") and not source_uri.startswith("demo://"):
             p = Path(source_uri)
             if not p.exists():
                 perf_logger.warning(".3f")

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест логики расчета среднего</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-case { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .result { font-weight: bold; color: #007bff; }
+        .old-logic { color: #ff6b6b; }
+        .new-logic { color: #51cf66; }
+    </style>
+</head>
+<body>
+    <h1>Тест новой логики расчета среднего</h1>
+    <p>Проверяем: если справа = 0, то справа = слева для расчета среднего.</p>
+
+    <div id="test-results"></div>
+
+    <script>
+        // Старая логика
+        function calculateOldAverage(leftInCount, rightInCount) {
+            return Math.round((leftInCount + rightInCount) / 2);
+        }
+
+        // Новая логика
+        function calculateNewAverage(leftInCount, rightInCount) {
+            let av;
+            if (rightInCount === 0) {
+                av = leftInCount;
+            } else {
+                av = Math.round((leftInCount + rightInCount) / 2);
+            }
+            return av;
+        }
+
+        // Тестовые случаи
+        const testCases = [
+            { left: 10, right: 0, description: "Справа = 0, слева = 10" },
+            { left: 8, right: 0, description: "Справа = 0, слева = 8" },
+            { left: 15, right: 13, description: "Справа = 13, слева = 15 (нормальный случай)" },
+            { left: 0, right: 0, description: "Обе стороны = 0" },
+            { left: 20, right: 18, description: "Справа = 18, слева = 20 (нормальный случай)" },
+            { left: 5, right: 0, description: "Справа = 0, слева = 5" }
+        ];
+
+        // Выполняем тесты
+        let resultHTML = '';
+        testCases.forEach((testCase, index) => {
+            const oldResult = calculateOldAverage(testCase.left, testCase.right);
+            const newResult = calculateNewAverage(testCase.left, testCase.right);
+            
+            resultHTML += `
+                <div class="test-case">
+                    <h3>Тест ${index + 1}: ${testCase.description}</h3>
+                    <p>Значения: Слева = ${testCase.left}, Справа = ${testCase.right}</p>
+                    <p><span class="old-logic">Старая логика:</span> (${testCase.left} + ${testCase.right}) / 2 = ${oldResult}</p>
+                    <p><span class="new-logic">Новая логика:</span> ${newResult}</p>
+                    <p class="result">
+                        ${testCase.right === 0 ? 
+                            `✅ Исправлено: среднее = ${newResult} вместо ${oldResult}` : 
+                            `✓ Без изменений: ${newResult}`}
+                    </p>
+                </div>
+            `;
+        });
+
+        document.getElementById('test-results').innerHTML = resultHTML;
+    </script>
+</body>
+</html>
