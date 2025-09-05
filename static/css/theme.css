@@ -603,11 +603,12 @@ body[data-source="file"] .only-live{ display:none !important; }
   background: var(--journal-glass);
   backdrop-filter: blur(20px);
   border: 1px solid var(--journal-border);
-  border-radius: var(--radius-lg);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   box-shadow: var(--journal-shadow);
   padding: 20px;
-  margin: 16px 0;
+  margin: 0;
   transition: all 0.3s ease;
+  border-top: none;
 }
 
 .journal-container:hover {
@@ -848,4 +849,93 @@ body[data-source="file"] .only-live{ display:none !important; }
 
 .journal-btn.primary:hover {
   background: var(--grad-primary-hover);
+}
+
+.journal-upload-area {
+  background: var(--journal-glass);
+  border: 2px dashed var(--journal-border);
+  border-radius: var(--radius-md);
+  margin: 16px 0;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(15px);
+}
+
+.journal-upload-area:hover {
+  background: var(--journal-glass-hover);
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--journal-shadow);
+}
+
+.journal-upload-area.dragover {
+  border-color: var(--accent);
+  background: var(--journal-glass-hover);
+  box-shadow: var(--journal-glow);
+}
+
+/* === ВКЛАДКИ В LIQUID GLASS СТИЛЕ === */
+
+.journal-tabs {
+  display: flex;
+  padding: 12px;
+  gap: 8px;
+  background: var(--journal-glass);
+  backdrop-filter: blur(15px);
+  border: 1px solid var(--journal-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  margin: 0;
+}
+
+.journal-tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border: none;
+  background: rgba(255,255,255,0.2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  border: 1px solid transparent;
+}
+
+.journal-tab-btn:hover {
+  background: rgba(255,255,255,0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.journal-tab-btn.active {
+  background: var(--grad-primary);
+  color: white;
+  border-color: var(--accent);
+  box-shadow: var(--journal-shadow);
+}
+
+.journal-tab-btn.active:hover {
+  background: var(--grad-primary-hover);
+}
+
+.journal-tab-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.journal-tab-text {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: inherit;
+}
+
+.journal-tab-btn:not(.active) .journal-tab-text {
+  color: var(--muted);
+}
+
+.journal-tab-btn.active .journal-tab-text {
+  color: white;
 }

@@ -45,7 +45,7 @@ except Exception:
     load_dotenv = None
 
 import numpy as np
-from fastapi import Body
+from fastapi import Body, Request
 import contextlib
 from contextlib import asynccontextmanager
 import math
@@ -941,7 +941,18 @@ async def _global_infer_loop(self):
             try:
                 jpeg = await self.get_jpeg()
                 if jpeg:
-                    arr = np.frombuffer(jpeg, dtype=np.uint8)
+                    # Исправляем проблему с типами данных
+                    if isinstance(jpeg, dict):
+                        # Если пришел dict вместо bytes, извлекаем jpeg данные
+                        if 'jpeg' in jpeg:
+                            jpeg_data = jpeg['jpeg']
+                        else:
+                            logger.error(f"Invalid jpeg data format: {type(jpeg)}")
+                            continue
+                    else:
+                        jpeg_data = jpeg
+                        
+                    arr = np.frombuffer(jpeg_data, dtype=np.uint8)
                     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if frame is not None:
                         H0, W0, _ = frame.shape
@@ -1431,12 +1442,12 @@ class DemoStream(VideoStream):
                         if FRAME_BROKER:
                             try:
                                 # Используем правильный метод API
-                                FRAME_BROKER.add_frame(self.stream_id, {
-                                    'frame': frame,
-                                    'jpeg': jpeg_data,
-                                    'timestamp': time.time(),
-                                    'frame_number': self.demo_generator.frame_count
-                                })
+                                await FRAME_BROKER.publish(
+                                    self.stream_id, 
+                                    self.demo_generator.frame_count, 
+                                    time.time(), 
+                                    jpeg_data
+                                )
                             except Exception as e:
                                 logger.debug(f"Demo stream {self.stream_id} frame broker error: {e}")
                 
@@ -1614,6 +1625,10 @@ class BrokerVideoTrack(VideoStreamTrack):
             if latest and latest.get('jpeg'):
                 jpeg = latest.get('jpeg')
                 source = "FRAME_BROKER"
+                # Проверяем что jpeg это bytes, а не dict
+                if not isinstance(jpeg, bytes):
+                    logger.warning(f"BrokerVideoTrack {self.stream_id}: FRAME_BROKER returned non-bytes jpeg: {type(jpeg)}")
+                    jpeg = None
             else:
                 logger.debug(f"BrokerVideoTrack {self.stream_id}: FRAME_BROKER returned empty or no jpeg")
 
@@ -1637,11 +1652,22 @@ class BrokerVideoTrack(VideoStreamTrack):
             await asyncio.sleep(self.frame_duration)
             return vf
 
-        logger.debug(f"BrokerVideoTrack {self.stream_id}: Using frame from {source}, size: {len(jpeg)} bytes")
+        # Проверяем тип данных - исправляем проблему с оптимизированной предобработкой
+        if isinstance(jpeg, dict):
+            # Если пришел dict вместо bytes, извлекаем jpeg данные
+            if 'jpeg' in jpeg:
+                jpeg_data = jpeg['jpeg']
+            else:
+                logger.error(f"BrokerVideoTrack {self.stream_id}: Invalid data format: {type(jpeg)}")
+                return None
+        else:
+            jpeg_data = jpeg
+            
+        logger.debug(f"BrokerVideoTrack {self.stream_id}: Using frame from {source}, size: {len(jpeg_data)} bytes")
 
         # decode JPEG to ndarray
         import numpy as _np
-        arr = _np.frombuffer(jpeg, dtype=_np.uint8)
+        arr = _np.frombuffer(jpeg_data, dtype=_np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             h, w = 480, 640

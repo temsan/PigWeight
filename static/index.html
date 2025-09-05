@@ -87,170 +87,239 @@
           </div>
         </div>
         <div class="right-col card glass rounded-xl" style="flex:0 0 480px; max-width:480px; order:1; position: relative;">
-          <!-- Навигационные вкладки -->
-          <div class="panel-tabs" style="display:flex; padding:8px 16px 0; margin-bottom:8px; border-bottom:1px solid rgba(60,90,140,.12);">
-            <button class="tab-btn active" onclick="switchPanel('live')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; border-bottom:2px solid #007bff; color:#007bff; font-weight:500; font-size:12px;">Live</button>
-            <button class="tab-btn" onclick="switchPanel('weighing')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; color:#666; font-size:12px;">Взвешивания</button>
-            <button class="tab-btn" onclick="switchPanel('logs')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; color:#666; font-size:12px;">Журналы</button>
-            <button class="tab-btn" onclick="switchPanel('verification')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; color:#666; font-size:12px;">Сверка</button>
+          <!-- Навигационные вкладки (liquid glass стиль) -->
+          <div class="journal-tabs">
+            <button class="journal-tab-btn active" onclick="switchPanel('live')">
+              <span class="journal-tab-icon">📊</span>
+              <span class="journal-tab-text">Live</span>
+            </button>
+            <button class="journal-tab-btn" onclick="switchPanel('weighing')">
+              <span class="journal-tab-icon">⚖️</span>
+              <span class="journal-tab-text">Взвешивания</span>
+            </button>
+            <button class="journal-tab-btn" onclick="switchPanel('logs')">
+              <span class="journal-tab-icon">📋</span>
+              <span class="journal-tab-text">Журналы</span>
+            </button>
+            <button class="journal-tab-btn" onclick="switchPanel('verification')">
+              <span class="journal-tab-icon">🔍</span>
+              <span class="journal-tab-text">Сверка</span>
+            </button>
           </div>
 
-          <!-- Панель Live (текущий контент) -->
-          <div id="livePanel" class="panel-content active" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
-            <div class="flow-row" id="flowRow">
-              <div class="flow-box">
-                <div class="flow-title">Слева (вход)</div>
-                <div id="leftIn" class="flow-val">0</div>
-              </div>
-              <div class="flow-box">
-                <div class="flow-title">Среднее</div>
-                <div id="avgFlow" class="flow-val">0</div>
-              </div>
-              <div class="flow-box">
-                <div class="flow-title">Справа (вход)</div>
-                <div id="rightIn" class="flow-val">0</div>
-              </div>
-            </div>
-            <div class="flow-row">
-              <div class="flow-box" style="flex:1 1 100%;">
-                <div class="flow-title">Акт взвешивания</div>
-                <div style="display:flex; gap:12px; justify-content:space-between;">
-                  <div><div class="flow-title">Пик одновременно</div><div id="actPeak" class="flow-val">0</div></div>
-                  <div><div class="flow-title">Длительность, с</div><div id="actDur" class="flow-val">0</div></div>
+          <!-- Панель Live (liquid glass стиль) -->
+          <div id="livePanel" class="panel-content active" style="padding:0;">
+            <div class="journal-container">
+              <!-- Счетчики потока -->
+              <div class="journal-stats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="leftIn">0</div>
+                  <div class="journal-stat-label">Слева (вход)</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="avgFlow">0</div>
+                  <div class="journal-stat-label">Среднее</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="rightIn">0</div>
+                  <div class="journal-stat-label">Справа (вход)</div>
                 </div>
               </div>
-            </div>
-            <!-- Простая форма записи -->
-            <div class="simple-weighing-form" style="display:flex; flex-direction:column; gap:12px;">
-              <div style="display:flex; gap:10px; align-items:center;">
-                <label style="min-width:80px; color:#2f5078;">Количество:</label>
-                <input type="number" id="manualCount" min="0" style="flex:1; font-size:24px; padding:8px;">
-                <span style="color:#2f5078;">шт.</span>
+
+              <!-- Текущий акт взвешивания -->
+              <div class="journal-stats" style="grid-template-columns: 1fr 1fr;">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="actPeak">0</div>
+                  <div class="journal-stat-label">Пик одновременно</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="actDur">0</div>
+                  <div class="journal-stat-label">Длительность, с</div>
+                </div>
               </div>
-              <div style="display:flex; gap:10px; align-items:center;">
-                <label style="min-width:80px; color:#2f5078;">Общий вес:</label>
-                <input type="number" id="manualTotalWeight" min="0" step="0.1" style="flex:1; font-size:20px; padding:8px;">
-                <span style="color:#2f5078;">кг</span>
+
+              <!-- Форма ввода данных -->
+              <div class="journal-header">
+                <div class="journal-title">💾 Новый акт взвешивания</div>
               </div>
-              <button id="saveManualBtn" class="pill primary" style="height:40px; font-size:16px;">💾 Сохранить акт</button>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Количество голов</label>
+                  <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Общий вес (кг)</label>
+                  <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0.0">
+                </div>
+              </div>
+
+              <button id="saveManualBtn" class="journal-btn primary" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600;">
+                💾 Сохранить акт взвешивания
+              </button>
+
+              <!-- График -->
+              <div style="margin-top: 20px; background: var(--journal-glass); border: 1px solid var(--journal-border); border-radius: var(--radius-md); padding: 12px; backdrop-filter: blur(15px);">
+                <canvas id="liveCountChart" height="160" style="width:100%; height:160px;"></canvas>
+              </div>
             </div>
-            <canvas id="liveCountChart" height="160" style="width:100%; height:160px; flex:0 0 auto; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
           </div>
 
-          <!-- Панель Взвешивания -->
-          <div id="weighingPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px; display:none;">
-            <h3 style="margin:0 0 12px 0; color:#1f3d6b;">Журналирование актов взвешивания</h3>
-            
-            <!-- Статистика текущего сеанса -->
-            <div class="weighing-stats" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; margin-bottom:12px;">
-              <div class="stat-box" style="background:rgba(40,167,69,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#28a745;" id="weighingLeftCount">0</div>
-                <div style="font-size:10px; color:#155724;">Слева</div>
+          <!-- Панель Взвешивания (liquid glass стиль) -->
+          <div id="weighingPanel" class="panel-content" style="padding:0; display:none;">
+            <div class="journal-container">
+              <div class="journal-header">
+                <div class="journal-title">
+                  ⚖️ Журналирование актов взвешивания
+                </div>
               </div>
-              <div class="stat-box" style="background:rgba(23,162,184,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#17a2b8;" id="weighingRightCount">0</div>
-                <div style="font-size:10px; color:#0c5460;">Справа</div>
-              </div>
-              <div class="stat-box" style="background:rgba(255,193,7,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#ffc107;" id="weighingDiff">0</div>
-                <div style="font-size:10px; color:#856404;">Разница</div>
-              </div>
-            </div>
 
-            <!-- Форма записи акта -->
-            <div class="weighing-form" style="background:rgba(240,245,252,0.5); padding:12px; border-radius:8px; margin-bottom:12px;">
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
-                <div>
-                  <label style="font-size:11px; color:#666;">Дата</label>
-                  <input type="date" id="weighingDate" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
+              <!-- Статистика текущего сеанса -->
+              <div class="journal-stats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="weighingLeftCount" style="color: #28a745;">0</div>
+                  <div class="journal-stat-label">Слева</div>
                 </div>
-                <div>
-                  <label style="font-size:11px; color:#666;">Время</label>
-                  <input type="time" id="weighingTime" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="weighingRightCount" style="color: #17a2b8;">0</div>
+                  <div class="journal-stat-label">Справа</div>
                 </div>
-              </div>
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
-                <div>
-                  <label style="font-size:11px; color:#666;">Группа/Секция</label>
-                  <input type="text" id="weighingGroup" placeholder="6B 4,5" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
-                </div>
-                <div>
-                  <label style="font-size:11px; color:#666;">Всего свиней</label>
-                  <input type="number" id="weighingTotal" min="1" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="weighingDiff" style="color: #ffc107;">0</div>
+                  <div class="journal-stat-label">Разница</div>
                 </div>
               </div>
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-                <div>
-                  <label style="font-size:11px; color:#666;">Общий вес (кг)</label>
-                  <input type="number" id="weighingWeight" step="0.1" min="0" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
-                </div>
-                <div>
-                  <label style="font-size:11px; color:#666;">Средний вес</label>
-                  <input type="number" id="weighingAvgWeight" step="0.01" readonly style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f8f9fa;" />
-                </div>
-              </div>
-            </div>
 
-            <button id="saveWeighingBtn" class="pill success" style="height:36px; font-size:14px;">💾 Сохранить акт взвешивания</button>
+              <!-- Форма записи акта -->
+              <div class="journal-header">
+                <div class="journal-title">📝 Новый акт взвешивания</div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Дата</label>
+                  <input type="date" id="weighingDate" class="journal-filter-input">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Время</label>
+                  <input type="time" id="weighingTime" class="journal-filter-input">
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Группа/Секция</label>
+                  <input type="text" id="weighingGroup" placeholder="6B 4,5" class="journal-filter-input">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Всего свиней</label>
+                  <input type="number" id="weighingTotal" min="1" class="journal-filter-input" style="text-align: center;">
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Общий вес (кг)</label>
+                  <input type="number" id="weighingWeight" step="0.1" min="0" class="journal-filter-input" style="text-align: center;">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Средний вес</label>
+                  <input type="number" id="weighingAvgWeight" step="0.01" readonly class="journal-filter-input" style="text-align: center; background: rgba(255,255,255,0.2);">
+                </div>
+              </div>
+
+              <button id="saveWeighingBtn" class="journal-btn primary" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600;">💾 Сохранить акт взвешивания</button>
+            </div>
           </div>
 
-          <!-- Панель Журналов -->
-          <div id="logsPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px; display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <h3 style="margin:0; color:#1f3d6b;">Журнал взвешиваний</h3>
-              <button id="exportLogsBtn" class="pill secondary" style="height:28px; font-size:11px; padding:4px 8px;">📥 Экспорт</button>
-            </div>
-
-            <!-- Фильтры -->
-            <div class="logs-filters" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:12px;">
-              <div>
-                <label style="font-size:11px; color:#666;">От даты</label>
-                <input type="date" id="logsDateFrom" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:11px;" />
+          <!-- Панель Журнала (liquid glass стиль) -->
+          <div id="logsPanel" class="panel-content" style="padding:0; display:none;">
+            <div class="journal-container">
+              <div class="journal-header">
+                <div class="journal-title">
+                  📊 Журнал взвешиваний
+                </div>
+                <div class="journal-filters">
+                  <input type="date" id="logsDateFrom" class="journal-filter-input" placeholder="От даты">
+                  <input type="date" id="logsDateTo" class="journal-filter-input" placeholder="До даты">
+                  <select id="logsCameraFilter" class="journal-filter-input">
+                    <option value="">Все камеры</option>
+                    <option value="cam1">Камера 1</option>
+                    <option value="cam2">Камера 2</option>
+                  </select>
+                  <button id="refreshLogsBtn" class="journal-btn primary">🔄 Обновить</button>
+                  <button id="exportLogsBtn" class="journal-btn">📥 Экспорт</button>
+                </div>
               </div>
-              <div>
-                <label style="font-size:11px; color:#666;">До даты</label>
-                <input type="date" id="logsDateTo" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:11px;" />
+
+              <!-- Статистика -->
+              <div class="journal-stats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalTotalActs">0</div>
+                  <div class="journal-stat-label">Актов</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalTotalCount">0</div>
+                  <div class="journal-stat-label">Голов</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalTotalWeight">0</div>
+                  <div class="journal-stat-label">кг</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalAvgWeight">0</div>
+                  <div class="journal-stat-label">кг/гол</div>
+                </div>
+              </div>
+
+              <!-- Список актов -->
+              <div class="journal-list" id="journalList">
+                <div class="journal-loading">Загрузка актов...</div>
               </div>
             </div>
-
-            <!-- Список записей с группировкой по датам -->
-            <div class="logs-list" style="flex:1; overflow-y:auto; max-height:300px;">
-              <div id="logsList" style="display:flex; flex-direction:column; gap:4px;">
-                <!-- Записи журнала будут добавлены сюда -->
-              </div>
-            </div>
-
-            <button id="refreshLogsBtn" class="pill secondary" style="height:32px; font-size:12px;">🔄 Обновить</button>
           </div>
 
-          <!-- Панель Сверки (упрощенная) -->
-          <div id="verificationPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:12px; display:none;">
-            <h3 style="margin:0; color:#1f3d6b;">📊 Сверка с Excel</h3>
-
-            <!-- Простая загрузка файла -->
-            <div style="border: 2px dashed #ccc; border-radius: 6px; padding: 12px; text-align: center; cursor: pointer;" id="verificationUploadArea">
-              <div style="font-size:14px; color:#666;">📎 Выбрать Excel файл</div>
-              <input type="file" id="verificationFileInput" accept=".xlsx,.xls" style="display: none;">
-            </div>
-
-            <!-- Простая статистика -->
-            <div style="display:flex; gap:8px;">
-              <div style="flex:1; text-align:center; padding:8px; background:rgba(40,167,69,0.1); border-radius:4px;">
-                <div style="font-size:18px; font-weight:bold; color:#28a745;" id="verificationMatches">0</div>
-                <div style="font-size:11px;">Совпадений</div>
+          <!-- Панель Сверки (liquid glass стиль) -->
+          <div id="verificationPanel" class="panel-content" style="padding:0; display:none;">
+            <div class="journal-container">
+              <div class="journal-header">
+                <div class="journal-title">
+                  📊 Сверка с Excel
+                </div>
+                <button id="startVerificationBtn" class="journal-btn primary" disabled>▶ Проверить</button>
               </div>
-              <div style="flex:1; text-align:center; padding:8px; background:rgba(255,193,7,0.1); border-radius:4px;">
-                <div style="font-size:18px; font-weight:bold; color:#ffc107;" id="verificationDiffs">0</div>
-                <div style="font-size:11px;">Расхождений</div>
-              </div>
-            </div>
 
-            <!-- Результаты -->
-            <div id="verificationResults" style="flex:1; overflow-y:auto; max-height:150px; font-size:12px;">
+              <!-- Загрузка файла -->
+              <div class="journal-upload-area" id="verificationUploadArea">
+                <div style="text-align: center; padding: 24px;">
+                  <div style="font-size: 48px; margin-bottom: 12px;">📎</div>
+                  <div style="font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px;">
+                    Перетащите Excel файл сюда
+                  </div>
+                  <div style="font-size: 13px; color: var(--muted);">
+                    или нажмите для выбора (.xlsx, .xls)
+                  </div>
+                </div>
+                <input type="file" id="verificationFileInput" accept=".xlsx,.xls" style="display: none;">
+              </div>
+
               <!-- Результаты сверки -->
-            </div>
+              <div class="journal-stats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="verificationMatches" style="color: #28a745;">0</div>
+                  <div class="journal-stat-label">Совпадений</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="verificationDiffs" style="color: #ffc107;">0</div>
+                  <div class="journal-stat-label">Расхождений</div>
+                </div>
+              </div>
 
-            <button id="startVerificationBtn" class="pill success" style="height:32px; font-size:13px;" disabled>▶ Проверить</button>
+              <!-- Детали сверки -->
+              <div id="verificationResults" class="journal-comparison-result" style="display: none;">
+                <!-- Результаты сверки будут здесь -->
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1500,7 +1569,7 @@
 
     // === ВЕРИФИКАЦИЯ И АНАЛИЗ ===
 
-    // Переключение панелей
+    // Переключение панелей (обновлено для liquid glass стиля)
     function switchPanel(panelName) {
       // Скрываем все панели
       document.querySelectorAll('.panel-content').forEach(panel => {
@@ -1508,26 +1577,27 @@
         panel.classList.remove('active');
       });
 
-      // Убираем активные стили у всех кнопок
-      document.querySelectorAll('.tab-btn').forEach(btn => {
+      // Убираем активные стили у всех вкладок
+      document.querySelectorAll('.journal-tab-btn').forEach(btn => {
         btn.classList.remove('active');
-        btn.style.borderBottom = 'none';
-        btn.style.color = '#666';
       });
 
       // Показываем выбранную панель
       const targetPanel = document.getElementById(panelName + 'Panel');
       if (targetPanel) {
-        targetPanel.style.display = 'flex';
+        targetPanel.style.display = 'block';
         targetPanel.classList.add('active');
       }
 
-      // Активируем кнопку
+      // Активируем вкладку
       const targetBtn = document.querySelector(`[onclick="switchPanel('${panelName}')"]`);
       if (targetBtn) {
         targetBtn.classList.add('active');
-        targetBtn.style.borderBottom = '2px solid #007bff';
-        targetBtn.style.color = '#007bff';
+      }
+
+      // Загружаем данные для журнала при переключении на него
+      if (panelName === 'logs') {
+        loadJournalActs();
       }
 
       // Загружаем данные для панели
@@ -2197,7 +2267,300 @@
           updateWeighingCounters();
         }
       }, 2000);
+
+      // === ИНИЦИАЛИЗАЦИЯ НОВОГО LIQUID GLASS ИНТЕРФЕЙСА ===
+
+      // Обработчик кнопки сохранения акта
+      document.getElementById('saveManualBtn').addEventListener('click', saveNewAct);
+
+      // Обработчик кнопки обновления журнала
+      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
+
+      // Обработчик изменения фильтров
+      document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
+      document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
+      document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
+
+      // Обработчики для загрузки Excel файла
+      const uploadArea = document.getElementById('verificationUploadArea');
+      const fileInput = document.getElementById('verificationFileInput');
+
+      uploadArea.addEventListener('click', () => fileInput.click());
+      uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+      });
+      uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+      });
+      uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+          handleExcelFile(files[0]);
+        }
+      });
+
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          handleExcelFile(e.target.files[0]);
+        }
+      });
+
+      // Обработчик кнопки проверки
+      document.getElementById('startVerificationBtn').addEventListener('click', () => {
+        const file = fileInput.files[0];
+        if (file) {
+          compareWithExcel(file);
+        } else {
+          showNotification('⚠️ Выберите Excel файл для сверки', 'warning');
+        }
+      });
+
+      function handleExcelFile(file) {
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+          document.getElementById('startVerificationBtn').disabled = false;
+          showNotification('📄 Файл загружен: ' + file.name, 'success');
+        } else {
+          showNotification('❌ Поддерживаются только Excel файлы', 'error');
+        }
+      }
     });
+
+    // === ФУНКЦИИ ДЛЯ LIQUID GLASS ИНТЕРФЕЙСА ===
+
+    // Загрузка и отображение журнала актов
+    async function loadJournalActs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        const camera = document.getElementById('logsCameraFilter').value;
+        
+        const params = new URLSearchParams();
+        if (dateFrom) params.append('date_from', dateFrom);
+        if (dateTo) params.append('date_to', dateTo);
+        if (camera) params.append('camera', camera);
+        
+        const response = await fetch(`/api/journal/acts?${params}`);
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        displayJournalActs(data);
+        
+      } catch (error) {
+        console.error('Ошибка загрузки актов:', error);
+        document.getElementById('journalList').innerHTML = `
+          <div class="journal-empty">❌ Ошибка загрузки: ${error.message}</div>
+        `;
+      }
+    }
+
+    // Отображение актов в журнале
+    function displayJournalActs(data) {
+      // Обновляем статистику
+      document.getElementById('journalTotalActs').textContent = data.summary.total_acts;
+      document.getElementById('journalTotalCount').textContent = data.summary.total_count;
+      document.getElementById('journalTotalWeight').textContent = data.summary.total_weight;
+      document.getElementById('journalAvgWeight').textContent = data.summary.avg_weight;
+      
+      // Отображаем список актов
+      const journalList = document.getElementById('journalList');
+      
+      if (data.acts.length === 0) {
+        journalList.innerHTML = '<div class="journal-empty">📝 Нет актов взвешивания</div>';
+        return;
+      }
+      
+      journalList.innerHTML = data.acts.map(act => `
+        <div class="journal-item">
+          <div class="journal-item-info">
+            <div class="journal-item-date">${act.date}</div>
+            <div class="journal-item-time">${act.time}</div>
+            <div class="journal-item-metrics">
+              <div class="journal-item-metric">
+                <div class="journal-item-metric-value">${act.count}</div>
+                <div class="journal-item-metric-label">голов</div>
+              </div>
+              <div class="journal-item-metric">
+                <div class="journal-item-metric-value">${act.weight}</div>
+                <div class="journal-item-metric-label">кг</div>
+              </div>
+              <div class="journal-item-metric">
+                <div class="journal-item-metric-value">${(act.weight / act.count).toFixed(1)}</div>
+                <div class="journal-item-metric-label">кг/гол</div>
+              </div>
+            </div>
+          </div>
+          <div class="journal-item-camera">${act.camera}</div>
+        </div>
+      `).join('');
+    }
+
+    // Сохранение нового акта
+    async function saveNewAct() {
+      try {
+        const count = parseInt(document.getElementById('manualCount').value);
+        const weight = parseFloat(document.getElementById('manualTotalWeight').value);
+        
+        if (!count || count <= 0) {
+          showNotification('⚠️ Введите количество голов', 'warning');
+          return;
+        }
+        
+        if (!weight || weight <= 0) {
+          showNotification('⚠️ Введите общий вес', 'warning');
+          return;
+        }
+        
+        const response = await fetch('/api/journal/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            count: count,
+            weight: weight,
+            camera: 'cam1'
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        
+        // Очищаем форму
+        document.getElementById('manualCount').value = '';
+        document.getElementById('manualTotalWeight').value = '';
+        
+        // Обновляем журнал если он открыт
+        if (document.getElementById('logsPanel').style.display !== 'none') {
+          loadJournalActs();
+        }
+        
+        showNotification('✅ Акт взвешивания сохранен', 'success');
+        
+      } catch (error) {
+        console.error('Ошибка сохранения акта:', error);
+        showNotification('❌ Ошибка: ' + error.message, 'error');
+      }
+    }
+
+    // Сверка с Excel файлом
+    async function compareWithExcel(file) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/journal/compare', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        
+        displayComparisonResults(result);
+        
+      } catch (error) {
+        console.error('Ошибка сверки:', error);
+        showNotification('❌ Ошибка сверки: ' + error.message, 'error');
+      }
+    }
+
+    // Отображение результатов сверки
+    function displayComparisonResults(result) {
+      document.getElementById('verificationMatches').textContent = result.matches || 0;
+      document.getElementById('verificationDiffs').textContent = result.differences || 0;
+      
+      const resultsContainer = document.getElementById('verificationResults');
+      resultsContainer.style.display = 'block';
+      
+      const statusClass = result.status === 'success' ? 'journal-comparison-success' : 
+                         result.status === 'warning' ? 'journal-comparison-warning' : 
+                         'journal-comparison-error';
+      
+      resultsContainer.className = `journal-comparison-result ${statusClass}`;
+      
+      resultsContainer.innerHTML = `
+        <h4 style="margin: 0 0 12px 0; color: var(--text);">${result.message}</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Excel файл:</h5>
+            <p style="margin: 0; font-size: 13px;">
+              Количество: ${result.comparison.excel.total_count}<br>
+              Вес: ${result.comparison.excel.total_weight} кг<br>
+              Записей: ${result.comparison.excel.rows}
+            </p>
+          </div>
+          <div>
+            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Наши акты:</h5>
+            <p style="margin: 0; font-size: 13px;">
+              Количество: ${result.comparison.acts.total_count}<br>
+              Вес: ${result.comparison.acts.total_weight} кг<br>
+              Записей: ${result.comparison.acts.rows}
+            </p>
+          </div>
+        </div>
+        ${result.comparison.differences ? `
+          <div style="margin-top: 12px; padding: 8px; background: rgba(255,193,7,0.1); border-radius: 6px; font-size: 12px;">
+            <strong>Расхождения:</strong><br>
+            Количество: ±${result.comparison.differences.count_diff} (${result.comparison.differences.count_diff_percent}%)<br>
+            Вес: ±${result.comparison.differences.weight_diff} кг (${result.comparison.differences.weight_diff_percent}%)
+          </div>
+        ` : ''}
+      `;
+      
+      showNotification('📊 Сверка выполнена', 'info');
+    }
+
+    // Уведомления
+    function showNotification(message, type = 'info') {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: var(--journal-glass);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--journal-border);
+        border-radius: var(--radius-md);
+        padding: 12px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        z-index: 10000;
+        transition: all 0.3s ease;
+        transform: translateX(100%);
+        opacity: 0;
+        max-width: 300px;
+        border-left-width: 4px;
+      `;
+      
+      if (type === 'success') notification.style.borderLeftColor = '#28a745';
+      else if (type === 'error') notification.style.borderLeftColor = '#dc3545';
+      else if (type === 'warning') notification.style.borderLeftColor = '#ffc107';
+      else notification.style.borderLeftColor = '#10addd';
+      
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+        notification.style.opacity = '1';
+      }, 100);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 300);
+      }, 3000);
+    }
 
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
