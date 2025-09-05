@@ -119,11 +119,21 @@ class _Worker(mp.Process):
         container = sess.get('container')
         vstream = sess.get('vstream')
         try:
-            container.seek(int(max(0.0, t) / av.time_base), any_frame=False, backward=True, stream=vstream)  # type: ignore
-        except Exception:
-            # fallback rough seek by seconds
+            # Compute timestamp in stream time_base units if available
+            ts = None
             try:
-                container.seek(int(max(0.0, t) * 1e6))
+                if vstream and getattr(vstream, 'time_base', None):
+                    ts = int(max(0.0, float(t)) / float(vstream.time_base))
+            except Exception:
+                ts = None
+            if ts is not None and vstream is not None:
+                container.seek(ts, any_frame=False, backward=True, stream=vstream)
+            else:
+                # Fallback: AV_TIME_BASE (microseconds)
+                container.seek(int(max(0.0, float(t)) * 1_000_000))
+        except Exception:
+            try:
+                container.seek(int(max(0.0, float(t)) * 1_000_000))
             except Exception:
                 pass
         return self._read_one(sid)

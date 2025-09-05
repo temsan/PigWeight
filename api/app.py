@@ -11,6 +11,19 @@ from datetime import datetime, timedelta
 import csv
 from collections import deque
 import abc
+import subprocess
+
+# Импортируем новый единый процессор
+try:
+    from core.processor import get_processor, ProcessingOptions, FrameResult
+    HAVE_UNIFIED_PROCESSOR = True
+    logging.info("✅ Unified processor available")
+except ImportError as e:
+    HAVE_UNIFIED_PROCESSOR = False
+    logging.warning(f"⚠️ Unified processor not available: {e}, using legacy processors")
+
+# Performance logging
+perf_logger = logging.getLogger("perf.api")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, HTMLResponse, Response, JSONResponse, FileResponse
@@ -160,6 +173,17 @@ except Exception:
 DEVICE = os.getenv("DEVICE") or ("cuda:0" if _cuda_ok else "cpu")
 USE_HALF = (os.getenv("USE_HALF", "true").lower() == "true") and DEVICE.startswith("cuda")
 
+# Auto-fallback: if torch exists but CUDA not available, force CPU and disable half
+try:
+    import torch as _torch_check
+    if DEVICE and DEVICE.startswith('cuda') and not (_torch_check.cuda.is_available() if hasattr(_torch_check, 'cuda') else False):
+        logger.warning("Requested DEVICE=%s but CUDA not available. Falling back to CPU (disabling half).", DEVICE)
+        DEVICE = 'cpu'
+        USE_HALF = False
+except Exception:
+    # if torch isn't importable here, leave env values as-is; ModelAdapter will warn later
+    pass
+
 # Inference device (GPU/CPU) and torch settings
 try:
     import torch as _torch
@@ -295,6 +319,12 @@ def av_open_file(stream_id: str, path: str) -> Dict[str, Any]:
     return _av_safe_call('open_file', stream_id, path)
 
 def av_close(stream_id: str) -> None:
+    try:
+        _av_safe_call('close', stream_id)
+    except Exception:
+        pass
+
+def ocv_close(stream_id: str) -> None:
     try:
         _av_safe_call('close', stream_id)
     except Exception:
@@ -1156,16 +1186,92 @@ class RtspStream(VideoStream):
 
     async def _stream_loop(self):
         try:
-            av_open_rtsp(self.stream_id, self.rtsp_url)
+            use_ffmpeg = os.getenv("USE_FFMPEG", "false").lower() == "true"
+            ffproc = None
+            if use_ffmpeg:
+                try:
+                    q = os.getenv("FFMPEG_MJPEG_Q", "7")
+                    cmd = [
+                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "-rtsp_transport", "tcp",
+                        "-fflags", "nobuffer",
+                        "-flags", "low_delay",
+                        "-i", self.rtsp_url,
+                        "-an", "-c:v", "mjpeg", "-q:v", str(q),
+                        "-f", "mjpeg", "-"
+                    ]
+                    ffproc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+                    buf = bytearray()
+                except Exception as e:
+                    logger.warning(f"FFmpeg start failed, fallback to PyAV: {e}")
+                    use_ffmpeg = False
+
+            if not use_ffmpeg:
+                av_open_rtsp(self.stream_id, self.rtsp_url)
+
             while self.running:
-                jpeg = av_read_jpeg(self.stream_id, timeout=1.0)
-                async with self.lock:
-                    self.last_jpeg = jpeg
-                await asyncio.sleep(1.0 / TARGET_FPS)
+                if use_ffmpeg and ffproc and ffproc.stdout:
+                    try:
+                        chunk = ffproc.stdout.read(4096)
+                        if not chunk:
+                            await asyncio.sleep(0.01)
+                            continue
+                        buf.extend(chunk)
+                        # extract JPEG frames by SOI(FFD8) / EOI(FFD9)
+                        while True:
+                            soi = buf.find(b"\xff\xd8")
+                            if soi < 0:
+                                # drop old data if buffer too large
+                                if len(buf) > 2_000_000:
+                                    del buf[:len(buf)-1024]
+                                break
+                            eoi = buf.find(b"\xff\xd9", soi + 2)
+                            if eoi < 0:
+                                # wait for more data
+                                # trim left if useless bytes before SOI
+                                if soi > 0:
+                                    del buf[:soi]
+                                break
+                            frame = bytes(buf[soi:eoi+2])
+                            del buf[:eoi+2]
+                            async with self.lock:
+                                self.last_jpeg = frame
+                            # publish to in-process broker (fire-and-forget)
+                            try:
+                                if FRAME_BROKER is not None:
+                                    asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), frame))
+                                    if start_global_worker_for is not None:
+                                        start_global_worker_for(self.stream_id)
+                            except Exception:
+                                pass
+                            break
+                    except Exception:
+                        await asyncio.sleep(0.01)
+                else:
+                    jpeg = av_read_jpeg(self.stream_id, timeout=1.0)
+                    if jpeg:
+                        async with self.lock:
+                            self.last_jpeg = jpeg
+                        try:
+                            if FRAME_BROKER is not None:
+                                asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
+                                if start_global_worker_for is not None:
+                                    start_global_worker_for(self.stream_id)
+                        except Exception:
+                            pass
+                    await asyncio.sleep(1.0 / TARGET_FPS)
         except Exception as e:
             logger.error(f"RTSP stream {self.stream_id} error: {e}")
         finally:
-            av_close(self.stream_id)
+            try:
+                av_close(self.stream_id)
+            except Exception:
+                pass
+            try:
+                if ffproc:
+                    ffproc.kill()
+            except Exception:
+                pass
             self.running = False
 
     async def stop(self):
@@ -1226,6 +1332,13 @@ class FileStream(VideoStream):
                     async with self.lock:
                         self.last_jpeg = jpeg
                     self.current_time += (1.0 / self.fps)
+                    try:
+                        if FRAME_BROKER is not None:
+                            asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
+                            if start_global_worker_for is not None:
+                                start_global_worker_for(self.stream_id)
+                    except Exception:
+                        pass
                 await asyncio.sleep(1.0 / self.fps)
         except Exception as e:
             logger.error(f"File stream {self.stream_id} error: {e}")
@@ -1305,8 +1418,20 @@ class StreamManager:
 
     async def stop_stream(self, stream_id: str):
         if stream_id in self.streams:
-            await self.streams[stream_id].stop()
-            del self.streams[stream_id]
+            stream = self.streams[stream_id]
+            try:
+                await stream.stop()
+            finally:
+                try:
+                    # ensure act finalization is performed
+                    if hasattr(stream, '_finalize_act_to_files'):
+                        stream._finalize_act_to_files()
+                except Exception:
+                    pass
+                try:
+                    del self.streams[stream_id]
+                except Exception:
+                    pass
 
     def register_websocket(self, stream_id: str, ws: WebSocket):
         if stream_id not in self.websockets:
@@ -1323,6 +1448,15 @@ class StreamManager:
                 await ws.send_json(data)
 
 STREAM_MANAGER = StreamManager()
+# attach frame broker and start inference workers on-demand
+try:
+    from core.frame_broker import FRAME_BROKER
+    from services.inference_worker import start_global_worker_for
+    from core.results_store import RESULTS_STORE
+except Exception:
+    FRAME_BROKER = None
+    start_global_worker_for = None
+    RESULTS_STORE = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1333,9 +1467,222 @@ async def lifespan(app: FastAPI):
         await stream.stop()
 
 _DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
-app = FastAPI(title="PigWeight API (FastAPI)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
+app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
+
+# Подключаем упрощенные endpoints
+try:
+    from api.simple_endpoints import setup_endpoints
+    setup_endpoints(app)
+    logging.info("✅ Simplified endpoints loaded")
+except Exception as e:
+    logging.error(f"❌ Failed to load simplified endpoints: {e}")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# --- Simple WebRTC signalling (aiortc) integrated into FastAPI ---
+try:
+    from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCIceCandidate
+    import uuid as _uuid
+    from av import VideoFrame as _VideoFrame
+    _HAVE_AIORTC = True
+except Exception:
+    _HAVE_AIORTC = False
+
+# peer_id -> RTCPeerConnection
+_PEER_CONNECTIONS: Dict[str, RTCPeerConnection] = {}
+
+
+class BrokerVideoTrack(VideoStreamTrack):
+    def __init__(self, stream_id: str, fps: float = 15.0):
+        super().__init__()
+        self.stream_id = stream_id
+        self.fps = float(fps)
+        self.frame_duration = 1.0 / max(1.0, self.fps)
+        self._last_pts = 0
+
+    async def recv(self):
+        # Pull latest frame from FRAME_BROKER or fallback to StreamManager.last_jpeg
+        start = time.time()
+        jpeg = None
+        source = "none"
+
+        if 'FRAME_BROKER' in globals() and FRAME_BROKER is not None:
+            latest = FRAME_BROKER.get_latest(self.stream_id)
+            if latest and latest.get('jpeg'):
+                jpeg = latest.get('jpeg')
+                source = "FRAME_BROKER"
+            else:
+                logger.debug(f"BrokerVideoTrack {self.stream_id}: FRAME_BROKER returned empty or no jpeg")
+
+        if jpeg is None:
+            # fallback to StreamManager
+            stream = STREAM_MANAGER.streams.get(self.stream_id)
+            if stream:
+                try:
+                    jpeg = await stream.get_jpeg()
+                    source = "StreamManager"
+                except Exception as e:
+                    logger.warning(f"BrokerVideoTrack {self.stream_id}: StreamManager.get_jpeg failed: {e}")
+
+        if not jpeg:
+            # return black frame
+            logger.warning(f"BrokerVideoTrack {self.stream_id}: No frame available, returning black frame")
+            import numpy as _np
+            h, w = 480, 640
+            black = _np.zeros((h, w, 3), dtype=_np.uint8)
+            vf = _VideoFrame.from_ndarray(black[..., ::-1], format='bgr24')
+            await asyncio.sleep(self.frame_duration)
+            return vf
+
+        logger.debug(f"BrokerVideoTrack {self.stream_id}: Using frame from {source}, size: {len(jpeg)} bytes")
+
+        # decode JPEG to ndarray
+        import numpy as _np
+        arr = _np.frombuffer(jpeg, dtype=_np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            h, w = 480, 640
+            img = _np.zeros((h, w, 3), dtype=_np.uint8)
+
+        # convert BGR -> RGB
+        try:
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        except Exception:
+            img_rgb = img
+
+        vf = _VideoFrame.from_ndarray(img_rgb, format='rgb24')
+        vf.pts = int(time.time() * 1000)
+        vf.time_base = 1 / 1000
+
+        # throttle to target fps
+        elapsed = time.time() - start
+        wait = max(0.0, self.frame_duration - elapsed)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        return vf
+
+
+@app.post('/api/webrtc/offer')
+async def api_webrtc_offer(payload: Dict[str, Any]):
+    start_time = time.time()
+    if not _HAVE_AIORTC:
+        perf_logger.warning(".3f")
+        return JSONResponse({'error': 'aiortc not available'}, status_code=500)
+    try:
+        sdp = payload.get('sdp')
+        typ = payload.get('type')
+        stream_id = payload.get('stream_id')
+        fps = float(payload.get('fps') or TARGET_FPS)
+        # Validate inputs with clear messages to avoid vague exceptions
+        if not isinstance(sdp, str) or len(sdp) < 10:
+            return JSONResponse({'error': 'invalid or missing sdp'}, status_code=400)
+        if typ not in ('offer', 'answer'):
+            return JSONResponse({'error': "invalid type, expected 'offer' or 'answer'"}, status_code=400)
+        if not stream_id:
+            return JSONResponse({'error': 'missing stream_id'}, status_code=400)
+
+        pc = RTCPeerConnection()
+        peer_id = _uuid.uuid4().hex
+        _PEER_CONNECTIONS[peer_id] = pc
+        logger.info(f"WebRTC: Created peer connection {peer_id} for stream {stream_id}")
+
+        @pc.on('connectionstatechange')
+        async def on_state():
+            if pc.connectionState == 'failed' or pc.connectionState == 'closed':
+                try:
+                    await pc.close()
+                except Exception:
+                    pass
+                _PEER_CONNECTIONS.pop(peer_id, None)
+
+        try:
+            offer = RTCSessionDescription(sdp=sdp, type=typ)
+            await pc.setRemoteDescription(offer)
+        except Exception as e:
+            logger.exception(f"Failed to set remote description for peer={peer_id} stream={stream_id}")
+            return JSONResponse({'error': f'Failed to set remote description: {str(e)}'}, status_code=400)
+        # add broker track AFTER remote description to avoid transceiver direction mismatch
+        try:
+            track = BrokerVideoTrack(stream_id=stream_id, fps=fps)
+            pc.addTrack(track)
+            logger.info(f"WebRTC: Added BrokerVideoTrack for peer={peer_id}, stream={stream_id}, fps={fps}")
+        except Exception:
+            logger.exception(f"Failed to add track for peer={peer_id}")
+        try:
+            answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+        except ValueError as e:
+            # handle SDP direction mismatch (aiortc error) gracefully
+            logger.exception(f"SDP direction error for peer={peer_id} stream={stream_id}: {e}")
+            try:
+                await pc.close()
+            except Exception:
+                pass
+            _PEER_CONNECTIONS.pop(peer_id, None)
+            return JSONResponse({'error': 'SDP direction mismatch or missing media in offer'}, status_code=400)
+        except Exception as e:
+            logger.exception(f"Failed to create/set local description for peer={peer_id} stream={stream_id}")
+            try:
+                await pc.close()
+            except Exception:
+                pass
+            _PEER_CONNECTIONS.pop(peer_id, None)
+            return JSONResponse({'error': str(e)}, status_code=500)
+
+        end_time = time.time()
+        perf_logger.info(".3f")
+        return {
+            'peer_id': peer_id,
+            'sdp': pc.localDescription.sdp,
+            'type': pc.localDescription.type
+        }
+    except Exception as e:
+        end_time = time.time()
+        perf_logger.error(".3f")
+        logger.exception(f"Error handling WebRTC offer for stream_id={payload.get('stream_id')}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.post('/api/webrtc/candidate')
+async def api_webrtc_candidate(body: Dict[str, Any]):
+    start_time = time.time()
+    try:
+        peer_id = body.get('peer_id')
+        candidate = body.get('candidate')
+        if not peer_id or not candidate:
+            perf_logger.warning(".3f")
+            return JSONResponse({'error': 'peer_id and candidate required'}, status_code=400)
+        pc = _PEER_CONNECTIONS.get(peer_id)
+        if not pc:
+            perf_logger.warning(".3f")
+            return JSONResponse({'error': 'peer not found'}, status_code=404)
+        # create RTCIceCandidate
+        c = RTCIceCandidate(**candidate)
+        await pc.addIceCandidate(c)
+        end_time = time.time()
+        perf_logger.debug(".3f")
+        return {'status': 'ok'}
+    except Exception as e:
+        end_time = time.time()
+        perf_logger.error(".3f")
+        logger.exception(f"Error handling WebRTC candidate for peer_id={body.get('peer_id')}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.post('/api/webrtc/stop')
+async def api_webrtc_stop(body: Dict[str, Any]):
+    try:
+        peer_id = body.get('peer_id')
+        pc = _PEER_CONNECTIONS.pop(peer_id, None)
+        if pc:
+            try:
+                await pc.close()
+            except Exception:
+                pass
+        return {'status': 'stopped'}
+    except Exception as e:
+        logger.exception(f"Error stopping WebRTC peer peer_id={body.get('peer_id')}")
+        return JSONResponse({'error': str(e)}, status_code=500)
 
 @app.get("/api/health")
 async def api_health():
@@ -1343,7 +1690,12 @@ async def api_health():
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
-    return FileResponse(STATIC_DIR / "index.html")
+    index_path = STATIC_DIR / "index.html"
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except Exception as e:
+        return JSONResponse({"error": f"Cannot read index.html: {e}"}, status_code=500)
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def read_dashboard():
@@ -1379,13 +1731,18 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.post("/api/stream/start")
 async def api_stream_start(stream_id: str, source_uri: str):
+    start_time = time.time()
     try:
+        perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Starting stream {stream_id} with source {source_uri}")
+
         # Basic validation for file paths to give clearer errors
         if not source_uri.startswith("rtsp://"):
             p = Path(source_uri)
             if not p.exists():
+                perf_logger.warning(".3f")
                 return JSONResponse({"error": f"file not found: {source_uri}"}, status_code=404)
             if not p.is_file():
+                perf_logger.warning(".3f")
                 return JSONResponse({"error": f"not a file: {source_uri}"}, status_code=400)
 
         stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
@@ -1400,17 +1757,28 @@ async def api_stream_start(stream_id: str, source_uri: str):
             })
         else:
             resp.update({"type": "rtsp"})
+
+        end_time = time.time()
+        perf_logger.info(".3f")
         return resp
     except Exception as e:
+        end_time = time.time()
+        perf_logger.error(".3f")
         logger.error(f"Start stream error for {stream_id}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/stream/{stream_id}/stop")
 async def api_stream_stop(stream_id: str):
+    start_time = time.time()
     try:
+        perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Stopping stream {stream_id}")
         await STREAM_MANAGER.stop_stream(stream_id)
+        end_time = time.time()
+        perf_logger.info(".3f")
         return {"status": "stopped", "stream_id": stream_id}
     except Exception as e:
+        end_time = time.time()
+        perf_logger.warning(".3f")
         # Be resilient: never break UI on stop
         logger.error(f"Stop stream error for {stream_id}: {e}")
         return JSONResponse({"status": "stopped", "stream_id": stream_id, "warning": str(e)}, status_code=200)
@@ -1437,9 +1805,13 @@ async def mjpeg_generator(stream: VideoStream):
 
 @app.get("/api/stream/{stream_id}/feed")
 async def api_stream_feed(stream_id: str):
+    start_time = time.time()
     stream = STREAM_MANAGER.streams.get(stream_id)
     if not stream or not stream.running:
+        perf_logger.warning(".3f")
         return JSONResponse({"error": "stream not found or not running"}, status_code=404)
+
+    perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Starting MJPEG feed for {stream_id}")
     headers = {
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
@@ -1499,6 +1871,193 @@ async def api_records_list():
         items.sort(key=lambda x: x.get("finished_at") or 0, reverse=True)
         return {"items": items}
     except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# --- Verification API ---
+try:
+    from core.verification import verification_system
+    _HAVE_VERIFICATION = True
+except Exception:
+    _HAVE_VERIFICATION = False
+    verification_system = None
+
+# Глобальный экземпляр процессора
+_unified_processor = None
+
+def get_unified_processor():
+    """Получение глобального экземпляра процессора"""
+    global _unified_processor
+    if _unified_processor is None and HAVE_UNIFIED_PROCESSOR:
+        # Получаем путь к модели из конфигурации
+        model_path = os.getenv("MODEL_PATH", "models/pig_yolo11-seg.v4.pt")
+        options = ProcessingOptions(
+            confidence_threshold=float(os.getenv("CONF_THRESHOLD", "0.3")),
+            img_size=int(os.getenv("IMG_SIZE", "640")),
+            device=os.getenv("DEVICE", "auto"),
+            batch_size=int(os.getenv("BATCH_SIZE", "1"))
+        )
+        _unified_processor = get_processor(model_path, options)
+        logging.info("🚀 Unified processor initialized")
+    return _unified_processor
+
+@app.get("/api/verification/stats")
+async def api_verification_stats():
+    """Получить статистику верификации всех актов"""
+    if not _HAVE_VERIFICATION or verification_system is None:
+        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
+
+    try:
+        stats = verification_system.get_verification_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting verification stats: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/verification/grouped")
+async def api_verification_grouped():
+    """Получить группированные по датам данные верификации"""
+    if not _HAVE_VERIFICATION or verification_system is None:
+        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
+
+    try:
+        stats = verification_system.get_verification_stats()
+        return {
+            "grouped_by_date": stats.get("grouped_by_date", {}),
+            "summary": {
+                "total_dates": len(stats.get("grouped_by_date", {})),
+                "total_acts": stats.get("total_acts", 0),
+                "verified_acts": stats.get("verified_count", 0),
+                "discrepancy_acts": stats.get("discrepancy_count", 0)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting grouped verification data: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/verification/verify/{act_name}")
+async def api_verify_act(act_name: str):
+    """Проверить конкретный акт взвешивания"""
+    if not _HAVE_VERIFICATION or verification_system is None:
+        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
+
+    try:
+        result = verification_system.verify_weighing_act(act_name)
+        return result
+    except Exception as e:
+        logger.error(f"Error verifying act {act_name}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/verification/analyze_excel")
+async def api_analyze_excel(file: UploadFile = File(...)):
+    """Анализировать загруженный Excel файл с замерами"""
+    if not _HAVE_VERIFICATION or verification_system is None:
+        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
+
+    try:
+        # Сохраняем файл во временную директорию
+        temp_dir = BASE_DIR / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = temp_dir / file.filename
+        content = await file.read()
+
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        # Анализируем файл
+        result = verification_system.analyze_excel_measurements(str(file_path))
+
+        # Удаляем временный файл
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error analyzing Excel file: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/verification/report")
+async def api_verification_report():
+    """Получить отчет о несоответствиях в счетчиках"""
+    if not _HAVE_VERIFICATION or verification_system is None:
+        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
+
+    try:
+        stats = verification_system.get_verification_stats()
+
+        # Генерируем отчет
+        report = {
+            "generated_at": datetime.now().isoformat(),
+            "summary": {
+                "total_acts": stats["total_acts"],
+                "verified_acts": stats["verified_count"],
+                "discrepancy_acts": stats["discrepancy_count"],
+                "error_acts": stats["error_count"],
+                "total_pigs_counted": stats["total_pigs"],
+                "verification_rate": (stats["verified_count"] / max(stats["total_acts"], 1)) * 100,
+                "avg_duration_sec": stats["avg_duration"]
+            },
+            "issues": [],
+            "recommendations": []
+        }
+
+        # Анализируем проблемы
+        for act in stats["results"]:
+            if act["status"] == "success":
+                verification = act.get("verification", {})
+                if not verification.get("verified"):
+                    issue = {
+                        "act_file": act["act_file"],
+                        "stream_id": act.get("stream_id"),
+                        "timestamp": act.get("finished_at"),
+                        "left_count": act.get("flow", {}).get("left_in", 0),
+                        "right_count": act.get("flow", {}).get("right_in", 0),
+                        "difference": verification.get("difference", 0),
+                        "relative_difference": verification.get("relative_difference", 0),
+                        "status": verification.get("status"),
+                        "message": verification.get("message", "")
+                    }
+                    report["issues"].append(issue)
+
+        # Генерируем рекомендации
+        if report["summary"]["discrepancy_acts"] > 0:
+            discrepancy_rate = (report["summary"]["discrepancy_acts"] / report["summary"]["total_acts"]) * 100
+            if discrepancy_rate > 20:
+                report["recommendations"].append({
+                    "priority": "high",
+                    "message": f"{discrepancy_rate:.1f}% актов имеют расхождения",
+                    "action": "Проверьте настройки камер и линий отсечки"
+                })
+            elif discrepancy_rate > 10:
+                report["recommendations"].append({
+                    "priority": "medium",
+                    "message": f"{discrepancy_rate:.1f}% актов имеют расхождения",
+                    "action": "Рекомендуется калибровка системы распознавания"
+                })
+
+        # Анализ паттернов ошибок
+        if len(report["issues"]) > 0:
+            # Группировка по времени
+            time_pattern = {}
+            for issue in report["issues"]:
+                hour = datetime.fromtimestamp(issue["timestamp"]).hour
+                time_pattern[hour] = time_pattern.get(hour, 0) + 1
+
+            peak_hour = max(time_pattern.items(), key=lambda x: x[1])[0] if time_pattern else None
+            if peak_hour is not None:
+                report["recommendations"].append({
+                    "priority": "info",
+                    "message": f"Большинство расхождений происходит в {peak_hour}:00",
+                    "action": "Проверьте условия освещения в это время"
+                })
+
+        return report
+
+    except Exception as e:
+        logger.error(f"Error generating verification report: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/records/{name}")
@@ -1572,14 +2131,298 @@ async def api_stream_seek(stream_id: str, t: float = Query(...)):
     await stream.seek(max(0.0, float(t)))
     return {"status": "ok", "current_time": float(stream.current_time)}
 
+@app.post("/api/stream/{stream_id}/optimize")
+async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
+    """Optimize stream settings based on transport type"""
+    try:
+        stream = STREAM_MANAGER.streams.get(stream_id)
+        if not stream:
+            return JSONResponse({"error": "stream not found"}, status_code=404)
 
+        # For WebRTC, we can optimize by reducing some polling
+        if transport == "webrtc":
+            # This is a hint to potentially adjust internal settings
+            # Could be extended to modify batch sizes, polling rates, etc.
+            logger.info(f"Optimizing stream {stream_id} for WebRTC transport")
+            return {"status": "optimized", "transport": "webrtc"}
+
+        return {"status": "no_change", "transport": transport}
+    except Exception as e:
+        logger.error(f"Error optimizing stream {stream_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+
+# === API для работы с актами взвешивания ===
+
+# Путь к файлу базы данных актов взвешивания
+WEIGHING_DB_FILE = "weighing_acts.json"
+
+def load_weighing_acts():
+    """Загрузка актов взвешивания из JSON файла"""
+    try:
+        if os.path.exists(WEIGHING_DB_FILE):
+            with open(WEIGHING_DB_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        logger.error(f"Error loading weighing acts: {e}")
+        return []
+
+def save_weighing_acts(acts):
+    """Сохранение актов взвешивания в JSON файл"""
+    try:
+        with open(WEIGHING_DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(acts, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving weighing acts: {e}")
+        return False
+
+@app.post("/api/weighing/save")
+async def save_weighing_act(data: Dict[str, Any]):
+    """Сохранение акта взвешивания"""
+    try:
+        # Валидация данных
+        required_fields = ['date', 'group', 'total', 'weight']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
+        
+        # Создаем запись акта
+        act = {
+            'id': f"{data['date']}_{data['group']}_{int(time.time())}",
+            'date': data['date'],
+            'time': data.get('time', datetime.now().strftime('%H:%M')),
+            'group': data['group'],
+            'total': int(data['total']),
+            'weight': float(data['weight']),
+            'avg_weight': float(data.get('avg_weight', data['weight'] / data['total'])),
+            'left_count': int(data.get('left_count', 0)),
+            'right_count': int(data.get('right_count', 0)),
+            'stream_id': data.get('stream_id', ''),
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # Загружаем существующие акты
+        acts = load_weighing_acts()
+        acts.append(act)
+        
+        # Сохраняем
+        if save_weighing_acts(acts):
+            logger.info(f"Saved weighing act: {act['group']} on {act['date']}")
+            return {"status": "success", "id": act['id']}
+        else:
+            return JSONResponse({"error": "Failed to save act"}, status_code=500)
+            
+    except Exception as e:
+        logger.error(f"Error saving weighing act: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/weighing/logs")
+async def get_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
+    """Получение журнала актов взвешивания за период"""
+    try:
+        acts = load_weighing_acts()
+        
+        # Фильтруем по датам
+        filtered_acts = []
+        for act in acts:
+            if date_from <= act['date'] <= date_to:
+                filtered_acts.append(act)
+        
+        # Сортируем по дате и времени (новые сначала)
+        filtered_acts.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+        
+        return filtered_acts
+        
+    except Exception as e:
+        logger.error(f"Error getting weighing logs: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/weighing/export")
+async def export_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
+    """Экспорт журнала актов взвешивания в Excel"""
+    try:
+        acts = load_weighing_acts()
+        
+        # Фильтруем по датам
+        filtered_acts = []
+        for act in acts:
+            if date_from <= act['date'] <= date_to:
+                filtered_acts.append(act)
+        
+        if not filtered_acts:
+            return JSONResponse({"error": "No data to export"}, status_code=404)
+        
+        # Создаем CSV данные (проще, чем Excel)
+        csv_data = []
+        csv_data.append(['Дата', 'Время', 'Группа/Секция', 'Количество свиней', 'Общий вес (кг)', 'Средний вес (кг)', 'Счетчик слева', 'Счетчик справа', 'Разница счетчиков', 'Поток'])
+        
+        for act in sorted(filtered_acts, key=lambda x: (x['date'], x['time'])):
+            diff = abs(act['left_count'] - act['right_count'])
+            csv_data.append([
+                act['date'],
+                act['time'],
+                act['group'],
+                act['total'],
+                act['weight'],
+                act['avg_weight'],
+                act['left_count'],
+                act['right_count'],
+                diff,
+                act['stream_id']
+            ])
+        
+        # Создаем CSV файл в памяти
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';')  # Используем точку с запятой для лучшей совместимости с Excel
+        for row in csv_data:
+            writer.writerow(row)
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        # Возвращаем как файл
+        from fastapi.responses import Response
+        return Response(
+            content=csv_content.encode('utf-8-sig'),  # BOM для правильного отображения в Excel
+            media_type='text/csv; charset=utf-8',
+            headers={
+                "Content-Disposition": f"attachment; filename=weighing_logs_{date_from}_{date_to}.csv"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting weighing logs: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# === API для сверки с файлами замеров ===
+
+@app.post("/api/verification/compare")
+async def compare_with_measurements(file: UploadFile = File(...)):
+    """Сверка актов взвешивания с загруженным файлом замеров"""
+    try:
+        if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+            return JSONResponse({"error": "Unsupported file format. Use .xlsx, .xls or .csv"}, status_code=400)
+        
+        # Сохраняем временный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        try:
+            # Читаем файл замеров
+            if file.filename.endswith('.csv'):
+                import pandas as pd
+                measurements_df = pd.read_csv(tmp_path)
+            else:
+                import pandas as pd
+                measurements_df = pd.read_excel(tmp_path, engine='openpyxl')
+            
+            # Загружаем наши акты
+            acts = load_weighing_acts()
+            
+            # Анализируем структуру файла замеров (используя наш анализ)
+            # Предполагаем, что в файле есть столбцы с датами, группами, весами и количеством
+            
+            matches = 0
+            differences = 0
+            missing = 0
+            details = []
+            
+            # Простая логика сверки (может быть улучшена)
+            for act in acts:
+                # Ищем соответствующую запись в файле замеров
+                found_match = False
+                for _, row in measurements_df.iterrows():
+                    # Пытаемся найти совпадение по дате и группе
+                    # Это упрощенная логика, может потребовать доработки
+                    if str(act['group']).lower() in str(row.values).lower():
+                        found_match = True
+                        # Сравниваем веса (с допуском 5%)
+                        file_weight = 0
+                        file_count = 0
+                        
+                        # Пытаемся извлечь числовые значения из строки
+                        for val in row.values:
+                            if isinstance(val, (int, float)) and 10 <= val <= 2000:  # Диапазон весов
+                                if abs(val - act['weight']) < abs(file_weight - act['weight']):
+                                    file_weight = val
+                            elif isinstance(val, (int, float)) and 1 <= val <= 500:  # Диапазон количества
+                                if abs(val - act['total']) < abs(file_count - act['total']):
+                                    file_count = val
+                        
+                        weight_diff = abs(act['weight'] - file_weight) / act['weight'] if act['weight'] > 0 else 1
+                        count_diff = abs(act['total'] - file_count) / act['total'] if act['total'] > 0 else 1
+                        
+                        if weight_diff <= 0.05 and count_diff <= 0.1:  # Допуск 5% по весу, 10% по количеству
+                            matches += 1
+                            status = 'match'
+                        else:
+                            differences += 1
+                            status = 'diff'
+                        
+                        details.append({
+                            'group': act['group'],
+                            'date': act['date'],
+                            'status': status,
+                            'system_weight': act['weight'],
+                            'system_count': act['total'],
+                            'file_weight': file_weight,
+                            'file_count': file_count
+                        })
+                        break
+                
+                if not found_match:
+                    missing += 1
+                    details.append({
+                        'group': act['group'],
+                        'date': act['date'],
+                        'status': 'missing',
+                        'system_weight': act['weight'],
+                        'system_count': act['total'],
+                        'file_weight': 0,
+                        'file_count': 0
+                    })
+            
+            return {
+                'matches': matches,
+                'differences': differences,
+                'missing': missing,
+                'total_acts': len(acts),
+                'details': details[:20]  # Ограничиваем количество деталей
+            }
+            
+        finally:
+            # Удаляем временный файл
+            os.unlink(tmp_path)
+            
+    except Exception as e:
+        logger.error(f"Error comparing with measurements: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.websocket("/ws/count")
 async def ws_count(ws: WebSocket, id: str):
+    start_time = time.time()
+    perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] WebSocket connection established for stream {id}")
+
     await ws.accept()
     STREAM_MANAGER.register_websocket(id, ws)
+    messages_sent = 0
+
     try:
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
+        end_time = time.time()
+        perf_logger.info(".3f")
+        STREAM_MANAGER.unregister_websocket(id, ws)
+    except Exception as e:
+        end_time = time.time()
+        perf_logger.error(".3f")
+        logger.error(f"WebSocket error for stream {id}: {e}")
         STREAM_MANAGER.unregister_websocket(id, ws)

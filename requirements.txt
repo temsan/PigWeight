@@ -1,24 +1,42 @@
-# Backend
-fastapi==0.112.0
-uvicorn[standard]==0.30.0
-python-multipart==0.0.9
-# Разрешаем актуальную установленную версию python-dotenv (снятый пин)
-python-dotenv
-orjson>=3.10.0
+# ===== МИНИМАЛЬНЫЕ ЗАВИСИМОСТИ PigWeight v3.0 =====
+# Только необходимые пакеты для работы системы
 
-# Scheduling / Timezone
-APScheduler==3.10.4
-tzdata>=2023.3
+# ===== CORE DEPENDENCIES =====
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
+pydantic>=2.0.0
 
-# Video/Imaging
-# Для Python 3.13 требуются колёса numpy 2.x и совместимый OpenCV
+# ===== VIDEO & AI PROCESSING =====
 numpy>=2.0.0,<3
-opencv-python-headless>=4.10.0.84
-# Стабильный декодер и seek для файлов/RTSP (низкая задержка)
-av>=12.2.0
-# Быстрый JPEG энкодер (опционально, ставится вручную при наличии libturbojpeg)
-# PyTurboJPEG>=1.7.6
-# Фоллбек JPEG-энкодинга через Pillow
+opencv-python-headless>=4.8.0
+torch>=2.1.0
+ultralytics>=8.0.0
 pillow>=10.0.0
 
-# Убраны лишние зависимости клиентского инференса (norfair, rich, pygments)
+# ===== DATA & ANALYSIS =====
+pandas>=2.0.0
+
+# ===== OPTIONAL FEATURES =====
+# Раскомментировать при необходимости:
+
+# WebRTC streaming (для real-time видео)
+# aiortc>=1.9.0
+# cryptography>=44.0.0
+
+# Real-time updates (для WebSocket)
+# python-socketio>=5.0.0
+
+# Caching (для производительности)
+# redis>=5.0.0
+
+# System monitoring (для диагностики)
+# psutil>=5.9.0
+# pynvml>=11.5.0
+
+# ===== DEVELOPMENT TOOLS =====
+# Только для разработки - не устанавливать в продакшене
+# pytest>=7.0.0
+# black>=23.0.0
+# flake8>=6.0.0

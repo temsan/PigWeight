@@ -89,14 +89,14 @@ class GPUVideoStreamTrack(VideoStreamTrack):
                 # Создаем черный кадр как fallback
                 frame = np.zeros((self.config.height, self.config.width, 3), dtype=np.uint8)
             
-            # Инференс если включен
-            if self.config.inference_enabled:
-                inference_start = time.time()
-                # Batch inference для лучшей производительности
-                results = self.video_processor.batch_inference([frame])
-                if results and results[0]:
-                    frame = self._draw_detections(frame, results[0])
-                self.stats['last_inference_time'] = time.time() - inference_start
+            # Компонент инференса вынесен в отдельный worker; здесь подтягиваем результаты
+            try:
+                from core.results_store import RESULTS_STORE
+                res = RESULTS_STORE.get_for_frame(self.config.video_id, int(self.current_timestamp * 1000))
+                if self.config.inference_enabled and res:
+                    frame = self._draw_detections(frame, res)
+            except Exception:
+                pass
             
             # Изменение размера если нужно
             if frame.shape[:2] != (self.config.height, self.config.width):
@@ -148,33 +148,46 @@ class GPUVideoStreamTrack(VideoStreamTrack):
     def _draw_detections(self, frame: np.ndarray, detections: Dict) -> np.ndarray:
         """Отрисовка результатов детекции на кадре"""
         try:
-            # Пример отрисовки (замените на вашу логику)
             height, width = frame.shape[:2]
-            
-            # Добавляем информацию о детекции
+            # Info text
             info_text = f"Detections: {detections.get('detections', 0)}"
             confidence_text = f"Conf: {detections.get('confidence', 0.0):.2f}"
-            
-            cv2.putText(frame, info_text, (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            cv2.putText(frame, confidence_text, (10, 60), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            
-            # Пример: рисуем случайные bbox для демонстрации
-            num_detections = detections.get('detections', 0)
-            if isinstance(num_detections, (int, float)) and num_detections > 0:
-                for i in range(min(int(num_detections), 5)):  # Максимум 5 bbox
-                    x1 = int(np.random.uniform(0, width * 0.7))
-                    y1 = int(np.random.uniform(0, height * 0.7))
-                    x2 = int(x1 + np.random.uniform(50, 200))
-                    y2 = int(y1 + np.random.uniform(50, 150))
-                    
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                    cv2.putText(frame, f"Pig {i+1}", (x1, y1-10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            
+            cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.putText(frame, confidence_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+            # If masks present (list of polygons), draw filled translucent overlays
+            masks = detections.get('masks') or []
+            if masks:
+                try:
+                    overlay = frame.copy()
+                    alpha = 0.35
+                    color_fill = (0, 200, 255)  # warm overlay
+                    for poly in masks:
+                        # poly may be list/ndarray of points
+                        try:
+                            pts = np.array(poly, dtype=np.int32)
+                            if pts.ndim == 2 and pts.shape[0] >= 3:
+                                # ensure shape (N,2)
+                                cv2.fillPoly(overlay, [pts], color_fill)
+                                cv2.polylines(overlay, [pts], isClosed=True, color=(0,120,200), thickness=2)
+                        except Exception:
+                            continue
+                    # blend
+                    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+                except Exception:
+                    pass
+
+            # If bbox-like info present, draw boxes
+            bboxes = detections.get('bboxes')
+            if bboxes:
+                for bb in bboxes:
+                    try:
+                        x1, y1, x2, y2 = map(int, bb[:4])
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                    except Exception:
+                        continue
+
             return frame
-            
         except Exception as e:
             logger.error(f"Error drawing detections: {e}")
             return frame

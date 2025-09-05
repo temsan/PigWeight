@@ -56,25 +56,36 @@ def download_model():
         print(f"Model already exists at {MODEL_PATH}")
 
 def install_requirements():
-    print("Installing required packages from requirements.txt...")
+    """Установка минимальных зависимостей"""
+    print("📦 Installing minimal dependencies...")
     try:
+        # Используем основной requirements файл (теперь минимальный)
         requirements_path = os.path.join(os.path.dirname(__file__), 'requirements.txt')
         if not os.path.exists(requirements_path):
-            print("Error: requirements.txt not found!")
-            raise FileNotFoundError("requirements.txt not found")
-                
+            print("❌ requirements.txt not found!")
+            return
+
+        python_exe = sys.executable
         subprocess.check_call([
-            sys.__executable__ if hasattr(sys, "__executable__") else sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-r",
-            requirements_path
+            python_exe, "-m", "pip", "install", "-r", requirements_path
         ])
-        print("All required packages installed successfully")
+        print("✅ Dependencies installed successfully")
+
+        # Быстрая проверка системы
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+                print(f"🎯 CUDA ready: {gpu_name}")
+            else:
+                print("💻 Using CPU (CUDA not available)")
+        except ImportError:
+            print("⚠️ PyTorch not available")
+
     except subprocess.CalledProcessError as e:
-        print(f"Error installing packages: {str(e)}")
-        raise
+        print(f"❌ Installation error: {e}")
+        print("💡 Try installing minimal dependencies manually:")
+        print("   pip install fastapi uvicorn torch ultralytics opencv-python")
 
 def convert_to_onnx():
     if not os.path.exists(ONNX_PATH) or os.path.getmtime(MODEL_PATH) > os.path.getmtime(ONNX_PATH):
@@ -112,7 +123,7 @@ def main():
         ensure_dir('stream')
         ensure_dir('uploads')
 
-        install_requirements()
+        # install_requirements()       
 
         # Import ASGI app and start server
         logger.info(f'Starting server at http://{HOST}:{PORT}')
@@ -137,7 +148,14 @@ def main():
                 host=HOST,
                 port=PORT,
                 reload=RELOAD or DEBUG,  # Релоад включается, если включён RELOAD или DEBUG
-                log_level="debug" if DEBUG else "info"
+                log_level="debug" if DEBUG else "info",
+                # Исключаем директории, которые часто меняются и провоцируют бесконечный reload
+                reload_excludes=[
+                    "logs",
+                    "uploads",
+                    "records",
+                    "models",
+                ]
             )
         except Exception as e:
             logger.error(f'Error starting server via uvicorn: {str(e)}')
@@ -146,5 +164,22 @@ def main():
         logger.error(f'Error starting server: {str(e)}')
         sys.exit(1)
 
-if __name__ == '__main__':
+def main_with_args():
+    """Главная функция с обработкой аргументов командной строки"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='PigWeight - Video Processing Server')
+    parser.add_argument('--install', action='store_true',
+                       help='Установить все зависимости')
+
+    args = parser.parse_args()
+
+    if args.install:
+        install_requirements()
+        return
+
+    # Запуск сервера
     main()
+
+if __name__ == '__main__':
+    main_with_args()

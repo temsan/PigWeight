@@ -42,9 +42,9 @@
   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden;">
             <div class="top-toolbar minimal glass sticky-top" id="topToolbar">
       <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
+        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight Monitor</h2>
         <div style="flex:1 1 auto;"></div>
-
+        <button onclick="window.open('/dashboard', '_blank')" class="pill secondary" style="font-size:13px; padding:6px 12px; height:36px;">📊 Журнал актов</button>
         <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
           <div id="streamRadios" class="toggle-group compact"></div>
         </div>
@@ -89,10 +89,9 @@
         <div class="right-col card glass rounded-xl" style="flex:0 0 480px; max-width:480px; order:1; position: relative;">
           <!-- Навигационные вкладки -->
           <div class="panel-tabs" style="display:flex; padding:8px 16px 0; margin-bottom:8px; border-bottom:1px solid rgba(60,90,140,.12);">
-            <button class="tab-btn active" onclick="switchPanel('live')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; border-bottom:2px solid #007bff; color:#007bff; font-weight:500; font-size:12px;">Live</button>
-            <button class="tab-btn" onclick="switchPanel('weighing')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; color:#666; font-size:12px;">Взвешивания</button>
-            <button class="tab-btn" onclick="switchPanel('logs')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; color:#666; font-size:12px;">Журналы</button>
-            <button class="tab-btn" onclick="switchPanel('verification')" style="flex:1; padding:6px; border:none; background:none; cursor:pointer; color:#666; font-size:12px;">Сверка</button>
+            <button class="tab-btn active" onclick="switchPanel('live')" style="flex:1; padding:8px; border:none; background:none; cursor:pointer; border-bottom:2px solid #007bff; color:#007bff; font-weight:500;">Live</button>
+            <button class="tab-btn" onclick="switchPanel('verification')" style="flex:1; padding:8px; border:none; background:none; cursor:pointer; color:#666;">Верификация</button>
+            <button class="tab-btn" onclick="switchPanel('analysis')" style="flex:1; padding:8px; border:none; background:none; cursor:pointer; color:#666;">Анализ</button>
           </div>
 
           <!-- Панель Live (текущий контент) -->
@@ -139,131 +138,51 @@
             <canvas id="liveCountChart" height="160" style="width:100%; height:160px; flex:0 0 auto; border:1px solid rgba(60,90,140,.12); background:rgba(240,245,252,0.9);"></canvas>
           </div>
 
-          <!-- Панель Взвешивания -->
-          <div id="weighingPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px; display:none;">
-            <h3 style="margin:0 0 12px 0; color:#1f3d6b;">Журналирование актов взвешивания</h3>
-            
-            <!-- Статистика текущего сеанса -->
-            <div class="weighing-stats" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; margin-bottom:12px;">
-              <div class="stat-box" style="background:rgba(40,167,69,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#28a745;" id="weighingLeftCount">0</div>
-                <div style="font-size:10px; color:#155724;">Слева</div>
-              </div>
-              <div class="stat-box" style="background:rgba(23,162,184,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#17a2b8;" id="weighingRightCount">0</div>
-                <div style="font-size:10px; color:#0c5460;">Справа</div>
-              </div>
-              <div class="stat-box" style="background:rgba(255,193,7,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#ffc107;" id="weighingDiff">0</div>
-                <div style="font-size:10px; color:#856404;">Разница</div>
-              </div>
-            </div>
-
-            <!-- Форма записи акта -->
-            <div class="weighing-form" style="background:rgba(240,245,252,0.5); padding:12px; border-radius:8px; margin-bottom:12px;">
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
-                <div>
-                  <label style="font-size:11px; color:#666;">Дата</label>
-                  <input type="date" id="weighingDate" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
-                </div>
-                <div>
-                  <label style="font-size:11px; color:#666;">Время</label>
-                  <input type="time" id="weighingTime" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
-                <div>
-                  <label style="font-size:11px; color:#666;">Группа/Секция</label>
-                  <input type="text" id="weighingGroup" placeholder="6B 4,5" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
-                </div>
-                <div>
-                  <label style="font-size:11px; color:#666;">Всего свиней</label>
-                  <input type="number" id="weighingTotal" min="1" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-                <div>
-                  <label style="font-size:11px; color:#666;">Общий вес (кг)</label>
-                  <input type="number" id="weighingWeight" step="0.1" min="0" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;" />
-                </div>
-                <div>
-                  <label style="font-size:11px; color:#666;">Средний вес</label>
-                  <input type="number" id="weighingAvgWeight" step="0.01" readonly style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f8f9fa;" />
-                </div>
-              </div>
-            </div>
-
-            <button id="saveWeighingBtn" class="pill success" style="height:36px; font-size:14px;">💾 Сохранить акт взвешивания</button>
-          </div>
-
-          <!-- Панель Журналов -->
-          <div id="logsPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px; display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <h3 style="margin:0; color:#1f3d6b;">Журнал взвешиваний</h3>
-              <button id="exportLogsBtn" class="pill secondary" style="height:28px; font-size:11px; padding:4px 8px;">📥 Экспорт</button>
-            </div>
-
-            <!-- Фильтры -->
-            <div class="logs-filters" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:12px;">
-              <div>
-                <label style="font-size:11px; color:#666;">От даты</label>
-                <input type="date" id="logsDateFrom" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:11px;" />
-              </div>
-              <div>
-                <label style="font-size:11px; color:#666;">До даты</label>
-                <input type="date" id="logsDateTo" style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:11px;" />
-              </div>
-            </div>
-
-            <!-- Список записей с группировкой по датам -->
-            <div class="logs-list" style="flex:1; overflow-y:auto; max-height:300px;">
-              <div id="logsList" style="display:flex; flex-direction:column; gap:4px;">
-                <!-- Записи журнала будут добавлены сюда -->
-              </div>
-            </div>
-
-            <button id="refreshLogsBtn" class="pill secondary" style="height:32px; font-size:12px;">🔄 Обновить</button>
-          </div>
-
-          <!-- Панель Сверки -->
+          <!-- Панель Верификации -->
           <div id="verificationPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px; display:none;">
-            <h3 style="margin:0 0 12px 0; color:#1f3d6b;">Сверка с файлом замеров</h3>
+            <h3 style="margin:0 0 12px 0; color:#1f3d6b;">Верификация актов</h3>
 
-            <!-- Загрузка файла для сверки -->
+            <div class="verification-stats" style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; margin-bottom:12px;">
+              <div class="stat-box" style="background:rgba(40,167,69,0.1); padding:8px; border-radius:6px; text-align:center;">
+                <div style="font-size:18px; font-weight:700; color:#28a745;" id="verifiedCount">0</div>
+                <div style="font-size:11px; color:#155724;">Проверено</div>
+              </div>
+              <div class="stat-box" style="background:rgba(255,193,7,0.1); padding:8px; border-radius:6px; text-align:center;">
+                <div style="font-size:18px; font-weight:700; color:#ffc107;" id="discrepancyCount">0</div>
+                <div style="font-size:11px; color:#856404;">Расхождения</div>
+              </div>
+            </div>
+
+            <div class="verification-list" style="flex:1; overflow-y:auto; max-height:300px;">
+              <div id="verificationItems" style="display:flex; flex-direction:column; gap:6px;">
+                <!-- Записи верификации будут добавлены сюда -->
+              </div>
+            </div>
+
+            <button id="refreshVerificationBtn" class="pill secondary" style="height:36px; font-size:14px;">Обновить</button>
+          </div>
+
+          <!-- Панель Анализа -->
+          <div id="analysisPanel" class="panel-content" style="padding:14px 16px; display:flex; flex-direction:column; gap:14px; display:none;">
+            <h3 style="margin:0 0 12px 0; color:#1f3d6b;">Анализ файлов</h3>
+
             <div class="upload-section" style="margin-bottom:12px;">
-              <div class="upload-area" id="verificationUploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.3s ease; background: rgba(255,255,255,0.5);">
+              <div class="upload-area" id="fileUploadArea" style="border: 2px dashed #ccc; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; background: rgba(255,255,255,0.5);">
                 <div>
-                  <div style="font-size:13px; color:#666; margin-bottom:4px;">📎 Загрузить файл замеров</div>
-                  <div style="font-size:11px; color:#999;">Excel (.xlsx, .xls) или CSV</div>
+                  <div style="font-size:14px; color:#666; margin-bottom:4px;">📎 Загрузить файл замера</div>
+                  <div style="font-size:12px; color:#999;">Excel (.xlsx, .xls)</div>
                 </div>
-                <input type="file" id="verificationFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+                <input type="file" id="analysisFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
               </div>
             </div>
 
-            <!-- Статистика сверки -->
-            <div class="verification-stats" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; margin-bottom:12px;">
-              <div class="stat-box" style="background:rgba(40,167,69,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#28a745;" id="verificationMatches">0</div>
-                <div style="font-size:10px; color:#155724;">Совпадений</div>
-              </div>
-              <div class="stat-box" style="background:rgba(255,193,7,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#ffc107;" id="verificationDiffs">0</div>
-                <div style="font-size:10px; color:#856404;">Расхождений</div>
-              </div>
-              <div class="stat-box" style="background:rgba(220,53,69,0.1); padding:6px; border-radius:4px; text-align:center;">
-                <div style="font-size:16px; font-weight:700; color:#dc3545;" id="verificationMissing">0</div>
-                <div style="font-size:10px; color:#721c24;">Не найдено</div>
+            <div class="analysis-results" style="flex:1; overflow-y:auto; max-height:250px;">
+              <div id="analysisResults" style="display:flex; flex-direction:column; gap:8px;">
+                <!-- Результаты анализа будут добавлены сюда -->
               </div>
             </div>
 
-            <!-- Результаты сверки -->
-            <div class="verification-results" style="flex:1; overflow-y:auto; max-height:200px;">
-              <div id="verificationResults" style="display:flex; flex-direction:column; gap:4px;">
-                <!-- Результаты сверки будут добавлены сюда -->
-              </div>
-            </div>
-
-            <button id="startVerificationBtn" class="pill success" style="height:36px; font-size:14px;" disabled>🔍 Начать сверку</button>
+            <button id="analyzeFilesBtn" class="pill success" style="height:36px; font-size:14px;" disabled>Анализировать</button>
           </div>
         </div>
       </div>
@@ -428,8 +347,9 @@
             try { videoStream.style.display = 'none'; } catch (e) {}
             try { document.getElementById('webrtcVideo').style.display = 'block'; } catch (e) {}
             try {
-                showLoader('Подключение WebRTC…');
                 await startWebRTCClient(streamId);
+                // ensure loading overlay is shown until first playing event
+                try { showLoader('Подключение WebRTC…'); } catch (e) {}
             } catch (err) {
                 console.error('WebRTC failed, fallback to MJPEG', err);
                 try { await stopWebRTCClient(); } catch(_) {}
@@ -521,12 +441,12 @@
                 if (v) {
                     try { v.style.display = 'block'; v.style.opacity = '1'; v.style.zIndex = '0'; } catch(e){}
                     v.srcObject = evt.streams[0];
-                    // hide loader immediately when remote track arrives
-                    hideLoader();
-                    // also keep playing listener to ensure opacity on actual playback
+                    // hide loader immediately when remote track arrives (will be removed again on playing)
+                    try { hideLoader(); } catch(e){}
+                    // still keep playing listener to ensure opacity on actual playback
                     const onPlay = () => {
                         try { hasFirstFrame = true; v.style.opacity = '1'; } catch (e) {}
-                        hideLoader();
+                        try { hideLoader(); } catch (e) {}
                         v.removeEventListener('playing', onPlay);
                     };
                     v.addEventListener('playing', onPlay);
@@ -574,8 +494,6 @@
         } catch (e) {
             console.error('WebRTC start error', e);
             streamStatus.textContent = 'WebRTC error';
-            hideLoader();
-            throw e; // Re-throw to trigger fallback
         }
     }
 
@@ -1527,11 +1445,7 @@
       }
 
       // Загружаем данные для панели
-      if (panelName === 'weighing') {
-        loadWeighingData();
-      } else if (panelName === 'logs') {
-        loadLogsData();
-      } else if (panelName === 'verification') {
+      if (panelName === 'verification') {
         loadVerificationData();
       }
     }
@@ -1822,375 +1736,14 @@
       }
     });
 
-    // === ФУНКЦИИ ДЛЯ НОВЫХ ПАНЕЛЕЙ ===
-
-    // Загрузка данных взвешивания
-    function loadWeighingData() {
-      // Устанавливаем текущие дату и время
-      const now = new Date();
-      document.getElementById('weighingDate').value = now.toISOString().split('T')[0];
-      document.getElementById('weighingTime').value = now.toTimeString().slice(0, 5);
-      
-      // Обновляем счетчики из текущего потока
-      updateWeighingCounters();
-    }
-
-    // Обновление счетчиков взвешивания
-    function updateWeighingCounters() {
-      try {
-        const leftCount = parseInt(leftInEl.textContent) || 0;
-        const rightCount = parseInt(rightInEl.textContent) || 0;
-        const diff = Math.abs(leftCount - rightCount);
-        
-        document.getElementById('weighingLeftCount').textContent = leftCount;
-        document.getElementById('weighingRightCount').textContent = rightCount;
-        document.getElementById('weighingDiff').textContent = diff;
-        
-        // Автоматически заполняем общее количество
-        const totalField = document.getElementById('weighingTotal');
-        if (!totalField.value && leftCount > 0) {
-          totalField.value = leftCount;
-        }
-      } catch (e) {
-        console.error('Error updating weighing counters:', e);
-      }
-    }
-
-    // Расчет среднего веса
-    function calculateAvgWeight() {
-      const total = parseFloat(document.getElementById('weighingTotal').value) || 0;
-      const weight = parseFloat(document.getElementById('weighingWeight').value) || 0;
-      const avgField = document.getElementById('weighingAvgWeight');
-      
-      if (total > 0 && weight > 0) {
-        avgField.value = (weight / total).toFixed(2);
-      } else {
-        avgField.value = '';
-      }
-    }
-
-    // Сохранение акта взвешивания
-    async function saveWeighingAct() {
-      try {
-        const data = {
-          date: document.getElementById('weighingDate').value,
-          time: document.getElementById('weighingTime').value,
-          group: document.getElementById('weighingGroup').value,
-          total: parseInt(document.getElementById('weighingTotal').value) || 0,
-          weight: parseFloat(document.getElementById('weighingWeight').value) || 0,
-          avg_weight: parseFloat(document.getElementById('weighingAvgWeight').value) || 0,
-          left_count: parseInt(document.getElementById('weighingLeftCount').textContent) || 0,
-          right_count: parseInt(document.getElementById('weighingRightCount').textContent) || 0,
-          stream_id: activeStreamId
-        };
-
-        if (!data.date || !data.group || data.total <= 0 || data.weight <= 0) {
-          alert('Пожалуйста, заполните все обязательные поля');
-          return;
-        }
-
-        const response = await fetch('/api/weighing/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-
-        if (response.ok) {
-          alert('Акт взвешивания сохранен успешно!');
-          // Очищаем форму
-          document.getElementById('weighingGroup').value = '';
-          document.getElementById('weighingTotal').value = '';
-          document.getElementById('weighingWeight').value = '';
-          document.getElementById('weighingAvgWeight').value = '';
-        } else {
-          const error = await response.json();
-          alert('Ошибка сохранения: ' + (error.detail || 'Неизвестная ошибка'));
-        }
-      } catch (error) {
-        console.error('Error saving weighing act:', error);
-        alert('Ошибка сохранения: ' + error.message);
-      }
-    }
-
-    // Загрузка данных журналов
-    async function loadLogsData() {
-      try {
-        // Устанавливаем диапазон дат (последние 30 дней)
-        const now = new Date();
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        
-        document.getElementById('logsDateTo').value = now.toISOString().split('T')[0];
-        document.getElementById('logsDateFrom').value = monthAgo.toISOString().split('T')[0];
-        
-        await refreshLogs();
-      } catch (error) {
-        console.error('Error loading logs data:', error);
-      }
-    }
-
-    // Обновление журналов
-    async function refreshLogs() {
-      try {
-        const dateFrom = document.getElementById('logsDateFrom').value;
-        const dateTo = document.getElementById('logsDateTo').value;
-        
-        const response = await fetch(`/api/weighing/logs?date_from=${dateFrom}&date_to=${dateTo}`);
-        const data = await response.json();
-
-        const logsList = document.getElementById('logsList');
-        logsList.innerHTML = '';
-
-        if (data.length === 0) {
-          logsList.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет записей за выбранный период</div>';
-          return;
-        }
-
-        // Группируем по датам
-        const groupedByDate = {};
-        data.forEach(log => {
-          const date = log.date;
-          if (!groupedByDate[date]) {
-            groupedByDate[date] = [];
-          }
-          groupedByDate[date].push(log);
-        });
-
-        // Создаем группы с возможностью сворачивания
-        Object.keys(groupedByDate).sort().reverse().forEach(date => {
-          const logs = groupedByDate[date];
-          const dateGroup = document.createElement('div');
-          dateGroup.className = 'date-group';
-          
-          const dateHeader = document.createElement('div');
-          dateHeader.style.cssText = `
-            background: rgba(0,123,255,0.1); 
-            padding: 8px 12px; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            font-weight: 600; 
-            font-size: 13px; 
-            color: #0066cc;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          `;
-          
-          const totalWeight = logs.reduce((sum, log) => sum + (log.weight || 0), 0);
-          const totalCount = logs.reduce((sum, log) => sum + (log.total || 0), 0);
-          
-          dateHeader.innerHTML = `
-            <span>📅 ${date} (${logs.length} актов)</span>
-            <span style="font-size:11px;">🐷 ${totalCount} шт, ⚖️ ${totalWeight.toFixed(1)} кг</span>
-          `;
-          
-          const logsContainer = document.createElement('div');
-          logsContainer.style.cssText = 'margin-left: 16px; margin-top: 4px;';
-          
-          logs.forEach(log => {
-            const logItem = document.createElement('div');
-            logItem.style.cssText = `
-              background: rgba(255,255,255,0.7);
-              border: 1px solid rgba(60,90,140,0.1);
-              border-radius: 4px;
-              padding: 6px 8px;
-              margin-bottom: 4px;
-              font-size: 11px;
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 8px;
-            `;
-            
-            logItem.innerHTML = `
-              <div><strong>${log.group}</strong><br/><span style="color:#666;">${log.time}</span></div>
-              <div>🐷 ${log.total} шт<br/>⚖️ ${log.weight} кг</div>
-              <div>📊 ${log.avg_weight} кг/шт<br/><span style="color:#666;">±${Math.abs(log.left_count - log.right_count)}</span></div>
-            `;
-            
-            logsContainer.appendChild(logItem);
-          });
-          
-          // Логика сворачивания/разворачивания
-          let isExpanded = true;
-          dateHeader.onclick = () => {
-            isExpanded = !isExpanded;
-            logsContainer.style.display = isExpanded ? 'block' : 'none';
-            dateHeader.style.opacity = isExpanded ? '1' : '0.7';
-          };
-          
-          dateGroup.appendChild(dateHeader);
-          dateGroup.appendChild(logsContainer);
-          logsList.appendChild(dateGroup);
-        });
-
-      } catch (error) {
-        console.error('Error refreshing logs:', error);
-        document.getElementById('logsList').innerHTML = '<div style="text-align:center; color:#dc3545; padding:20px;">Ошибка загрузки данных</div>';
-      }
-    }
-
-    // Экспорт журналов
-    async function exportLogs() {
-      try {
-        const dateFrom = document.getElementById('logsDateFrom').value;
-        const dateTo = document.getElementById('logsDateTo').value;
-        
-        const response = await fetch(`/api/weighing/export?date_from=${dateFrom}&date_to=${dateTo}`);
-        const blob = await response.blob();
-        
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `weighing_logs_${dateFrom}_${dateTo}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (error) {
-        console.error('Error exporting logs:', error);
-        alert('Ошибка экспорта: ' + error.message);
-      }
-    }
-
-    // Новая функция загрузки данных верификации
-    async function loadVerificationData() {
-      // Пока оставляем заглушку, будет доработана позже
-      console.log('Loading verification data...');
-    }
-
-    // === ОБРАБОТЧИКИ СОБЫТИЙ ===
-
-    // Обработчики для панели взвешивания
+    // Автоматическая загрузка данных верификации при запуске
     document.addEventListener('DOMContentLoaded', () => {
-      // Автоматический расчет среднего веса
-      document.getElementById('weighingTotal').addEventListener('input', calculateAvgWeight);
-      document.getElementById('weighingWeight').addEventListener('input', calculateAvgWeight);
-      
-      // Сохранение акта
-      document.getElementById('saveWeighingBtn').addEventListener('click', saveWeighingAct);
-      
-      // Обработчики для панели журналов
-      document.getElementById('refreshLogsBtn').addEventListener('click', refreshLogs);
-      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
-      document.getElementById('logsDateFrom').addEventListener('change', refreshLogs);
-      document.getElementById('logsDateTo').addEventListener('change', refreshLogs);
-      
-      // Обработчики для панели сверки
-      const verificationUploadArea = document.getElementById('verificationUploadArea');
-      const verificationFileInput = document.getElementById('verificationFileInput');
-      
-      verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
-      verificationUploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        verificationUploadArea.style.borderColor = '#007bff';
-        verificationUploadArea.style.background = 'rgba(0,123,255,0.1)';
-      });
-      verificationUploadArea.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
-      });
-      verificationUploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
-        if (e.dataTransfer.files.length > 0) {
-          verificationFileInput.files = e.dataTransfer.files;
-          handleVerificationFile();
-        }
-      });
-      
-      verificationFileInput.addEventListener('change', handleVerificationFile);
-      document.getElementById('startVerificationBtn').addEventListener('click', startVerification);
-    });
+      // ... существующий код ...
 
-    // Обработка файла для сверки
-    function handleVerificationFile() {
-      const file = document.getElementById('verificationFileInput').files[0];
-      const startBtn = document.getElementById('startVerificationBtn');
-      
-      if (file) {
-        document.querySelector('#verificationUploadArea div div').textContent = `📎 ${file.name}`;
-        startBtn.disabled = false;
-      } else {
-        startBtn.disabled = true;
-      }
-    }
-
-    // Начало сверки
-    async function startVerification() {
-      try {
-        const fileInput = document.getElementById('verificationFileInput');
-        if (!fileInput.files[0]) {
-          alert('Пожалуйста, выберите файл для сверки');
-          return;
-        }
-
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
-
-        const response = await fetch('/api/verification/compare', {
-          method: 'POST',
-          body: formData
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-          displayVerificationResults(result);
-        } else {
-          alert('Ошибка сверки: ' + (result.detail || 'Неизвестная ошибка'));
-        }
-      } catch (error) {
-        console.error('Error during verification:', error);
-        alert('Ошибка сверки: ' + error.message);
-      }
-    }
-
-    // Отображение результатов сверки
-    function displayVerificationResults(result) {
-      document.getElementById('verificationMatches').textContent = result.matches || 0;
-      document.getElementById('verificationDiffs').textContent = result.differences || 0;
-      document.getElementById('verificationMissing').textContent = result.missing || 0;
-
-      const resultsContainer = document.getElementById('verificationResults');
-      resultsContainer.innerHTML = '';
-
-      if (result.details && result.details.length > 0) {
-        result.details.forEach(item => {
-          const resultItem = document.createElement('div');
-          resultItem.style.cssText = `
-            padding: 6px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            margin-bottom: 4px;
-            ${item.status === 'match' ? 'background: rgba(40,167,69,0.1); border: 1px solid rgba(40,167,69,0.2);' :
-              item.status === 'diff' ? 'background: rgba(255,193,7,0.1); border: 1px solid rgba(255,193,7,0.2);' :
-              'background: rgba(220,53,69,0.1); border: 1px solid rgba(220,53,69,0.2);'}
-          `;
-          
-          const statusIcon = item.status === 'match' ? '✅' : item.status === 'diff' ? '⚠️' : '❌';
-          resultItem.innerHTML = `
-            <div><strong>${statusIcon} ${item.group} (${item.date})</strong></div>
-            <div style="margin-top:2px;">
-              Система: ${item.system_weight}кг (${item.system_count}шт) | 
-              Файл: ${item.file_weight}кг (${item.file_count}шт)
-            </div>
-          `;
-          
-          resultsContainer.appendChild(resultItem);
-        });
-      } else {
-        resultsContainer.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет данных для отображения</div>';
-      }
-    }
-
-    // Автоматическая загрузка данных при запуске
-    document.addEventListener('DOMContentLoaded', () => {
-      // Обновляем счетчики взвешивания каждые 2 секунды, если панель активна
-      setInterval(() => {
-        const weighingPanel = document.getElementById('weighingPanel');
-        if (weighingPanel && weighingPanel.classList.contains('active')) {
-          updateWeighingCounters();
+      // Загружаем данные верификации через 2 секунды после загрузки страницы
+      setTimeout(() => {
+        if (document.getElementById('verificationPanel').classList.contains('active')) {
+          loadVerificationData();
         }
       }, 2000);
     });

@@ -1,289 +1,259 @@
 """
-Упрощенные эндпоинты без лишних конверсий для максимальной производительности
+Упрощенные API endpoints с использованием единого процессора
+Заменяет все legacy endpoints
 """
-import asyncio
-import json
-import time
-from pathlib import Path
-from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Query, UploadFile, File, Form, Response, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
-
-from .lightweight_processor import (
-    LightweightVideoProcessor,
-    StreamingVideoProcessor,
-    encode_frame_fast,
-    FrameResult
-)
-
+import os
 import logging
+from pathlib import Path
+from typing import Dict, Optional, Any
+from fastapi import FastAPI, Query, UploadFile, File, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse
+import cv2
+import numpy as np
+
+# Импортируем единый процессор
+try:
+    from core.processor import get_processor, ProcessingOptions
+    HAVE_UNIFIED_PROCESSOR = True
+except ImportError:
+    HAVE_UNIFIED_PROCESSOR = False
+    logging.error("❌ Unified processor not available")
+
 logger = logging.getLogger(__name__)
 
-# Глобальное хранилище процессоров
-processors: Dict[str, LightweightVideoProcessor] = {}
-streaming_processors: Dict[str, StreamingVideoProcessor] = {}
+# Конфигурация
+VIDEO_DIR = Path("uploads")
+RECORDS_DIR = Path("records")
 
-router = APIRouter(prefix="/api/simple", tags=["simple"])
+# Глобальный экземпляр процессора
+_processor = None
 
-@router.post("/video/upload")
-async def upload_video_simple(
-    id: str = Form(...),
-    file: UploadFile = File(...)
-):
-    """Загрузка видео без лишней обработки"""
-    try:
-        # Очистка старого процессора если есть
-        if id in processors:
-            processors[id].close()
-            del processors[id]
-            
-        # Сохраняем файл
-        upload_dir = Path("uploads")
-        upload_dir.mkdir(exist_ok=True)
+def get_video_processor():
+    """Получение процессора с автоконфигурацией"""
+    global _processor
+    if _processor is None and HAVE_UNIFIED_PROCESSOR:
+        model_path = os.getenv("MODEL_PATH", "models/pig_yolo11-seg.v4.pt")
+        if not Path(model_path).exists():
+            # Пробуем найти любую доступную модель
+            models_dir = Path("models")
+            for model_file in models_dir.glob("*.pt"):
+                model_path = str(model_file)
+                break
         
-        file_path = upload_dir / f"{id}_{file.filename}"
-        
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-            
-        # Создаем процессор
-        processor = LightweightVideoProcessor(str(file_path))
-        if not processor.open():
-            raise HTTPException(status_code=400, detail="Cannot open video file")
-            
-        processors[id] = processor
-        
-        return {
-            "id": id,
-            "filename": file.filename,
-            "fps": processor.fps,
-            "duration": processor.duration,
-            "total_frames": processor.total_frames
-        }
-        
-    except Exception as e:
-        logger.error(f"Upload error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/video/{video_id}/frame")
-async def get_frame_simple(
-    video_id: str,
-    t: float = Query(..., description="Timestamp in seconds"),
-    inference: bool = Query(default=False),
-    quality: int = Query(default=85, ge=10, le=100)
-):
-    """Сверхбыстрое получение кадра для максимальной отзывчивости"""
-    if video_id not in processors:
-        raise HTTPException(status_code=404, detail="Video not found")
-        
-    processor = processors[video_id]
-    
-    try:
-        start_time = time.time()
-        
-        # По умолчанию используем быстрый режим без инференса
-        if inference:
-            # Инференс только при явном запросе
-            if not processor.inference_enabled:
-                processor.enable_inference("models/yolo11n.pt")  
-            result = processor.get_frame_with_inference(t)
-            if not result:
-                raise HTTPException(status_code=404, detail="Frame not found")
-            frame = result.frame
-            count = result.count
-            inference_time = result.inference_time_ms
-        else:
-            # Быстрый режим - только кадр
-            frame = processor.get_frame_fast(t)
-            if frame is None:
-                raise HTTPException(status_code=404, detail="Frame not found")
-            count = 0
-            inference_time = 0.0
-                
-        # Максимально быстрое кодирование
-        jpeg_bytes = encode_frame_fast(frame, quality)
-        if not jpeg_bytes:
-            raise HTTPException(status_code=500, detail="Encoding failed")
-            
-        total_time = (time.time() - start_time) * 1000
-        
-        headers = {
-            "X-Processing-Time": f"{total_time:.1f}ms",
-            "X-Frame-Time": f"{t:.3f}",
-            "X-Inference": str(inference).lower(),
-            "X-Count": str(count),
-            "X-Inference-Time": f"{inference_time:.1f}ms",
-            "Cache-Control": "no-cache"  # Для отзывчивости
-        }
-            
-        return Response(
-            content=jpeg_bytes,
-            media_type="image/jpeg",
-            headers=headers
+        options = ProcessingOptions(
+            confidence_threshold=float(os.getenv("CONF_THRESHOLD", "0.3")),
+            img_size=int(os.getenv("IMG_SIZE", "640")),
+            device=os.getenv("DEVICE", "auto"),
+            batch_size=int(os.getenv("BATCH_SIZE", "1"))
         )
         
-    except Exception as e:
-        logger.error(f"Frame processing error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/video/{video_id}/stream")
-async def start_stream_simple(
-    video_id: str,
-    inference: bool = Query(default=False),
-    fps: Optional[float] = Query(default=None)
-):
-    """Запуск простого стрима без лишних накладок"""
-    if video_id not in processors:
-        raise HTTPException(status_code=404, detail="Video not found")
-        
-    # Создаем стрим процессор
-    base_processor = processors[video_id]
-    stream_processor = StreamingVideoProcessor(base_processor.video_path)
-    
-    model_path = "models/yolo11n.pt" if inference else None
-    success = await stream_processor.start_streaming(inference, model_path)
-    
-    if not success:
-        raise HTTPException(status_code=500, detail="Cannot start streaming")
-        
-    streaming_processors[video_id] = stream_processor
-    
-    target_fps = fps or base_processor.fps
-    frame_interval = 1.0 / target_fps
-    
-    async def generate_frames():
-        """Генератор кадров для стрима"""
-        boundary = "frame_boundary"
-        
         try:
-            while stream_processor.is_playing:
-                frame_start = time.time()
-                
-                result = await stream_processor.get_frame_stream()
-                if not result:
+            _processor = get_processor(model_path, options)
+            logger.info(f"✅ Video processor initialized with model: {model_path}")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize processor: {e}")
+            _processor = None
+    
+    return _processor
+
+def setup_endpoints(app: FastAPI):
+    """Настройка упрощенных endpoints"""
+    
+    @app.get("/api/video/process")
+    async def process_video_endpoint(
+        video_id: str = Query(..., description="ID видеофайла"),
+        frame_skip: int = Query(1, description="Обрабатывать каждый N-й кадр"),
+        start_sec: float = Query(0, description="Начальное время в секундах"),
+        end_sec: Optional[float] = Query(None, description="Конечное время в секундах")
+    ):
+        """Обработка видеофайла с детекцией свиней"""
+        try:
+            # Проверяем процессор
+            processor = get_video_processor()
+            if not processor:
+                return JSONResponse(
+                    {"error": "Video processor not available"}, 
+                    status_code=503
+                )
+            
+            # Находим видеофайл
+            video_path = None
+            for ext in ['.mp4', '.avi', '.mov', '.mkv']:
+                candidate = VIDEO_DIR / f"{video_id}{ext}"
+                if candidate.exists():
+                    video_path = candidate
+                    break
+            
+            if not video_path:
+                return JSONResponse(
+                    {"error": f"Video {video_id} not found"}, 
+                    status_code=404
+                )
+            
+            logger.info(f"🎬 Processing video: {video_path}")
+            
+            # Обрабатываем видео
+            results = await processor.process_video(
+                video_path,
+                frame_skip=frame_skip
+            )
+            
+            # Сохраняем результаты
+            output_file = RECORDS_DIR / f"{video_id}_analysis.json"
+            RECORDS_DIR.mkdir(exist_ok=True)
+            
+            import json
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+            
+            logger.info(f"✅ Analysis saved to: {output_file}")
+            
+            return {
+                "status": "success",
+                "video_id": video_id,
+                "video_path": str(video_path),
+                "output_file": str(output_file),
+                "processor_stats": processor.get_stats(),
+                **results
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing video {video_id}: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
+    
+    @app.get("/api/video/frame")
+    async def process_frame_endpoint(
+        video_id: str = Query(..., description="ID видеофайла"),
+        frame_number: int = Query(..., description="Номер кадра"),
+        timestamp: Optional[float] = Query(None, description="Временная метка")
+    ):
+        """Обработка одного кадра"""
+        try:
+            processor = get_video_processor()
+            if not processor:
+                return JSONResponse(
+                    {"error": "Video processor not available"}, 
+                    status_code=503
+                )
+            
+            # Находим видеофайл
+            video_path = None
+            for ext in ['.mp4', '.avi', '.mov', '.mkv']:
+                candidate = VIDEO_DIR / f"{video_id}{ext}"
+                if candidate.exists():
+                    video_path = candidate
                     break
                     
-                # Быстрое кодирование
-                jpeg_data = encode_frame_fast(result.frame, quality=70)
-                if not jpeg_data:
-                    continue
-                    
-                # Формируем multipart chunk
-                chunk = (
-                    f"--{boundary}\r\n"
-                    "Content-Type: image/jpeg\r\n"
-                    f"Content-Length: {len(jpeg_data)}\r\n"
-                    f"X-Timestamp: {stream_processor.current_time:.3f}\r\n"
-                ).encode() + b"\r\n" + jpeg_data + b"\r\n"
-                
-                yield chunk
-                
-                # Контроль FPS
-                elapsed = time.time() - frame_start
-                sleep_time = max(0, frame_interval - elapsed)
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
+            if not video_path:
+                return JSONResponse(
+                    {"error": f"Video {video_id} not found"}, 
+                    status_code=404
+                )
+            
+            # Извлекаем кадр
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                return JSONResponse(
+                    {"error": "Cannot open video"}, 
+                    status_code=500
+                )
+            
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            cap.release()
+            
+            if not ret:
+                return JSONResponse(
+                    {"error": "Cannot read frame"}, 
+                    status_code=404
+                )
+            
+            # Обрабатываем кадр
+            if timestamp is None:
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25
+                timestamp = frame_number / fps
+            
+            result = await processor.process_frame(frame, frame_number, timestamp)
+            
+            return {
+                "status": "success",
+                "video_id": video_id,
+                "frame_number": frame_number,
+                "timestamp": timestamp,
+                "result": {
+                    "pig_count": result.pig_count,
+                    "detections": result.detections,
+                    "confidence_scores": result.confidence_scores,
+                    "processing_time_ms": result.processing_time_ms
+                }
+            }
                     
         except Exception as e:
-            logger.error(f"Streaming error: {e}")
-        finally:
-            if video_id in streaming_processors:
-                streaming_processors[video_id].stop()
-                del streaming_processors[video_id]
+            logger.error(f"❌ Error processing frame: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
     
-    return StreamingResponse(
-        generate_frames(),
-        media_type="multipart/x-mixed-replace; boundary=frame_boundary"
-    )
-
-@router.post("/video/{video_id}/seek")
-async def seek_simple(
-    video_id: str,
-    timestamp: float = Query(...)
-):
-    """Простой seek без лишних проверок"""
-    if video_id in streaming_processors:
-        streaming_processors[video_id].seek(timestamp)
-        return {"status": "ok", "timestamp": timestamp}
-    else:
-        raise HTTPException(status_code=404, detail="No active stream")
-
-@router.post("/video/{video_id}/stop")
-async def stop_stream_simple(video_id: str):
-    """Остановка стрима"""
-    if video_id in streaming_processors:
-        streaming_processors[video_id].stop()
-        del streaming_processors[video_id]
-        return {"status": "stopped"}
-    else:
-        raise HTTPException(status_code=404, detail="No active stream")
-
-@router.get("/video/{video_id}/info")
-async def get_video_info_simple(video_id: str):
-    """Информация о видео"""
-    if video_id not in processors:
-        raise HTTPException(status_code=404, detail="Video not found")
+    @app.get("/api/system/status")
+    async def system_status():
+        """Статус системы и процессора"""
+        processor = get_video_processor()
         
-    processor = processors[video_id]
-    
-    # Информация о стриме если активен
-    stream_info = None
-    if video_id in streaming_processors:
-        stream_proc = streaming_processors[video_id]
-        stream_info = {
-            "playing": stream_proc.is_playing,
-            "current_time": stream_proc.current_time,
-            "speed": stream_proc.play_speed
+        status = {
+            "unified_processor_available": HAVE_UNIFIED_PROCESSOR,
+            "processor_initialized": processor is not None,
+            "video_directory": str(VIDEO_DIR),
+            "records_directory": str(RECORDS_DIR),
+            "available_videos": []
         }
-    
-    return {
-        "id": video_id,
-        "fps": processor.fps,
-        "duration": processor.duration,
-        "total_frames": processor.total_frames,
-        "cache_size": len(processor.frame_cache),
-        "inference_enabled": processor.inference_enabled,
-        "stream": stream_info
-    }
-
-@router.delete("/video/{video_id}")
-async def delete_video_simple(video_id: str):
-    """Удаление видео и очистка ресурсов"""
-    # Останавливаем стрим если есть
-    if video_id in streaming_processors:
-        streaming_processors[video_id].stop()
-        del streaming_processors[video_id]
         
-    # Закрываем процессор
-    if video_id in processors:
-        processors[video_id].close()
-        del processors[video_id]
+        # Список доступных видео
+        if VIDEO_DIR.exists():
+            for ext in ['.mp4', '.avi', '.mov', '.mkv']:
+                for video_file in VIDEO_DIR.glob(f"*{ext}"):
+                    status["available_videos"].append({
+                        "id": video_file.stem,
+                        "filename": video_file.name,
+                        "size_mb": round(video_file.stat().st_size / 1024 / 1024, 2)
+                    })
         
-    return {"status": "deleted", "id": video_id}
-
-@router.get("/stats")
-async def get_simple_stats():
-    """Статистика упрощенной системы"""
-    return {
-        "active_videos": len(processors),
-        "active_streams": len(streaming_processors),
-        "video_ids": list(processors.keys()),
-        "stream_ids": list(streaming_processors.keys())
-    }
-
-# Функции для интеграции с основным приложением
-def cleanup_all():
-    """Очистка всех ресурсов при shutdown"""
-    for processor in processors.values():
-        processor.close()
-    processors.clear()
+        # Статистика процессора
+        if processor:
+            status["processor_stats"] = processor.get_stats()
+        
+        return status
     
-    for stream_processor in streaming_processors.values():
-        stream_processor.stop()
-    streaming_processors.clear()
-
-def get_processor(video_id: str) -> Optional[LightweightVideoProcessor]:
-    """Получение процессора по ID"""
-    return processors.get(video_id)
+    @app.post("/api/video/upload")
+    async def upload_video(file: UploadFile = File(...)):
+        """Загрузка видеофайла"""
+        try:
+            # Проверяем тип файла
+            if not file.content_type or not file.content_type.startswith('video/'):
+                return JSONResponse(
+                    {"error": "Only video files are allowed"}, 
+                    status_code=400
+                )
+            
+            # Создаем директорию если нужно
+            VIDEO_DIR.mkdir(exist_ok=True)
+            
+            # Сохраняем файл
+            file_path = VIDEO_DIR / file.filename
+            with open(file_path, 'wb') as f:
+                content = await file.read()
+                f.write(content)
+            
+            logger.info(f"📁 Video uploaded: {file_path}")
+            
+            return {
+                "status": "success",
+                "filename": file.filename,
+                "video_id": file_path.stem,
+                "size_mb": round(len(content) / 1024 / 1024, 2),
+                "path": str(file_path)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error uploading video: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
+    
+    logger.info("✅ Simplified endpoints configured")
