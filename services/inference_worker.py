@@ -12,6 +12,7 @@ from datetime import datetime
 from core.frame_broker import FRAME_BROKER
 from core.results_store import RESULTS_STORE
 from core.preprocess import preprocess_for_model, map_polys_to_original
+from core.optimized_preprocess import adaptive_preprocess, center_crop_resize
 from services.model_adapter import ModelAdapter
 
 logger = logging.getLogger("inference_worker")
@@ -119,9 +120,33 @@ class InferenceWorker:
                         orig_sizes.append((0,0))
                     else:
                         orig_h, orig_w = frame.shape[:2]
-                        p = preprocess_for_model(frame, target_size=int(os.getenv('IMG_SIZE', '960')), use_hsv=(os.getenv('USE_HSV','false').lower()=='true'))
+                        # Используем оптимизированную предобработку для соответствия датасету
+                        use_optimized = os.getenv('USE_OPTIMIZED_PREPROCESSING', 'true').lower() == 'true'
+                        target_size = int(os.getenv('IMG_SIZE', '960'))
+                        
+                        if use_optimized:
+                            # Новая оптимизированная предобработка, соответствующая датасету
+                            preprocessing_method = os.getenv('PREPROCESSING_METHOD', 'adaptive')  # adaptive, center_crop, letterbox
+                            if preprocessing_method == 'center_crop':
+                                p = center_crop_resize(frame, target_size)
+                            else:
+                                p = adaptive_preprocess(frame, target_size)
+                        else:
+                            # Старая предобработка (для совместимости)
+                            p = preprocess_for_model(frame, target_size=target_size, use_hsv=(os.getenv('USE_HSV','false').lower()=='true'))
                         imgs.append(p.get('img'))
-                        proc_meta.append({'scale': p.get('scale'), 'pad': p.get('pad')})
+                        # Адаптируем метаданные для совместимости
+                        if 'scale' in p and 'pad' in p:
+                            # Старый формат (letterbox)
+                            proc_meta.append({'scale': p.get('scale'), 'pad': p.get('pad')})
+                        else:
+                            # Новый формат (center_crop) - создаем совместимые метаданные
+                            proc_meta.append({
+                                'scale': 1.0,  # center crop не масштабирует, только обрезает
+                                'pad': (0, 0, 0, 0),  # padding не используется
+                                'method': p.get('method', 'unknown'),
+                                'original_size': p.get('original_size', (orig_w, orig_h))
+                            })
                         orig_sizes.append((orig_w, orig_h))
 
                 # run model if available

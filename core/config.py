@@ -46,6 +46,11 @@ DEFAULT_CONFIG = {
     # Lines for counting
     "LINE_LEFT_X": 0.25,
     "LINE_RIGHT_X": 0.75,
+    
+    # Оптимизированная предобработка
+    "USE_OPTIMIZED_PREPROCESSING": True,
+    "PREPROCESSING_METHOD": "adaptive",  # adaptive, center_crop, letterbox
+    "ANTI_LETTERBOX": False,  # Отключаем для избежания конфликтов
 }
 
 def load_config() -> Dict[str, Any]:

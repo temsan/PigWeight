@@ -40,6 +40,11 @@ IMG_SIZE=960
 BATCH_SIZE=8   # Увеличен для лучшей производительности
 MAX_WAIT_MS=50
 
+# Оптимизированная предобработка (НОВОЕ!)
+USE_OPTIMIZED_PREPROCESSING=true   # Включить оптимизированную предобработку
+PREPROCESSING_METHOD=adaptive      # adaptive, center_crop, letterbox
+ANTI_LETTERBOX=false              # Отключить для избежания конфликтов
+
 # Broker and Results Configuration
 FRAME_BROKER_CACHE=16
 RESULTS_TTL_SECONDS=30
@@ -68,6 +73,10 @@ DEVICE=cuda:0
 USE_HALF=true
 BATCH_SIZE=16
 MODEL_PATH=models/pig_yolo11-seg.v4.pt
+# Оптимизированная предобработка
+USE_OPTIMIZED_PREPROCESSING=true
+PREPROCESSING_METHOD=center_crop
+ANTI_LETTERBOX=false
 ```
 
 ### Для CPU оптимизации:
@@ -76,6 +85,10 @@ DEVICE=cpu
 USE_HALF=false
 BATCH_SIZE=4
 MODEL_PATH=models/pig_yolo11-seg.onnx
+# Оптимизированная предобработка
+USE_OPTIMIZED_PREPROCESSING=true
+PREPROCESSING_METHOD=adaptive
+ANTI_LETTERBOX=false
 ```
 
 ### Для низкой задержки (WebRTC):

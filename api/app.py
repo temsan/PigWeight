@@ -148,6 +148,16 @@ ANTI_LETTERBOX = os.getenv("ANTI_LETTERBOX", "false").lower() == "true"
 AVG_WINDOW = int(os.getenv("AVG_WINDOW", "20"))
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
 
+# Оптимизированная предобработка для соответствия датасету
+USE_OPTIMIZED_PREPROCESSING = os.getenv("USE_OPTIMIZED_PREPROCESSING", "true").lower() == "true"
+PREPROCESSING_METHOD = os.getenv("PREPROCESSING_METHOD", "adaptive")  # adaptive, center_crop, letterbox
+
+# Предупреждение о конфликте настроек
+if USE_OPTIMIZED_PREPROCESSING and ANTI_LETTERBOX:
+    logger.warning("⚠️  ANTI_LETTERBOX=true конфликтует с USE_OPTIMIZED_PREPROCESSING=true")
+    logger.warning("   Рекомендуется установить ANTI_LETTERBOX=false для оптимальной работы")
+    logger.warning("   Оптимизированная предобработка уже включает обработку черных полос")
+
 # Inference device (GPU/CPU)
 try:
     import torch as _torch
@@ -2391,7 +2401,194 @@ async def export_weighing_logs(date_from: str = Query(...), date_to: str = Query
         logger.error(f"Error exporting weighing logs: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+# === API для журнала взвешиваний ===
+
+@app.get("/api/journal/acts")
+async def get_weighing_acts(
+    date_from: str = None,
+    date_to: str = None,
+    camera: str = None,
+    limit: int = 100
+):
+    """Получить акты взвешивания с фильтрацией"""
+    try:
+        acts = load_weighing_acts()
+        
+        # Применяем фильтры
+        filtered_acts = []
+        for act in acts:
+            # Фильтр по дате
+            if date_from and act['date'] < date_from:
+                continue
+            if date_to and act['date'] > date_to:
+                continue
+            # Фильтр по камере
+            if camera and act.get('camera') != camera:
+                continue
+            
+            filtered_acts.append(act)
+        
+        # Сортируем по дате (новые сверху)
+        filtered_acts.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+        
+        # Ограничиваем количество
+        filtered_acts = filtered_acts[:limit]
+        
+        # Добавляем статистику
+        total_count = sum(act['count'] for act in filtered_acts)
+        total_weight = sum(act['weight'] for act in filtered_acts)
+        avg_weight = total_weight / total_count if total_count > 0 else 0
+        
+        return {
+            "acts": filtered_acts,
+            "summary": {
+                "total_acts": len(filtered_acts),
+                "total_count": total_count,
+                "total_weight": round(total_weight, 1),
+                "avg_weight": round(avg_weight, 2)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting weighing acts: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/journal/save")
+async def save_weighing_act(request: Request):
+    """Сохранить новый акт взвешивания"""
+    try:
+        data = await request.json()
+        
+        # Валидация данных
+        count = data.get('count', 0)
+        weight = data.get('weight', 0)
+        camera = data.get('camera', 'cam1')
+        
+        if count <= 0:
+            return JSONResponse({"error": "Количество должно быть больше 0"}, status_code=400)
+        if weight <= 0:
+            return JSONResponse({"error": "Вес должен быть больше 0"}, status_code=400)
+        
+        # Создаем новый акт
+        from datetime import datetime
+        now = datetime.now()
+        
+        new_act = {
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M"),
+            "count": int(count),
+            "weight": float(weight),
+            "camera": camera
+        }
+        
+        # Загружаем существующие акты
+        acts = load_weighing_acts()
+        
+        # Добавляем новый акт в начало
+        acts.insert(0, new_act)
+        
+        # Сохраняем обратно в файл
+        save_weighing_acts(acts)
+        
+        logger.info(f"Сохранен новый акт взвешивания: {count} шт., {weight} кг")
+        
+        return {"success": True, "act": new_act}
+        
+    except Exception as e:
+        logger.error(f"Error saving weighing act: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 # === API для сверки с файлами замеров ===
+
+@app.post("/api/journal/compare")
+async def compare_with_excel(file: UploadFile = File(...)):
+    """Простая сверка актов взвешивания с Excel файлом"""
+    try:
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            return JSONResponse({"error": "Поддерживаются только Excel файлы (.xlsx, .xls)"}, status_code=400)
+        
+        # Сохраняем временный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        try:
+            import pandas as pd
+            # Читаем Excel файл
+            excel_df = pd.read_excel(tmp_path)
+            
+            # Загружаем наши акты
+            acts = load_weighing_acts()
+            
+            # Ищем столбцы с количеством и весом в Excel
+            count_cols = [col for col in excel_df.columns if any(word in col.lower() for word in ['количество', 'count', 'шт', 'голов'])]
+            weight_cols = [col for col in excel_df.columns if any(word in col.lower() for word in ['вес', 'weight', 'кг'])]
+            
+            if not count_cols or not weight_cols:
+                return JSONResponse({"error": "Не найдены столбцы с количеством или весом в Excel файле"}, status_code=400)
+            
+            # Суммируем данные из Excel
+            excel_total_count = int(excel_df[count_cols[0]].sum()) if count_cols else 0
+            excel_total_weight = float(excel_df[weight_cols[0]].sum()) if weight_cols else 0
+            
+            # Суммируем данные из наших актов
+            acts_total_count = sum(act['count'] for act in acts)
+            acts_total_weight = sum(act['weight'] for act in acts)
+            
+            # Вычисляем расхождения
+            count_diff = abs(acts_total_count - excel_total_count)
+            weight_diff = abs(acts_total_weight - excel_total_weight)
+            
+            count_diff_percent = (count_diff / max(acts_total_count, excel_total_count)) * 100 if max(acts_total_count, excel_total_count) > 0 else 0
+            weight_diff_percent = (weight_diff / max(acts_total_weight, excel_total_weight)) * 100 if max(acts_total_weight, excel_total_weight) > 0 else 0
+            
+            # Определяем статус сверки
+            matches = 0
+            differences = 0
+            
+            if count_diff_percent <= 5 and weight_diff_percent <= 5:  # Допуск 5%
+                matches = 1
+                status = "success"
+                message = "Данные соответствуют"
+            else:
+                differences = 1
+                status = "warning"
+                message = f"Расхождения: количество {count_diff_percent:.1f}%, вес {weight_diff_percent:.1f}%"
+            
+            return {
+                "status": status,
+                "message": message,
+                "matches": matches,
+                "differences": differences,
+                "comparison": {
+                    "excel": {
+                        "total_count": excel_total_count,
+                        "total_weight": round(excel_total_weight, 1),
+                        "rows": len(excel_df)
+                    },
+                    "acts": {
+                        "total_count": acts_total_count,
+                        "total_weight": round(acts_total_weight, 1),
+                        "rows": len(acts)
+                    },
+                    "differences": {
+                        "count_diff": count_diff,
+                        "weight_diff": round(weight_diff, 1),
+                        "count_diff_percent": round(count_diff_percent, 1),
+                        "weight_diff_percent": round(weight_diff_percent, 1)
+                    }
+                }
+            }
+            
+        finally:
+            # Удаляем временный файл
+            os.unlink(tmp_path)
+        
+    except Exception as e:
+        logger.error(f"Error comparing with Excel: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/api/verification/compare")
 async def compare_with_measurements(file: UploadFile = File(...)):
