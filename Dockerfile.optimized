@@ -1,0 +1,76 @@
+# Dockerfile для оптимизированной версии PigWeight с CUDA 12.9
+FROM nvidia/cuda:12.9-devel-ubuntu22.04
+
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    libssl-dev \
+    libffi-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libavdevice-dev \
+    libturbojpeg0-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создание рабочей директории
+WORKDIR /app
+
+# Установка Python зависимостей
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Установка дополнительных оптимизированных зависимостей для CUDA 12.9
+RUN pip3 install --no-cache-dir \
+    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 \
+    tensorrt \
+    pynvml \
+    gputil \
+    websockets \
+    aiortc \
+    av \
+    ultralytics \
+    onnxruntime-gpu
+
+# Копирование исходного кода
+COPY . .
+
+# Настройка переменных окружения для GPU
+ENV CUDA_VISIBLE_DEVICES=0
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+# Оптимизации CUDA
+ENV CUDA_LAUNCH_BLOCKING=0
+ENV CUDA_CACHE_DISABLE=0
+ENV CUDA_AUTO_BOOST=1
+
+# Сетевые оптимизации
+ENV NET_CORE_RMEM_MAX=134217728
+ENV NET_CORE_WMEM_MAX=134217728
+ENV NET_IPV4_TCP_RMEM="4096 87380 134217728"
+ENV NET_IPV4_TCP_WMEM="4096 65536 134217728"
+
+# Порты
+EXPOSE 8000 8765
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Запуск оптимизированного сервера с BALANCED профилем по умолчанию
+CMD ["python3", "main_optimized.py", "--config", ".env.optimized"]
