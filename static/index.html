@@ -39,7 +39,7 @@
   </style>
 </head>
 <body style="overflow:auto;">
-  <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden;">
+  <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
             <div class="top-toolbar minimal glass sticky-top" id="topToolbar">
       <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
@@ -74,7 +74,7 @@
     <div class="main-flex" style="display:flex; justify-content:stretch;">
       <div class="container" style="display:flex; gap:0; width:100%; max-width:100%; align-items:stretch; padding:0; margin:0;">
         <div class="left-col" style="flex:1 1 auto; min-width:0; order:0;">
-          <div id="videoWrapper" class="video-wrapper" style="position:fixed; inset:0; width:100%; height:100vh; margin:0; border-radius:0; background:#000;">
+          <div id="videoWrapper" class="video-wrapper" style="position:fixed; top:0; left:0; right:480px; bottom:0; width:auto; height:100vh; margin:0; border-radius:0; background:#000;">
             <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
             <video id="webrtcVideo" autoplay playsinline muted style="display:none; width:100%; height:100%; object-fit:contain;"></video>
             <canvas id="overlayCanvas"></canvas>
@@ -86,7 +86,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col card glass rounded-xl" style="flex:0 0 480px; max-width:480px; order:1; position: sticky; top: 12px;">
+        <div class="right-col card glass rounded-xl" style="flex:0 0 480px; max-width:480px; order:1; position:fixed; right:0; top:56px; bottom:0; overflow:auto;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -324,12 +324,7 @@
         </div>
       </div>
     </div>
-    <table id="history">
-      <thead>
-        <tr><th>Дата</th><th>Камера</th><th>Кол-во</th><th>Общий вес</th><th>Средний вес</th></tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    <!-- Убрана нижняя таблица истории для полноценного полноэкранного интерфейса -->
   </div>
   <script>
     const videoStream = document.getElementById('videoStream');
@@ -344,7 +339,7 @@
     const curTime = document.getElementById('curTime');
     const durTime = document.getElementById('durTime');
     const liveCountChart = document.getElementById('liveCountChart');
-    const historyTable = document.getElementById('history').querySelector('tbody');
+    // const historyTable = document.getElementById('history').querySelector('tbody'); // history table removed
     const loadingOverlay = document.getElementById('loadingOverlay');
     const loadingText = document.getElementById('loadingText');
 
