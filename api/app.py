@@ -857,7 +857,21 @@ class VideoStream(abc.ABC):
 
     async def get_jpeg(self) -> Optional[bytes]:
         async with self.lock:
-            return self.last_jpeg
+            lj = self.last_jpeg
+            # Нормализуем формат: всегда bytes
+            if isinstance(lj, dict):
+                try:
+                    data = lj.get('jpeg')
+                    if isinstance(data, (bytes, bytearray)):
+                        return bytes(data)
+                    else:
+                        return None
+                except Exception:
+                    return None
+            elif isinstance(lj, (bytes, bytearray)):
+                return bytes(lj)
+            else:
+                return None
 
 
 class WeightedMaxEstimator:

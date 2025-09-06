@@ -86,7 +86,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col card glass rounded-xl" style="flex:0 0 480px; max-width:480px; order:1; position: relative;">
+        <div class="right-col card glass rounded-xl" style="flex:0 0 480px; max-width:480px; order:1; position: sticky; top: 12px;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -286,7 +286,7 @@
                 <div class="journal-title">
                   📊 Сверка с Excel
                 </div>
-                <button id="startVerificationBtn" class="journal-btn primary" disabled>▶ Проверить</button>
+                <button id="startVerificationBtn" class="journal-btn primary">▶ Проверить</button>
               </div>
 
               <!-- Загрузка файла -->
@@ -2174,7 +2174,14 @@
       });
       
       verificationFileInput.addEventListener('change', handleVerificationFile);
-      document.getElementById('startVerificationBtn').addEventListener('click', startVerification);
+      document.getElementById('startVerificationBtn').addEventListener('click', () => {
+        const fileInput = document.getElementById('verificationFileInput');
+        if (!fileInput.files[0]) {
+          fileInput.click();
+          return;
+        }
+        startVerification();
+      });
     });
 
     // Обработка файла для сверки
@@ -2202,7 +2209,7 @@
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
 
-        const response = await fetch('/api/verification/compare', {
+        const response = await fetch('/api/journal/compare', {
           method: 'POST',
           body: formData
         });
@@ -2308,13 +2315,14 @@
         }
       });
 
-      // Обработчик кнопки проверки
-      document.getElementById('startVerificationBtn').addEventListener('click', () => {
+      // Обработчик кнопки проверки (унифицирован)
+      const startBtn2 = document.getElementById('startVerificationBtn');
+      startBtn2.addEventListener('click', () => {
         const file = fileInput.files[0];
         if (file) {
           compareWithExcel(file);
         } else {
-          showNotification('⚠️ Выберите Excel файл для сверки', 'warning');
+          fileInput.click();
         }
       });
 
