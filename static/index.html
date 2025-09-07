@@ -38,9 +38,9 @@
     body.fs .main-flex { justify-content:stretch !important; }
   </style>
 </head>
-<body style="overflow:auto;">
+<body style="overflow:hidden;">
   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
-            <div class="top-toolbar minimal glass sticky-top" id="topToolbar">
+            <div class="top-toolbar minimal glass sticky-top" id="topToolbar" style="padding-right:var(--sidebar-width, 480px); position:fixed; top:0; left:0; right:0; z-index:1000;">
       <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
         <div style="flex:1 1 auto;"></div>
@@ -71,10 +71,10 @@
         <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto;"></span>
       </div>
     </div>
-    <div class="main-flex" style="display:flex; justify-content:stretch;">
+    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:64px; height:calc(100vh - 64px);">
       <div class="container" style="display:flex; gap:0; width:100%; max-width:100%; align-items:stretch; padding:0; margin:0;">
         <div class="left-col" style="flex:1 1 auto; min-width:0; order:0;">
-          <div id="videoWrapper" class="video-wrapper" style="position:fixed; top:0; left:0; right:480px; bottom:0; width:auto; height:100vh; margin:0; border-radius:0; background:#000;">
+          <div id="videoWrapper" class="video-wrapper" style="position:absolute; top:0; left:0; right:var(--sidebar-width, 480px); bottom:0; width:auto; height:auto; margin:0; border-radius:0; background:#000;">
             <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
             <video id="webrtcVideo" autoplay playsinline muted style="display:none; width:100%; height:100%; object-fit:contain;"></video>
             <canvas id="overlayCanvas"></canvas>
@@ -86,7 +86,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col card glass rounded-xl" style="flex:0 0 480px; max-width:480px; order:1; position:fixed; right:0; top:56px; bottom:0; overflow:auto;">
+        <div class="right-col card glass rounded-xl" style="flex:0 0 var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); order:1; position:absolute; right:0; top:0; bottom:0; overflow:auto;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">

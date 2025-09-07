@@ -18,6 +18,7 @@
   --glow:#7cc7ff;
   --shadow:0 10px 26px rgba(0,0,0,.12);
   --shadow-soft:0 6px 18px rgba(0,0,0,.10);
+  --sidebar-width:480px;
 
   /* Radii */
   --radius-xl:22px;
