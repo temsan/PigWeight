@@ -13,7 +13,7 @@ ONNX_PATH = "models/yolo11n.onnx"
 # Default configuration values
 DEFAULT_CONFIG = {
     # Model settings
-    "MODEL_PATH": "models/pig_yolo11-seg.v4.pt",
+    "MODEL_PATH": "models/pig_yolo11-seg.v4",  # Базовый путь, расширение выберется автоматически
     "DETECTION_MODE": "pig-only",
     "PIG_CLASS_ID": 0,
     "CONF_THRESHOLD": 0.30,

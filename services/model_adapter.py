@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from typing import Any, Dict, List
 import numpy as np
 from datetime import datetime
@@ -26,6 +27,7 @@ except Exception:
     _HAVE_ULTRALYTICS = False
 
 logger = logging.getLogger("services.model_adapter")
+perf_logger = logging.getLogger("performance")
 
 
 class ModelAdapter:
@@ -35,8 +37,8 @@ class ModelAdapter:
     """
 
     def __init__(self, model_path: str, device: str = None):
-        self.model_path = model_path
-        self.device = device or os.getenv('DEVICE', 'cpu')
+        # Temporary device for detection
+        temp_device = device or os.getenv('DEVICE', 'cpu')
         self.backend = None
         self._sess = None  # ONNX Runtime session
         self._torch_model = None
@@ -46,17 +48,21 @@ class ModelAdapter:
         self._inference_times = []
         self._total_inferences = 0
 
+        # Auto-detect optimal configuration
+        self.device, self.use_half = self._detect_optimal_device(temp_device)
+        self.model_path = self._select_best_model(model_path)
+        
         perf_logger = logging.getLogger("perf.model_adapter")
 
         # Priority: ONNX (CPU) > Ultralytics (GPU/CPU) > TorchScript
-        if model_path and model_path.endswith('.onnx') and _HAVE_ONNX:
+        if self.model_path and self.model_path.endswith('.onnx') and _HAVE_ONNX:
             # ONNX model - optimized for CPU inference
-            perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Loading ONNX model from {model_path} for CPU inference")
+            perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Loading ONNX model from {self.model_path} for CPU inference")
             try:
-                logger.info(f"Loading ONNX model from {model_path} for CPU inference")
+                logger.info(f"Loading ONNX model from {self.model_path} for CPU inference")
                 # Use CPU execution provider for maximum performance
                 self._sess = ort.InferenceSession(
-                    model_path,
+                    self.model_path,
                     providers=['CPUExecutionProvider'],
                     sess_options=ort.SessionOptions()
                 )
@@ -64,14 +70,14 @@ class ModelAdapter:
                 logger.info(f"✅ ONNX model loaded successfully")
                 perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] ONNX backend initialized for CPU inference")
             except Exception as e:
-                logger.warning(f"Failed to load ONNX model {model_path}: {e}")
+                logger.warning(f"Failed to load ONNX model {self.model_path}: {e}")
                 self._sess = None
 
-        elif model_path and model_path.endswith('.pt') and _HAVE_ULTRALYTICS:
-            perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Loading Ultralytics model from {model_path} on device={self.device}")
+        elif self.model_path and self.model_path.endswith('.pt') and _HAVE_ULTRALYTICS:
+            perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Loading Ultralytics model from {self.model_path} on device={self.device}")
             try:
-                logger.info(f"Loading ultralytics model from {model_path} on device={self.device}")
-                self._yolo = YOLO(model_path)
+                logger.info(f"Loading ultralytics model from {self.model_path} on device={self.device}")
+                self._yolo = YOLO(self.model_path)
                 # try device/half settings
                 try:
                     if self.device:
@@ -91,14 +97,15 @@ class ModelAdapter:
                         can_half = False
                     if can_half and hasattr(self._yolo, 'model'):
                         try:
-                            self._yolo.model.half()
+                            # Принимаем half precision модели как есть, не форсируем изменения
+                            logger.info('Using model native precision (likely half precision)')
                         except Exception:
-                            logger.warning('Failed to set model to half precision; continuing with float32')
+                            logger.warning('Failed to configure model precision; using defaults')
                 except Exception:
                     pass
                 self.backend = 'ultralytics'
             except Exception as e:
-                logger.warning(f"Failed to load ultralytics model {model_path}: {e}")
+                logger.warning(f"Failed to load ultralytics model {self.model_path}: {e}")
                 self._yolo = None
         # ensure model on correct device and half if possible
         if self._yolo is not None:
@@ -108,22 +115,22 @@ class ModelAdapter:
             except Exception:
                 pass
 
-        if not self._yolo and _HAVE_ONNX and model_path.endswith('.onnx'):
+        if not self._yolo and _HAVE_ONNX and self.model_path.endswith('.onnx'):
             try:
-                logger.info(f"Loading ONNX model from {model_path}")
-                self._sess = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+                logger.info(f"Loading ONNX model from {self.model_path}")
+                self._sess = ort.InferenceSession(self.model_path, providers=['CPUExecutionProvider'])
                 self.backend = 'onnx'
             except Exception:
-                logger.warning(f"Failed to load ONNX model {model_path}")
+                logger.warning(f"Failed to load ONNX model {self.model_path}")
                 self._sess = None
 
-        if not self._yolo and not self._sess and _HAVE_TORCH and model_path.endswith('.pt'):
+        if not self._yolo and not self._sess and _HAVE_TORCH and self.model_path.endswith('.pt'):
             try:
                 # try jit first
                 try:
-                    self._torch_model = torch.jit.load(model_path)
+                    self._torch_model = torch.jit.load(self.model_path)
                 except Exception:
-                    self._torch_model = torch.load(model_path)
+                    self._torch_model = torch.load(self.model_path)
                 if self.device.startswith('cuda') and torch.cuda.is_available():
                     try:
                         self._torch_model.to(self.device)
@@ -132,10 +139,63 @@ class ModelAdapter:
                 self._torch_model.eval()
                 self.backend = 'torch'
             except Exception as e:
-                logger.warning(f"Failed to load Torch model {model_path}: {e}")
+                logger.warning(f"Failed to load Torch model {self.model_path}: {e}")
                 self._torch_model = None
 
-        logger.info(f"ModelAdapter initialized: path={model_path}, backend={self.backend}, device={self.device}")
+        logger.info(f"ModelAdapter initialized: path={self.model_path}, backend={self.backend}, device={self.device}")
+
+    def _detect_optimal_device(self, requested_device: str):
+        """Автоматически определяет оптимальное устройство и настройки"""
+        use_half = os.getenv('USE_HALF', 'true').lower() == 'true'
+        
+        # Проверяем доступность CUDA
+        cuda_available = False
+        try:
+            import torch
+            cuda_available = torch.cuda.is_available()
+        except ImportError:
+            pass
+        
+        if requested_device.startswith('cuda') and cuda_available:
+            logger.info(f"✅ CUDA доступна, используем: {requested_device}")
+            return requested_device, use_half
+        elif requested_device.startswith('cuda') and not cuda_available:
+            logger.warning(f"⚠️ CUDA недоступна, переключаемся на CPU")
+            return 'cpu', False
+        else:
+            logger.info(f"📱 Используем CPU")
+            return 'cpu', False
+    
+    def _select_best_model(self, model_path: str):
+        """Выбирает лучшую доступную модель (ONNX для CPU, PT для GPU)"""
+        base_path = model_path.rsplit('.', 1)[0]  # Убираем расширение
+        
+        # Список приоритетов в зависимости от устройства
+        if self.device.startswith('cuda'):
+            # Для GPU: предпочитаем PyTorch, потом ONNX
+            candidates = [
+                f"{base_path}.pt",
+                f"{base_path}.onnx",
+                model_path  # Исходный путь как fallback
+            ]
+        else:
+            # Для CPU: предпочитаем ONNX, потом PyTorch
+            candidates = [
+                f"{base_path}.onnx",
+                f"{base_path}.pt", 
+                model_path  # Исходный путь как fallback
+            ]
+        
+        # Ищем первую доступную модель
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                if candidate != model_path:
+                    logger.info(f"🔄 Автоматически выбрана модель: {candidate} (вместо {model_path})")
+                return candidate
+        
+        # Если ничего не найдено, возвращаем исходный путь
+        logger.warning(f"⚠️ Оптимальная модель не найдена, используем: {model_path}")
+        return model_path
 
     def infer(self, imgs: List[np.ndarray]) -> List[Dict[str, Any]]:
         import time
@@ -220,12 +280,31 @@ class ModelAdapter:
         # Ultralytics inference (GPU/CPU)
         elif self.backend == 'ultralytics' and self._yolo is not None:
             try:
+                perf_logger = logging.getLogger("perf.model_adapter")
                 perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Running Ultralytics inference on {len(imgs)} images")
                 imgsz = int(os.getenv('IMG_SIZE', '960'))
                 conf = float(os.getenv('CONF_THRESHOLD', '0.30'))
                 # ultralytics expects positional source argument or 'source=', not 'imgs='
                 # pass list of images as first positional argument
-                results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True)
+                # Отключаем автоматический fusing для избежания dtype конфликтов
+                # Устанавливаем параметры предсказания с отключенным fusing
+                try:
+                    # Временно отключаем fusing если возможно
+                    original_fuse = None
+                    if hasattr(self._yolo.model, 'fuse'):
+                        original_fuse = self._yolo.model.fuse
+                        self._yolo.model.fuse = lambda verbose=False: None
+                    
+                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True)
+                    
+                    # Восстанавливаем оригинальный метод
+                    if original_fuse is not None:
+                        self._yolo.model.fuse = original_fuse
+                        
+                except Exception as e:
+                    # Если что-то пошло не так, пробуем стандартный путь
+                    logger.warning(f"Fusing workaround failed, trying standard prediction: {e}")
+                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True)
                 for r in results:
                     if r is None:
                         out.append({'detections': 0, 'confidence': 0.0})
