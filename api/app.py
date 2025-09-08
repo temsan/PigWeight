@@ -1088,6 +1088,12 @@ async def _global_infer_loop(self):
                                     pts.append((x / float(W0), y / float(H0)))
                                 mapped.append(pts)
                             self.last_masks = mapped
+                            try:
+                                self._last_mask_ref_size = (int(W0), int(H0))
+                                self._last_mask_crop = (int(y0), int(y1))
+                            except Exception:
+                                self._last_mask_ref_size = (int(W0), int(H0))
+                                self._last_mask_crop = (0, int(H0))
                             # Update act-of-weighing metrics
                             cur_count = len(session_labels)
                             if cur_count > self._act_peak:
@@ -1097,6 +1103,11 @@ async def _global_infer_loop(self):
                         else:
                             self.last_count = 0
                             self.last_masks = []
+                            try:
+                                self._last_mask_ref_size = None
+                                self._last_mask_crop = None
+                            except Exception:
+                                pass
                         # Статистический максимум: окно + монотоничность
                         wnd_max = self.window_max.update(time.time(), int(self.last_count))
                         est = max(self.reported_count, wnd_max)
@@ -1626,11 +1637,10 @@ class BrokerVideoTrack(VideoStreamTrack):
         self.stream_id = stream_id
         self.fps = float(fps)
         self.frame_duration = 1.0 / max(1.0, self.fps)
-        self._last_pts = 0
+        self._last_good_jpeg: bytes | None = None
 
     async def recv(self):
         # Pull latest frame from FRAME_BROKER or fallback to StreamManager.last_jpeg
-        start = time.time()
         jpeg = None
         source = "none"
 
@@ -1656,14 +1666,22 @@ class BrokerVideoTrack(VideoStreamTrack):
                 except Exception as e:
                     logger.warning(f"BrokerVideoTrack {self.stream_id}: StreamManager.get_jpeg failed: {e}")
 
-        if not jpeg:
-            # return black frame
-            logger.warning(f"BrokerVideoTrack {self.stream_id}: No frame available, returning black frame")
+        # Use last good jpeg if current is empty
+        if jpeg:
+            self._last_good_jpeg = jpeg
+        elif self._last_good_jpeg:
+            jpeg = self._last_good_jpeg
+            source = f"cached:{source}"
+        else:
+            # return black frame if nothing ever received
             import numpy as _np
             h, w = 480, 640
             black = _np.zeros((h, w, 3), dtype=_np.uint8)
             vf = _VideoFrame.from_ndarray(black[..., ::-1], format='bgr24')
-            await asyncio.sleep(self.frame_duration)
+            # timestamp via next_timestamp for proper pacing
+            pts, time_base = await self.next_timestamp()
+            vf.pts = pts
+            vf.time_base = time_base
             return vf
 
         # Проверяем тип данных - исправляем проблему с оптимизированной предобработкой
@@ -1677,7 +1695,10 @@ class BrokerVideoTrack(VideoStreamTrack):
         else:
             jpeg_data = jpeg
             
-        logger.debug(f"BrokerVideoTrack {self.stream_id}: Using frame from {source}, size: {len(jpeg_data)} bytes")
+        try:
+            logger.debug(f"BrokerVideoTrack {self.stream_id}: Using frame from {source}, size: {len(jpeg_data)} bytes")
+        except Exception:
+            pass
 
         # decode JPEG to ndarray
         import numpy as _np
@@ -1687,6 +1708,37 @@ class BrokerVideoTrack(VideoStreamTrack):
             h, w = 480, 640
             img = _np.zeros((h, w, 3), dtype=_np.uint8)
 
+        # Optional: draw segmentation masks on server side (enabled by default, set WEBRTC_OVERLAY_SERVER=false to disable)
+        try:
+            if os.getenv('WEBRTC_OVERLAY_SERVER', 'true').lower() == 'false':
+                raise RuntimeError('server overlay disabled')
+            stream = STREAM_MANAGER.streams.get(self.stream_id)
+            if stream and getattr(stream, 'last_masks', None):
+                masks = stream.last_masks  # уже нормализованы к полному кадру (0..1)
+                overlay = img.copy()
+                alpha = 0.35
+                fill = (0, 200, 255)
+                edge = (0, 120, 200)
+                Hc, Wc = img.shape[0], img.shape[1]
+                for poly in masks:
+                    try:
+                        pts = []
+                        for (nx, ny) in poly:
+                            nx2 = 0.0 if nx is None else max(0.0, min(1.0, float(nx)))
+                            ny2 = 0.0 if ny is None else max(0.0, min(1.0, float(ny)))
+                            sx = int(round(nx2 * Wc))
+                            sy = int(round(ny2 * Hc))
+                            pts.append((sx, sy))
+                        pts = _np.array(pts, dtype=_np.int32)
+                        if pts.ndim == 2 and pts.shape[0] >= 3:
+                            cv2.fillPoly(overlay, [pts], fill)
+                            cv2.polylines(overlay, [pts], isClosed=True, color=edge, thickness=2)
+                    except Exception:
+                        continue
+                cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+        except Exception:
+            pass
+
         # convert BGR -> RGB
         try:
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -1694,14 +1746,10 @@ class BrokerVideoTrack(VideoStreamTrack):
             img_rgb = img
 
         vf = _VideoFrame.from_ndarray(img_rgb, format='rgb24')
-        vf.pts = int(time.time() * 1000)
-        vf.time_base = 1 / 1000
-
-        # throttle to target fps
-        elapsed = time.time() - start
-        wait = max(0.0, self.frame_duration - elapsed)
-        if wait > 0:
-            await asyncio.sleep(wait)
+        # Proper timestamping for aiortc pacing
+        pts, time_base = await self.next_timestamp()
+        vf.pts = pts
+        vf.time_base = time_base
         return vf
 
 

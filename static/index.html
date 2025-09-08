@@ -71,7 +71,7 @@
         <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto;"></span>
       </div>
     </div>
-    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:64px; height:calc(100vh - 64px);">
+    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:64px; height:calc(100vh - 64px); position:relative;">
       <div class="container" style="display:flex; gap:0; width:100%; max-width:100%; align-items:stretch; padding:0; margin:0;">
         <div class="left-col" style="flex:1 1 auto; min-width:0; order:0;">
           <div id="videoWrapper" class="video-wrapper" style="position:absolute; top:0; left:0; right:var(--sidebar-width, 480px); bottom:0; width:auto; height:auto; margin:0; border-radius:0; background:#000;">
@@ -86,7 +86,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col card glass rounded-xl" style="flex:0 0 var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); order:1; position:absolute; right:0; top:0; bottom:0; overflow:auto;">
+        <div class="right-col card glass rounded-xl" style="flex:0 0 var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); order:1; position:absolute; right:0; top:64px; bottom:0; overflow:auto;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -1452,12 +1452,12 @@
         }, 150);
     });
     // Manage pointer drag to avoid duplicate change/pointerup seeks
-    seekRange.addEventListener('pointerdown', (e) => {
+    if (seekRange) seekRange.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
         isSeeking = true;
         if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
     });
-    seekRange.addEventListener('pointerup', async (e) => {
+    if (seekRange) seekRange.addEventListener('pointerup', async (e) => {
         e.stopPropagation();
         const id = activeStreamId;
         const src = streamSources[id] || '';
@@ -1536,6 +1536,8 @@
     });
 
     function updateHistory() {
+        const historyTable = document.getElementById('historyTable');
+        if (!historyTable) return;
         historyTable.innerHTML = '';
         const history = JSON.parse(localStorage.getItem('history') || '[]');
         history.forEach(item => {
@@ -1549,18 +1551,24 @@
     }
 
     function recalcAvgWeight() {
-        const count = parseInt(document.getElementById('manualCount').value);
-        const totalWeight = parseFloat(document.getElementById('manualTotalWeight').value);
+        const countEl = document.getElementById('manualCount');
+        const totalEl = document.getElementById('manualTotalWeight');
+        const avgEl = document.getElementById('manualAvgWeight');
+        if (!countEl || !totalEl || !avgEl) return;
+        const count = parseInt(countEl.value);
+        const totalWeight = parseFloat(totalEl.value);
         if (count > 0 && totalWeight > 0) {
             const avgWeight = totalWeight / count;
-            document.getElementById('manualAvgWeight').value = avgWeight.toFixed(2);
+            avgEl.value = avgWeight.toFixed(2);
         } else {
-            document.getElementById('manualAvgWeight').value = '';
+            avgEl.value = '';
         }
     }
 
-    document.getElementById('manualCount').addEventListener('input', recalcAvgWeight);
-    document.getElementById('manualTotalWeight').addEventListener('input', recalcAvgWeight);
+    const manualCountEl = document.getElementById('manualCount');
+    const manualTotalEl = document.getElementById('manualTotalWeight');
+    if (manualCountEl) manualCountEl.addEventListener('input', recalcAvgWeight);
+    if (manualTotalEl) manualTotalEl.addEventListener('input', recalcAvgWeight);
 
     // === ВЕРИФИКАЦИЯ И АНАЛИЗ ===
 
