@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Test - PigWeight</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .video-container { margin: 20px 0; }
+        video { width: 100%; max-width: 640px; height: 480px; background: #000; border: 2px solid #ccc; }
+        .controls { margin: 10px 0; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        .log { background: #f5f5f5; padding: 10px; margin: 10px 0; height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #cce7ff; color: #004085; border: 1px solid #99d3ff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 WebRTC Test - PigWeight</h1>
+        
+        <div class="status" id="status">
+            <strong>Статус:</strong> Готов к подключению
+        </div>
+        
+        <div class="controls">
+            <input type="text" id="streamId" value="cam101" placeholder="Stream ID" style="padding: 8px; width: 150px;">
+            <button onclick="startWebRTC()" id="startBtn">🚀 Старт WebRTC</button>
+            <button onclick="stopWebRTC()" id="stopBtn" disabled>🛑 Стоп</button>
+            <button onclick="testMJPEG()" id="mjpegBtn">📡 Тест MJPEG</button>
+            <button onclick="clearLog()">🗑️ Очистить лог</button>
+        </div>
+        
+        <div class="video-container">
+            <h3>WebRTC видео:</h3>
+            <video id="webrtcVideo" autoplay playsinline muted controls></video>
+        </div>
+        
+        <div class="video-container">
+            <h3>MJPEG видео:</h3>
+            <img id="mjpegImg" style="width: 100%; max-width: 640px; height: 480px; background: #000; border: 2px solid #ccc;" alt="MJPEG Stream">
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let pc = null;
+        let peerId = null;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function setStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<strong>Статус:</strong> ${message}`;
+            statusDiv.className = `status ${type}`;
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        async function startWebRTC() {
+            const streamId = document.getElementById('streamId').value || 'cam101';
+            
+            try {
+                setStatus('Подключение WebRTC...', 'info');
+                log('🚀 Запуск WebRTC для потока: ' + streamId);
+                
+                // Сначала запускаем поток
+                log('📡 Запуск потока...');
+                const startResponse = await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=demo://test`, {
+                    method: 'POST'
+                });
+                
+                if (!startResponse.ok) {
+                    throw new Error(`Ошибка запуска потока: ${startResponse.status}`);
+                }
+                log('✅ Поток запущен');
+                
+                // Ждем инициализации
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Создаем WebRTC соединение
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                
+                // Добавляем обработчики
+                pc.ontrack = (event) => {
+                    log('📺 Получен видео трек');
+                    const video = document.getElementById('webrtcVideo');
+                    video.srcObject = event.streams[0];
+                    setStatus('WebRTC видео активно', 'success');
+                };
+                
+                pc.onicecandidate = async (event) => {
+                    if (event.candidate && peerId) {
+                        log('🧊 Отправка ICE candidate');
+                        await fetch('/api/webrtc/candidate', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                peer_id: peerId,
+                                candidate: event.candidate
+                            })
+                        });
+                    }
+                };
+                
+                pc.onconnectionstatechange = () => {
+                    log(`🔗 Состояние соединения: ${pc.connectionState}`);
+                    if (pc.connectionState === 'connected') {
+                        setStatus('WebRTC соединение установлено', 'success');
+                    } else if (pc.connectionState === 'failed') {
+                        setStatus('WebRTC соединение не удалось', 'error');
+                    }
+                };
+                
+                // Добавляем трансивер для получения видео
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                
+                // Создаем offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                log('📤 Отправка WebRTC offer');
+                const offerResponse = await fetch('/api/webrtc/offer', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        sdp: offer.sdp,
+                        type: offer.type,
+                        stream_id: streamId,
+                        fps: 12
+                    })
+                });
+                
+                if (!offerResponse.ok) {
+                    throw new Error(`WebRTC offer отклонен: ${offerResponse.status}`);
+                }
+                
+                const data = await offerResponse.json();
+                peerId = data.peer_id;
+                
+                if (data.sdp) {
+                    await pc.setRemoteDescription({
+                        type: data.type,
+                        sdp: data.sdp
+                    });
+                    log('✅ WebRTC соединение настроено');
+                } else {
+                    throw new Error('Нет SDP в ответе');
+                }
+                
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                
+            } catch (error) {
+                log('❌ Ошибка WebRTC: ' + error.message);
+                setStatus('Ошибка WebRTC: ' + error.message, 'error');
+                await stopWebRTC();
+            }
+        }
+        
+        async function stopWebRTC() {
+            try {
+                if (pc) {
+                    pc.close();
+                    pc = null;
+                }
+                
+                if (peerId) {
+                    await fetch('/api/webrtc/stop', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ peer_id: peerId })
+                    });
+                    peerId = null;
+                }
+                
+                const video = document.getElementById('webrtcVideo');
+                video.srcObject = null;
+                
+                log('🛑 WebRTC остановлен');
+                setStatus('WebRTC остановлен', 'info');
+                
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                
+            } catch (error) {
+                log('⚠️ Ошибка остановки: ' + error.message);
+            }
+        }
+        
+        function testMJPEG() {
+            const streamId = document.getElementById('streamId').value || 'cam101';
+            const img = document.getElementById('mjpegImg');
+            
+            log('📡 Тест MJPEG потока: ' + streamId);
+            img.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+            
+            img.onload = () => {
+                log('✅ MJPEG кадр загружен');
+                setStatus('MJPEG работает', 'success');
+            };
+            
+            img.onerror = () => {
+                log('❌ Ошибка загрузки MJPEG');
+                setStatus('MJPEG не работает', 'error');
+            };
+        }
+        
+        // Автоматический тест при загрузке
+        window.onload = () => {
+            log('🌐 Страница загружена');
+            log('💡 Нажмите "Старт WebRTC" для проверки видеопотока');
+        };
+    </script>
+</body>
+</html>
