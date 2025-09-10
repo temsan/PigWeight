@@ -1708,9 +1708,9 @@ class BrokerVideoTrack(VideoStreamTrack):
             h, w = 480, 640
             img = _np.zeros((h, w, 3), dtype=_np.uint8)
 
-        # Optional: draw segmentation masks on server side (enabled by default, set WEBRTC_OVERLAY_SERVER=false to disable)
+        # Optional: draw segmentation masks on server side (disabled by default, set WEBRTC_OVERLAY_SERVER=true to enable)
         try:
-            if os.getenv('WEBRTC_OVERLAY_SERVER', 'true').lower() == 'false':
+            if os.getenv('WEBRTC_OVERLAY_SERVER', 'false').lower() != 'true':
                 raise RuntimeError('server overlay disabled')
             stream = STREAM_MANAGER.streams.get(self.stream_id)
             if stream and getattr(stream, 'last_masks', None):

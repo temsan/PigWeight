@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
     .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.56); backdrop-filter: blur(12px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
-    .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: wrap !important; align-items: center !important; }
+    .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-end !important; }
     .top-toolbar .pill, .top-toolbar .file-input-btn { height: 32px; line-height: 20px; }
     html, body { margin: 0; padding: 0; }
     #main-container { padding-top: 64px; }
@@ -41,19 +41,18 @@
 <body style="overflow:hidden;">
   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
             <div class="top-toolbar minimal glass sticky-top" id="topToolbar" style="padding-right:var(--sidebar-width, 480px); position:fixed; top:0; left:0; right:0; z-index:1000;">
-      <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
-        <div style="flex:1 1 auto;"></div>
+      <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:nowrap;">
+        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap; margin-right:auto;">PigWeight v3.0</h2>
 
         <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
           <div id="streamRadios" class="toggle-group compact"></div>
         </div>
-        <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:6px 10px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:6px 10px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; order:4;">
           <span id="fileInputName">Файл</span>
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
-        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600;">Старт</button>
-        <div style="display:flex; align-items:center; gap:8px; flex:0 0 auto;">
+        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600; order:5;">Старт</button>
+        <div style="display:flex; align-items:center; gap:8px; flex:0 0 auto; order:2;">
           <label style="font-size:13px; color:#274063;">Транспорт:</label>
           <select id="transportSelect" style="height:32px;">
             <option value="mjpeg">MJPEG</option>
@@ -61,14 +60,14 @@
           </select>
         </div>
         <button id="fullscreenBtn" class="pill nowrap" aria-label="На весь экран" title="На весь экран"
-                style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center;">
+                style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3;">
           <!-- icon injected by JS -->
         </button>
-        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 420px; min-width:220px; max-width:100%;">
+        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:0 1 520px; min-width:260px; max-width:520px; order:1; margin-left:auto;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
-        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto;"></span>
+        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6;"></span>
       </div>
     </div>
     <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:64px; height:calc(100vh - 64px); position:relative;">
@@ -86,7 +85,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col card glass rounded-xl" style="flex:0 0 var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); order:1; position:absolute; right:0; top:64px; bottom:0; overflow:auto;">
+        <div class="right-col card glass rounded-xl" style="width:var(--sidebar-width, 480px); min-width:var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); box-sizing:border-box; order:1; position:absolute; right:0; top:64px; bottom:0; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -880,13 +879,20 @@
     }
 
     function getRenderedImageRect() {
-        // Compute the actual displayed image rectangle inside the canvas,
-        // accounting for object-fit: contain letterboxing.
+        // Возвращает реальную область отображения кадра внутри wrapper с учётом object-fit: contain
         const wrapper = document.getElementById('videoWrapper');
         const cw = wrapper ? wrapper.clientWidth : overlayCanvas.width;
         const ch = wrapper ? wrapper.clientHeight : overlayCanvas.height;
-        const iw = videoStream.naturalWidth || cw;
-        const ih = videoStream.naturalHeight || ch;
+        const webrtcEl = document.getElementById('webrtcVideo');
+        const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none';
+        let iw = 0, ih = 0;
+        if (webrtcVisible) {
+            iw = webrtcEl.videoWidth || 0;
+            ih = webrtcEl.videoHeight || 0;
+        } else {
+            iw = videoStream.naturalWidth || 0;
+            ih = videoStream.naturalHeight || 0;
+        }
         if (!iw || !ih) return { x: 0, y: 0, w: cw, h: ch };
         const scale = Math.min(cw / iw, ch / ih);
         const w = Math.round(iw * scale);
@@ -1326,11 +1332,17 @@
 
     videoPlayPauseBtn.addEventListener('click', async () => {
         if (isVideoPlaying) {
+            // Стоп без запуска демо — остаёмся на текущем файле, можно возобновить
             await stopStream();
+            isVideoPlaying = false;
+            videoPlayPauseBtn.textContent = 'Старт';
+            // не меняем activeStreamId и streamSources
         } else {
             const sourceUri = streamSources[activeStreamId];
             if (activeStreamId && sourceUri) {
                 await startStream(activeStreamId, sourceUri);
+                isVideoPlaying = true;
+                videoPlayPauseBtn.textContent = 'Стоп';
             }
         }
     });
@@ -1531,7 +1543,11 @@
         const defaultStreamId = Object.keys(streams)[0];
         const defaultSourceUri = streams[defaultStreamId];
         if (defaultStreamId && defaultSourceUri) {
-            await startStream(defaultStreamId, defaultSourceUri);
+            // Не автозапускаем демо; просто инициализируем источники
+            activeStreamId = defaultStreamId;
+            streamSources[defaultStreamId] = defaultSourceUri;
+            isVideoPlaying = false;
+            videoPlayPauseBtn.textContent = 'Старт';
         }
     });
 
