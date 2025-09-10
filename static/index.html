@@ -766,19 +766,33 @@
                     lastIds = data.debug.ids || null;
                     try {
                         window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
-                        // анимированные всплывающие +1/-1
+                        // анимированные всплывающие +N/-N с порядковым номером
                         const now = performance.now();
                         window.__popups = window.__popups || [];
                         const prevTs = window.__lastPopupTs || 0; // ms
                         const cr = window.__lastCrossings;
                         let maxTs = prevTs;
+                        
+                        // Счетчик для последовательной нумерации пересечений
+                        let enterCounter = 0;
+                        let exitCounter = 0;
+                        
                         cr.forEach(c => {
                             const tsMs = Number(c.ts || 0) * 1000;
                             if (tsMs > prevTs) {
                                 const side = String(c.side || 'left');
                                 const mode = String(c.mode || 'enter');
                                 const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
-                                const text = isPositive ? '+1' : '-1';
+                                
+                                // Увеличиваем соответствующий счетчик
+                                if (isPositive) {
+                                    enterCounter++;
+                                } else {
+                                    exitCounter++;
+                                }
+                                
+                                // Текст с номером
+                                const text = isPositive ? `+${enterCounter}` : `-${exitCounter}`;
                                 const color = isPositive ? '#51cf66' : '#ff6b6b';
                                 window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
                             }
@@ -1319,7 +1333,12 @@
         let max = Number(seekRange.max || 0);
         let clamped = Math.max(0, Math.min(max, Number(t) || 0));
         seekRange.value = clamped;
-        try { curTime.textContent = clamped.toFixed(1); } catch (_) {}
+        try { 
+            curTime.textContent = clamped.toFixed(1);
+            // Обновляем индикатор позиции в процентах от длительности
+            const percent = max > 0 ? Math.round((clamped / max) * 100) : 0;
+            streamStatus.textContent = `${percent}%`;
+        } catch (_) {}
         return clamped;
     }
     async function requestSeekTo(t) {
@@ -1341,14 +1360,23 @@
             const id = activeStreamId;
             const src = streamSources[id] || '';
             // Только для файловых источников
-            if (/^rtsp:\/\//i.test(src)) return;
+            if (!id || !src || /^rtsp:\/\//i.test(src) || !isVideoPlaying) return;
             e.preventDefault();
+            
+            // Определяем шаг перемотки: Ctrl+стрелка = 5 секунд, Shift+стрелка = 1 секунда, иначе - шаг из настроек
             const base = Math.max(0.05, parseFloat(seekRange.step || '0.1') || 0.1);
             const step = e.ctrlKey ? 5.0 : (e.shiftKey ? 1.0 : base);
             const cur = Number(seekRange.value || 0);
             const dir = (e.key === 'ArrowRight') ? 1 : -1;
+            
+            // Устанавливаем новое значение и запускаем перемотку
             const target = setSeekUIVal(cur + dir * step);
             requestSeekTo(target);
+            
+            // Визуальная обратная связь - мигаем индикатором времени
+            const timeElement = document.getElementById('curTime');
+            timeElement.style.color = '#2c7be5';
+            setTimeout(() => { timeElement.style.color = ''; }, 200);
         }
     });
 
