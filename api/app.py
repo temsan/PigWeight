@@ -1485,13 +1485,22 @@ class StreamManager:
 
         if stream_id not in self.streams:
             # Отключаем демо-поток, вместо него используем последний активный файл
-            # if source_uri.startswith("demo://"):
-            #    from core.demo_generator import create_demo_stream
-            #    self.streams[stream_id] = DemoStream(stream_id, source_uri)
-            elif source_uri.startswith("rtsp://"):
+            if source_uri.startswith("rtsp://"):
                 self.streams[stream_id] = RtspStream(stream_id, source_uri)
             else:
                 self.streams[stream_id] = FileStream(stream_id, source_uri)
+
+            # Загружаем сохраненные позиции линий
+            stream = self.streams[stream_id]
+            all_positions = load_line_positions()
+            
+            file_key = stream.file_path if isinstance(stream, FileStream) else stream_id
+            if "/" in file_key:
+                file_key = file_key.split("/")[-1]
+
+            if 'files' in all_positions and file_key in all_positions['files']:
+                stream.line_positions = all_positions['files'][file_key]
+                logger.info(f"Loaded line positions for {file_key}")
         return self.streams[stream_id]
 
     async def stop_stream(self, stream_id: str):
@@ -2259,19 +2268,26 @@ async def api_stream_seek(stream_id: str, t: float = Query(...)):
 async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Body(...)):
     """Сохранить позиции линий для конкретного видеофайла."""
     try:
-        stream = await STREAM_MANAGER.get_stream(stream_id)
+        stream = STREAM_MANAGER.streams.get(stream_id)
         if not stream:
             return JSONResponse({"error": f"Stream {stream_id} not found"}, status_code=404)
         
-        # Сохраняем позиции линий
-        file_path = stream_id
-        if "://" in stream_id:
-            # Извлекаем имя файла из URL
-            file_path = stream_id.split("/")[-1]
+        # Определяем ключ для файла (без пути)
+        file_key = stream.file_path if isinstance(stream, FileStream) else stream_id
+        if "/" in file_key:
+            file_key = file_key.split("/")[-1]
+
+        # Загружаем, обновляем и сохраняем
+        all_positions = load_line_positions()
+        if 'files' not in all_positions:
+            all_positions['files'] = {}
+        all_positions['files'][file_key] = positions
+        save_line_positions(all_positions)
+
+        # Также обновляем в текущем стриме
+        stream.line_positions = positions
         
-        stream.line_positions[file_path] = positions
-        
-        return {"status": "success", "message": f"Line positions saved for {file_path}"}
+        return {"status": "success", "message": f"Line positions saved for {file_key}"}
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -2296,6 +2312,31 @@ async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+
+# === API для работы с линиями ===
+
+LINE_POSITIONS_FILE = "line_positions.json"
+
+def load_line_positions():
+    """Загрузка позиций линий из JSON файла"""
+    try:
+        if os.path.exists(LINE_POSITIONS_FILE):
+            with open(LINE_POSITIONS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading line positions: {e}")
+        return {}
+
+def save_line_positions(positions):
+    """Сохранение позиций линий в JSON файл"""
+    try:
+        with open(LINE_POSITIONS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(positions, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving line positions: {e}")
+        return False
 
 # === API для работы с актами взвешивания ===
 

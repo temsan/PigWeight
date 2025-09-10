@@ -1055,6 +1055,13 @@
             ctx.beginPath();
             ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
             ctx.fill();
+            // DEBUG: Display line positions
+            ctx.save();
+            ctx.font = '16px Arial';
+            ctx.fillStyle = 'red';
+            ctx.fillText(`L: ${leftX.toFixed(2)} (${x1.toFixed(0)})`, x1 + 10, rect.y + 30);
+            ctx.fillText(`R: ${rightX.toFixed(2)} (${x2.toFixed(0)})`, x2 - 50, rect.y + 30);
+            ctx.restore();
             // Перетаскивание линий отсечки мышью/тапом
             try {
                 if (!window.__linesDragInit) {
