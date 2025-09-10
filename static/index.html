@@ -36,6 +36,20 @@
     body.fs .right-col { display:none !important; }
     body.fs .left-col { min-width:0 !important; }
     body.fs .main-flex { justify-content:stretch !important; }
+
+    /* Compact right panel (recursive compacting to remove empty space) */
+    :root{ --sidebar-width: 420px; }
+    .right-col{ padding:12px !important; }
+    .right-col .journal-tabs{ margin:0 0 8px 0 !important; }
+    .right-col .panel-content{ padding:10px !important; }
+    .right-col .journal-container{ padding:8px 10px !important; }
+    .right-col .journal-header{ padding:8px 10px !important; margin:0 0 8px 0 !important; }
+    .right-col .journal-filters{ gap:8px !important; }
+    .right-col .journal-stat-card{ padding:8px 10px !important; margin:6px 0 !important; }
+    .right-col .card{ padding:10px !important; }
+    .right-col .journal-comparison-result{ padding:8px 10px !important; }
+    .right-col .journal-btn{ height:32px; line-height:30px; padding:0 12px; }
+    .right-col input, .right-col select{ height:32px; }
   </style>
 </head>
 <body style="overflow:hidden;">
