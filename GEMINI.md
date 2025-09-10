@@ -1,52 +1,53 @@
 # GEMINI.md
 
-## Project Overview
+## Обзор проекта
 
-This project is a pig weighing system that uses computer vision to analyze video streams. It is a web application with a FastAPI backend and a simple HTML/JavaScript frontend. The backend uses OpenCV for video processing and a YOLO model for pig detection. The application can process live RTSP streams or uploaded video files. The frontend provides a user interface for viewing the video stream, controlling the application, and viewing the results of the analysis.
+Этот проект представляет собой систему взвешивания свиней, которая использует компьютерное зрение для анализа видеопотоков. Это веб-приложение с FastAPI бэкендом и простым HTML/JavaScript фронтендом. Бэкенд использует OpenCV для обработки видео и модель YOLO для обнаружения свиней. Приложение может обрабатывать живые RTSP-потоки или загруженные видеофайлы. Фронтенд предоставляет пользовательский интерфейс для просмотра видеопотока, управления приложением и просмотра результатов анализа.
 
-**Key Technologies:**
+**Ключевые технологии:**
 
-*   **Backend:** Python, FastAPI, Uvicorn, OpenCV, YOLO (Ultralytics)
-*   **Frontend:** HTML, JavaScript
-*   **Real-time Communication:** WebSockets
+*   **Бэкенд:** Python, FastAPI, Uvicorn, OpenCV, YOLO (Ultralytics)
+*   **Фронтенд:** HTML, JavaScript
+*   **Коммуникация в реальном времени:** WebSockets
 
-**Architecture:**
+**Архитектура:**
 
-*   **`main.py`:** The main entry point of the application. It initializes the environment, downloads the required models, and starts the Uvicorn server.
-*   **`api/app.py`:** The core of the backend. It defines the FastAPI application, including all API endpoints and WebSocket handlers. It manages the camera streams, video processing, and model inference.
-*   **`static/`:** Contains the frontend files, including `index.html`, CSS, and JavaScript.
-*   **`models/`:** Stores the YOLO models used for pig detection.
-*   **`uploads/`:**  A directory for storing uploaded video files.
-*   **`scripts/`:** Contains utility scripts, such as for cleaning the uploads directory.
+*   **`main.py`:** Главная точка входа приложения. Инициализирует среду, скачивает необходимые модели и запускает Uvicorn сервер.
+*   **`api/app.py`:** Ядро бэкенда. Определяет FastAPI приложение, включая все API эндпоинты и WebSocket обработчики. Управляет потоками камер, обработкой видео и выводом модели.
+*   **`static/`:** Содержит файлы фронтенда, включая `index.html`, CSS и JavaScript.
+*   **`models/`:** Хранит модели YOLO, используемые для обнаружения свиней.
+*   **`uploads/`:** Директория для хранения загруженных видеофайлов.
+*   **`scripts/`:** Содержит служебные скрипты, такие как для очистки директории uploads.
 
-## Building and Running
+## Сборка и запуск
 
-**1. Installation:**
+**1. Установка:**
 
 ```bash
-# Create a virtual environment
+# Создание виртуального окружения
 python -m venv .venv
-# Activate the virtual environment
+# Активация виртуального окружения
 # Windows
 .venv\Scripts\activate
 # Linux/macOS
 source .venv/bin/activate
-# Install dependencies
+# Установка зависимостей
 pip install -r requirements.txt
 ```
 
-**2. Running the Application:**
+**2. Запуск приложения:**
 
 ```bash
 python main.py
 ```
 
-The application will be available at `http://localhost:8000`.
+Приложение будет доступно по адресу `http://localhost:8000`.
 
-## Development Conventions
+## Соглашения разработки
 
-*   The project uses a `.env` file for configuration. An example is provided in `.env.example`.
-*   The backend code is located in the `api/` directory.
-*   The frontend code is in the `static/` directory.
-*   The project uses `requirements.txt` to manage Python dependencies.
-*   The `clean_uploads.bat` and `scripts/clean_uploads.py` scripts can be used to clean the `uploads/` directory.
+*   **Язык общения:** Все ответы и коммуникация должны быть только на русском языке
+*   Проект использует файл `.env` для конфигурации. Пример предоставлен в `.env.example`.
+*   Код бэкенда находится в директории `api/`.
+*   Код фронтенда находится в директории `static/`.
+*   Проект использует `requirements.txt` для управления Python зависимостями.
+*   Скрипты `clean_uploads.bat` и `scripts/clean_uploads.py` могут быть использованы для очистки директории `uploads/`.

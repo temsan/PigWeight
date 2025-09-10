@@ -1549,10 +1549,10 @@ class StreamManager:
                 self.streams.pop(stream_id, None)
 
         if stream_id not in self.streams:
-            if source_uri.startswith("demo://"):
-                # Создаем демо поток
-                from core.demo_generator import create_demo_stream
-                self.streams[stream_id] = DemoStream(stream_id, source_uri)
+            # Отключаем демо-поток, вместо него используем последний активный файл
+            # if source_uri.startswith("demo://"):
+            #    from core.demo_generator import create_demo_stream
+            #    self.streams[stream_id] = DemoStream(stream_id, source_uri)
             elif source_uri.startswith("rtsp://"):
                 self.streams[stream_id] = RtspStream(stream_id, source_uri)
             else:
