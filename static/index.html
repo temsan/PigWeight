@@ -63,11 +63,11 @@
                 style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3;">
           <!-- icon injected by JS -->
         </button>
-        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:0 1 520px; min-width:260px; max-width:520px; order:1; margin-left:auto;">
+        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 auto; min-width:360px; max-width:none; order:1; margin-left:auto;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
-        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6;"></span>
+        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:#274063; opacity:.8; margin-left:12px; white-space:nowrap;"></span>
       </div>
     </div>
     <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:64px; height:calc(100vh - 64px); position:relative;">
