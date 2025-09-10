@@ -87,11 +87,26 @@
     .right-col .journal-container{ padding:4px 6px !important; }
     .right-col .journal-header{ padding:4px 6px !important; margin:0 0 4px 0 !important; }
     .right-col .journal-filters{ gap:4px !important; }
-    .right-col .journal-stat-card{ padding:6px 8px !important; margin:4px 0 !important; }
+    .right-col .journal-stat-card{ 
+      padding:6px 8px !important; 
+      margin:4px 0 !important; 
+      background: var(--liquid-glass-bg); 
+      backdrop-filter: blur(var(--liquid-glass-blur)); 
+      border: 1px solid var(--liquid-glass-border); 
+      border-radius: var(--radius-sm); 
+      box-shadow: 0 2px 8px var(--liquid-glass-shadow);
+    }
     .right-col .card{ padding:6px !important; }
     .right-col .journal-comparison-result{ padding:6px 8px !important; }
     .right-col .journal-btn{ height:30px; line-height:28px; padding:0 10px; }
-    .right-col input, .right-col select{ height:32px; }
+    .right-col input, .right-col select{ 
+      height:32px; 
+      background: var(--liquid-glass-bg);
+      border: 1px solid var(--liquid-glass-border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      padding: 0 8px;
+    }
   </style>
 </head>
 <body style="overflow:hidden;">
@@ -208,12 +223,12 @@
                 </div>
               </div>
 
-              <button id="saveManualBtn" class="journal-btn primary" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600;">
+              <button id="saveManualBtn" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">
                 💾 Сохранить акт взвешивания
               </button>
 
               <!-- График -->
-              <div style="margin-top: 10px; background: var(--journal-glass); border: 1px solid var(--journal-border); border-radius: var(--radius-md); padding: 8px; backdrop-filter: blur(15px);">
+              <div style="margin-top: 10px; background: var(--liquid-glass-bg); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 8px; backdrop-filter: blur(var(--liquid-glass-blur)); box-shadow: 0 4px 16px var(--liquid-glass-shadow);">
                 <canvas id="liveCountChart" height="160" style="width:100%; height:160px;"></canvas>
               </div>
             </div>
@@ -282,7 +297,7 @@
                 </div>
               </div>
 
-              <button id="saveWeighingBtn" class="journal-btn primary" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600;">💾 Сохранить акт взвешивания</button>
+              <button id="saveWeighingBtn" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">💾 Сохранить акт взвешивания</button>
             </div>
           </div>
 
@@ -301,8 +316,8 @@
                     <option value="cam1">Камера 1</option>
                     <option value="cam2">Камера 2</option>
                   </select>
-                  <button id="refreshLogsBtn" class="journal-btn primary">🔄 Обновить</button>
-                  <button id="exportLogsBtn" class="journal-btn">📥 Экспорт</button>
+                  <button id="refreshLogsBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 500; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">🔄 Обновить</button>
+                  <button id="exportLogsBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 500; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease;">📥 Экспорт</button>
                 </div>
               </div>
 
@@ -340,7 +355,7 @@
                 <div class="journal-title">
                   📊 Сверка с Excel
                 </div>
-                <button id="startVerificationBtn" class="journal-btn primary">▶ Проверить</button>
+                <button id="startVerificationBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">▶ Проверить</button>
               </div>
 
               <!-- Загрузка файла -->
