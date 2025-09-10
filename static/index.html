@@ -18,9 +18,11 @@
     .panel-body input[type="number"] { text-align: right; }
     .stream-status { display:inline-block; min-width:64px; text-align:right; }
     /* Loading overlay */
-    #loadingOverlay { position:absolute; inset:0; z-index: 20; display:none; align-items:center; justify-content:center; }
-    #loadingOverlay .box { display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px 16px; border-radius:12px; background: rgba(255,255,255,0.65); backdrop-filter: blur(10px); border:1px solid rgba(60,90,140,.12); box-shadow: 0 6px 24px rgba(40,60,90,.12); }
-    #loadingOverlay .loading-text { font: 600 13px system-ui, Segoe UI, Arial; color:#1f3d6b; opacity:.9; }
+    #loadingOverlay { position:absolute; inset:0; z-index: 20; display:none; align-items:center; justify-content:center; backdrop-filter: blur(2px); background: rgba(245,248,255,0.72); }
+    #loadingOverlay .box { display:flex; flex-direction:column; align-items:center; gap:10px; padding:16px 18px; border-radius:12px; background: rgba(255,255,255,0.9); border:1px solid rgba(60,90,140,.12); box-shadow: 0 6px 24px rgba(40,60,90,.12); }
+    #loadingOverlay .spinner { width:28px; height:28px; border:3px solid rgba(44,123,229,0.18); border-top-color:#2c7be5; border-radius:50%; animation: spin 0.9s linear infinite; }
+    #loadingOverlay .loading-text { font: 600 14px system-ui, Segoe UI, Arial; color:#1f3d6b; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .flow-row { display:flex; gap:10px; align-items:stretch; justify-content:space-between; }
     .flow-box { flex:1 1 0; display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; background:rgba(240,245,252,0.85); border:1px solid rgba(60,90,140,.12); text-align:center; }
     .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
@@ -37,7 +39,7 @@
 
     /* Compact right panel (recursive compacting to remove empty space) */
     :root{ 
-      --sidebar-width: 420px; 
+      --sidebar-width: 380px; 
       --liquid-glass-bg: rgba(255, 255, 255, 0.65);
       --liquid-glass-border: rgba(255, 255, 255, 0.18);
       --liquid-glass-shadow: rgba(31, 38, 135, 0.15);
@@ -46,34 +48,34 @@
       --journal-border: var(--liquid-glass-border);
       --radius-md: 12px;
     }
-    .right-col{ padding:12px !important; }
-    .right-col .journal-tabs{ margin:0 0 8px 0 !important; }
-    .right-col .panel-content{ padding:10px !important; }
-    .right-col .journal-container{ padding:8px 10px !important; }
-    .right-col .journal-header{ padding:8px 10px !important; margin:0 0 8px 0 !important; }
-    .right-col .journal-filters{ gap:8px !important; }
-    .right-col .journal-stat-card{ padding:8px 10px !important; margin:6px 0 !important; }
-    .right-col .card{ padding:10px !important; }
-    .right-col .journal-comparison-result{ padding:8px 10px !important; }
-    .right-col .journal-btn{ height:32px; line-height:30px; padding:0 12px; }
+    .right-col{ padding:8px !important; }
+    .right-col .journal-tabs{ margin:0 0 4px 0 !important; }
+    .right-col .panel-content{ padding:6px !important; }
+    .right-col .journal-container{ padding:4px 6px !important; }
+    .right-col .journal-header{ padding:4px 6px !important; margin:0 0 4px 0 !important; }
+    .right-col .journal-filters{ gap:4px !important; }
+    .right-col .journal-stat-card{ padding:6px 8px !important; margin:4px 0 !important; }
+    .right-col .card{ padding:6px !important; }
+    .right-col .journal-comparison-result{ padding:6px 8px !important; }
+    .right-col .journal-btn{ height:30px; line-height:28px; padding:0 10px; }
     .right-col input, .right-col select{ height:32px; }
   </style>
 </head>
 <body style="overflow:hidden;">
   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
-            <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding-right:12px; position:fixed; top:0; left:0; right:0; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border-bottom: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
-      <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:nowrap;">
+            <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding-right:6px; position:fixed; top:0; left:0; right:0; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border-bottom: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
+      <div class="container toolbar-row-horizontal" style="display:flex; gap:4px; align-items:center; flex-wrap:nowrap;">
         <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
 
         <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
           <div id="streamRadios" class="toggle-group compact"></div>
         </div>
-        <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:6px 10px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; order:4;">
+        <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:4px 8px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; order:4;">
           <span id="fileInputName">Файл</span>
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
-        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:8px 14px; min-width:auto; height:40px; line-height:24px; font-weight:600; order:5;">Старт</button>
-        <div style="display:flex; align-items:center; gap:8px; flex:0 0 auto; order:2;">
+        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5;">Старт</button>
+        <div style="display:flex; align-items:center; gap:4px; flex:0 0 auto; order:2;">
           <label style="font-size:13px; color:#274063;">Транспорт:</label>
           <select id="transportSelect" style="height:32px;">
             <option value="mjpeg">MJPEG</option>
@@ -84,17 +86,17 @@
                 style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3;">
           <!-- icon injected by JS -->
         </button>
-        <div class="seek-wrap flex items-center gap-10 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 8px 12px;">
+        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
-        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:#274063; opacity:.8; margin-left:12px; white-space:nowrap;"></span>
+        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:#274063; opacity:.8; margin-left:6px; white-space:nowrap;"></span>
       </div>
     </div>
-    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:64px; height:calc(100vh - 64px); position:relative;">
+    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:56px; height:calc(100vh - 56px); position:relative;">
       <div class="container" style="display:flex; gap:0; width:100%; max-width:100%; align-items:stretch; padding:0; margin:0;">
         <div class="left-col" style="flex:1 1 auto; min-width:0; order:0;">
-          <div id="videoWrapper" class="video-wrapper" style="position:absolute; top:0; left:0; right:var(--sidebar-width, 480px); bottom:0; width:auto; height:auto; margin:0; border-radius:0; background:#000;">
+          <div id="videoWrapper" class="video-wrapper" style="position:fixed; inset:0; width:100%; height:100vh; margin:0; border-radius:0; background:#000;">
             <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
             <video id="webrtcVideo" autoplay playsinline muted style="display:none; width:100%; height:100%; object-fit:contain;"></video>
             <canvas id="overlayCanvas"></canvas>
@@ -105,7 +107,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 480px); min-width:var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); box-sizing:border-box; order:1; position:absolute; right:0; top:64px; bottom:0; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
+        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 380px); min-width:var(--sidebar-width, 380px); max-width:var(--sidebar-width, 380px); box-sizing:border-box; order:1; position:absolute; right:0; top:56px; bottom:0; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -162,13 +164,13 @@
                 <div class="journal-title">💾 Новый акт взвешивания</div>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Количество голов</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Количество голов</label>
                   <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0">
                 </div>
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Общий вес (кг)</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Общий вес (кг)</label>
                   <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0.0">
                 </div>
               </div>
@@ -178,7 +180,7 @@
               </button>
 
               <!-- График -->
-              <div style="margin-top: 20px; background: var(--journal-glass); border: 1px solid var(--journal-border); border-radius: var(--radius-md); padding: 12px; backdrop-filter: blur(15px);">
+              <div style="margin-top: 10px; background: var(--journal-glass); border: 1px solid var(--journal-border); border-radius: var(--radius-md); padding: 8px; backdrop-filter: blur(15px);">
                 <canvas id="liveCountChart" height="160" style="width:100%; height:160px;"></canvas>
               </div>
             </div>
@@ -214,35 +216,35 @@
                 <div class="journal-title">📝 Новый акт взвешивания</div>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Дата</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Дата</label>
                   <input type="date" id="weighingDate" class="journal-filter-input">
                 </div>
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Время</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Время</label>
                   <input type="time" id="weighingTime" class="journal-filter-input">
                 </div>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Группа/Секция</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Группа/Секция</label>
                   <input type="text" id="weighingGroup" placeholder="6B 4,5" class="journal-filter-input">
                 </div>
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Всего свиней</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Всего свиней</label>
                   <input type="number" id="weighingTotal" min="1" class="journal-filter-input" style="text-align: center;">
                 </div>
               </div>
 
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Общий вес (кг)</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Общий вес (кг)</label>
                   <input type="number" id="weighingWeight" step="0.1" min="0" class="journal-filter-input" style="text-align: center;">
                 </div>
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px;">Средний вес</label>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Средний вес</label>
                   <input type="number" id="weighingAvgWeight" step="0.01" readonly class="journal-filter-input" style="text-align: center; background: rgba(255,255,255,0.2);">
                 </div>
               </div>
