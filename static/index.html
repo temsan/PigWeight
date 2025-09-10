@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
     .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.56); backdrop-filter: blur(12px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
-    .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-end !important; }
+    .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; gap: 8px; }
     .top-toolbar .pill, .top-toolbar .file-input-btn { height: 32px; line-height: 20px; }
     html, body { margin: 0; padding: 0; }
     #main-container { padding-top: 64px; }
@@ -18,11 +18,9 @@
     .panel-body input[type="number"] { text-align: right; }
     .stream-status { display:inline-block; min-width:64px; text-align:right; }
     /* Loading overlay */
-    #loadingOverlay { position:absolute; inset:0; z-index: 20; display:none; align-items:center; justify-content:center; backdrop-filter: blur(2px); background: rgba(245,248,255,0.72); }
-    #loadingOverlay .box { display:flex; flex-direction:column; align-items:center; gap:10px; padding:16px 18px; border-radius:12px; background: rgba(255,255,255,0.9); border:1px solid rgba(60,90,140,.12); box-shadow: 0 6px 24px rgba(40,60,90,.12); }
-    #loadingOverlay .spinner { width:28px; height:28px; border:3px solid rgba(44,123,229,0.18); border-top-color:#2c7be5; border-radius:50%; animation: spin 0.9s linear infinite; }
-    #loadingOverlay .loading-text { font: 600 14px system-ui, Segoe UI, Arial; color:#1f3d6b; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    #loadingOverlay { position:absolute; inset:0; z-index: 20; display:none; align-items:center; justify-content:center; }
+    #loadingOverlay .box { display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px 16px; border-radius:12px; background: rgba(255,255,255,0.65); backdrop-filter: blur(10px); border:1px solid rgba(60,90,140,.12); box-shadow: 0 6px 24px rgba(40,60,90,.12); }
+    #loadingOverlay .loading-text { font: 600 13px system-ui, Segoe UI, Arial; color:#1f3d6b; opacity:.9; }
     .flow-row { display:flex; gap:10px; align-items:stretch; justify-content:space-between; }
     .flow-box { flex:1 1 0; display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; background:rgba(240,245,252,0.85); border:1px solid rgba(60,90,140,.12); text-align:center; }
     .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
@@ -38,7 +36,16 @@
     body.fs .main-flex { justify-content:stretch !important; }
 
     /* Compact right panel (recursive compacting to remove empty space) */
-    :root{ --sidebar-width: 420px; }
+    :root{ 
+      --sidebar-width: 420px; 
+      --liquid-glass-bg: rgba(255, 255, 255, 0.65);
+      --liquid-glass-border: rgba(255, 255, 255, 0.18);
+      --liquid-glass-shadow: rgba(31, 38, 135, 0.15);
+      --liquid-glass-blur: 10px;
+      --journal-glass: var(--liquid-glass-bg);
+      --journal-border: var(--liquid-glass-border);
+      --radius-md: 12px;
+    }
     .right-col{ padding:12px !important; }
     .right-col .journal-tabs{ margin:0 0 8px 0 !important; }
     .right-col .panel-content{ padding:10px !important; }
@@ -54,9 +61,9 @@
 </head>
 <body style="overflow:hidden;">
   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
-            <div class="top-toolbar minimal glass sticky-top" id="topToolbar" style="padding-right:var(--sidebar-width, 480px); position:fixed; top:0; left:0; right:0; z-index:1000;">
+            <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding-right:12px; position:fixed; top:0; left:0; right:0; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border-bottom: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
       <div class="container toolbar-row-horizontal" style="display:flex; gap:8px; align-items:center; flex-wrap:nowrap;">
-        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap; margin-right:auto;">PigWeight v3.0</h2>
+        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
 
         <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
           <div id="streamRadios" class="toggle-group compact"></div>
@@ -77,7 +84,7 @@
                 style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3;">
           <!-- icon injected by JS -->
         </button>
-        <div class="seek-wrap card card-md flex items-center gap-10 nowrap" style="flex:1 1 auto; min-width:360px; max-width:none; order:1; margin-left:auto;">
+        <div class="seek-wrap flex items-center gap-10 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 8px 12px;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
@@ -93,13 +100,12 @@
             <canvas id="overlayCanvas"></canvas>
             <div id="loadingOverlay" aria-live="polite">
               <div class="box">
-                <div class="spinner"></div>
-                <div class="loading-text" id="loadingText">Загрузка…</div>
+                <div class="loading-text" id="loadingText">Готово к пуску</div>
               </div>
             </div>
           </div>
         </div>
-        <div class="right-col card glass rounded-xl" style="width:var(--sidebar-width, 480px); min-width:var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); box-sizing:border-box; order:1; position:absolute; right:0; top:64px; bottom:0; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001;">
+        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 480px); min-width:var(--sidebar-width, 480px); max-width:var(--sidebar-width, 480px); box-sizing:border-box; order:1; position:absolute; right:0; top:64px; bottom:0; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -303,7 +309,7 @@
               </div>
 
               <!-- Загрузка файла -->
-              <div class="journal-upload-area" id="verificationUploadArea">
+              <div class="journal-upload-area" id="verificationUploadArea" style="cursor: pointer; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px dashed var(--liquid-glass-border); border-radius: var(--radius-md); margin: 10px 0; transition: all 0.3s ease;">
                 <div style="text-align: center; padding: 24px;">
                   <div style="font-size: 48px; margin-bottom: 12px;">📎</div>
                   <div style="font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px;">
@@ -1039,6 +1045,16 @@
                         try {
                             const { left_x, right_x } = window.__lines || {};
                             await fetch('/api/lines', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ left_x, right_x }) });
+                            
+                            // Сохраняем линии для конкретного видеофайла
+                            const activeStreamId = document.querySelector('#streamRadios .toggle-btn.active')?.dataset?.streamId;
+                            if (activeStreamId) {
+                                await fetch(`/api/stream/${activeStreamId}/line_positions`, {
+                                    method: 'POST', 
+                                    headers: {'Content-Type':'application/json'}, 
+                                    body: JSON.stringify({ left_x, right_x })
+                                });
+                            }
                         } catch(_) {}
                         overlayCanvas.style.cursor = 'crosshair';
                         window.__isDraggingLines = false;

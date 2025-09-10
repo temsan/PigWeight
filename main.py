@@ -151,12 +151,24 @@ def main():
                 port=PORT,
                 reload=RELOAD or DEBUG,  # Релоад включается, если включён RELOAD или DEBUG
                 log_level="debug" if DEBUG else "info",
-                # Исключаем директории, которые часто меняются и провоцируют бесконечный reload
+                # Явно указываем, ЧТО отслеживать, чтобы не реагировать на записи в logs/*
+                reload_dirs=[
+                    str(Path(__file__).parent / "api"),
+                    str(Path(__file__).parent / "core"),
+                    str(Path(__file__).parent / "services"),
+                    str(Path(__file__).parent / "static"),
+                ],
+                # Дополнительно исключаем шумные директории/файлы
                 reload_excludes=[
                     "logs",
+                    "logs/**",
+                    "*.log",
                     "uploads",
+                    "uploads/**",
                     "records",
+                    "records/**",
                     "models",
+                    "models/**",
                 ]
             )
         except Exception as e:

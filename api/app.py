@@ -536,6 +536,10 @@ class VideoStream(abc.ABC):
         self._track_prev_x: Dict[int, float] = {}
         self._track_last_side_time: Dict[Tuple[int, str], float] = {}
         self.last_masks = []
+        # Сохранение размеров и позиций для маппинга масок
+        self._last_mask_ref_size = None  # (width, height) оригинального кадра
+        self._last_mask_crop = None  # (y0, y1) границы обрезки
+        self.line_positions = {}  # Сохранение позиций линий для конкретных файлов
         self.tracker = SimpleTracker()
         self._infer_task: Optional[asyncio.Task] = None
         self._stream_task: Optional[asyncio.Task] = None
@@ -1939,24 +1943,18 @@ async def api_stream_start(stream_id: str, source_uri: str):
         stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
         await stream.start()
         resp = {"status": "started", "stream_id": stream_id}
+        
         if isinstance(stream, FileStream):
             # provide best-known meta immediately
             resp.update({
                 "type": "file",
                 "duration": float(stream.duration or 0.0),
-                "fps": float(stream.fps or 0.0)
             })
-        else:
-            resp.update({"type": "rtsp"})
-
-        end_time = time.time()
-        perf_logger.info(".3f")
+        
+        perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Stream started in {(time.time() - start_time):.3f}s")
         return resp
     except Exception as e:
-        end_time = time.time()
-        perf_logger.error(".3f")
-        logger.error(f"Start stream error for {stream_id}: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/stream/{stream_id}/stop")
 async def api_stream_stop(stream_id: str):
@@ -2321,6 +2319,26 @@ async def api_stream_seek(stream_id: str, t: float = Query(...)):
         return JSONResponse({"error": "seek supported only for file streams"}, status_code=400)
     await stream.seek(max(0.0, float(t)))
     return {"status": "ok", "current_time": float(stream.current_time)}
+
+@app.post("/api/stream/{stream_id}/line_positions")
+async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Body(...)):
+    """Сохранить позиции линий для конкретного видеофайла."""
+    try:
+        stream = await STREAM_MANAGER.get_stream(stream_id)
+        if not stream:
+            return JSONResponse({"error": f"Stream {stream_id} not found"}, status_code=404)
+        
+        # Сохраняем позиции линий
+        file_path = stream_id
+        if "://" in stream_id:
+            # Извлекаем имя файла из URL
+            file_path = stream_id.split("/")[-1]
+        
+        stream.line_positions[file_path] = positions
+        
+        return {"status": "success", "message": f"Line positions saved for {file_path}"}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.post("/api/stream/{stream_id}/optimize")
 async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
