@@ -144,7 +144,7 @@ else:
         raise RuntimeError(f"Файл модели не найден: {_ENV_MODEL_PATH}")
     MODEL_PATH = _ENV_MODEL_PATH
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))
-ANTI_LETTERBOX = os.getenv("ANTI_LETTERBOX", "false").lower() == "true"
+
 AVG_WINDOW = int(os.getenv("AVG_WINDOW", "20"))
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
 
@@ -152,11 +152,7 @@ FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
 USE_OPTIMIZED_PREPROCESSING = os.getenv("USE_OPTIMIZED_PREPROCESSING", "true").lower() == "true"
 PREPROCESSING_METHOD = os.getenv("PREPROCESSING_METHOD", "adaptive")  # adaptive, center_crop, letterbox
 
-# Предупреждение о конфликте настроек
-if USE_OPTIMIZED_PREPROCESSING and ANTI_LETTERBOX:
-    logger.warning("⚠️  ANTI_LETTERBOX=true конфликтует с USE_OPTIMIZED_PREPROCESSING=true")
-    logger.warning("   Рекомендуется установить ANTI_LETTERBOX=false для оптимальной работы")
-    logger.warning("   Оптимизированная предобработка уже включает обработку черных полос")
+
 
 # Inference device (GPU/CPU)
 try:
@@ -684,57 +680,7 @@ class VideoStream(abc.ABC):
         except Exception as e:
             logger.error(f"Finalize act save error for {self.stream_id}: {e}")
 
-    @staticmethod
-    def _detect_black_bars_top_bottom(frame: np.ndarray) -> tuple[int, int]:
-        """Detect top/bottom black bars and return crop indices [y0:y1].
-        Only crops vertical bars (letterbox). Returns (0, H) if nothing significant.
-        """
-        try:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        except Exception:
-            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        H, W = gray.shape[:2]
-        if H < 10 or W < 10:
-            return 0, H
-
-        # Row brightness and threshold
-        row_mean = gray.mean(axis=1)
-        # Dynamic threshold: low brightness + margin
-        thr = max(8.0, row_mean.mean() * 0.15)
-        min_run = 4  # consecutive non-black rows to consider start of content
-
-        # Find y0 from top
-        y0 = 0
-        run = 0
-        for i, val in enumerate(row_mean):
-            if val > thr:
-                run += 1
-                if run >= min_run:
-                    y0 = max(0, i - (min_run - 1))
-                    break
-            else:
-                run = 0
-
-        # Find y1 from bottom
-        y1 = H
-        run = 0
-        for off, val in enumerate(reversed(row_mean)):
-            if val > thr:
-                run += 1
-                if run >= min_run:
-                    y1 = H - max(0, off - (min_run - 1))
-                    break
-            else:
-                run = 0
-
-        # Sanity: ensure meaningful crop (at least 1% trimmed each side combined)
-        min_trim = int(0.01 * H)
-        if y0 <= min_trim and (H - y1) <= min_trim:
-            return 0, H
-        if y1 - y0 < int(0.5 * H):
-            # Avoid over-cropping when detection fails
-            return 0, H
-        return max(0, y0), min(H, y1)
+    
 
     def _update_line_counters(self, ids: List[int], centers_x: List[float], centers_y: Optional[List[float]] = None):
         """Count entries from left/right by crossing vertical lines at 0.25 and 0.75 of width.
@@ -974,19 +920,8 @@ async def _global_infer_loop(self):
                     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if frame is not None:
                         H0, W0, _ = frame.shape
-                        if ANTI_LETTERBOX:
-                            try:
-                                _y0, _y1 = self._detect_black_bars_top_bottom(frame)
-                                if isinstance(_y0, (int, float)) and isinstance(_y1, (int, float)) and 0 <= _y0 < _y1 <= H0:
-                                    y0, y1 = int(_y0), int(_y1)
-                                else:
-                                    y0, y1 = 0, H0
-                            except Exception:
-                                y0, y1 = 0, H0
-                            proc = frame[y0:y1, :, :] if (0 <= y0 < y1 <= H0) else frame
-                        else:
-                            y0, y1 = 0, H0
-                            proc = frame
+                        y0, y1 = 0, H0
+                        proc = frame
                         # imgsz из переменной окружения (по умолчанию 960)
                         try:
                             _IMG_SIZE = int(os.getenv("IMG_SIZE", "960"))

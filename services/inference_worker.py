@@ -126,11 +126,7 @@ class InferenceWorker:
                         
                         if use_optimized:
                             # Новая оптимизированная предобработка, соответствующая датасету
-                            preprocessing_method = os.getenv('PREPROCESSING_METHOD', 'adaptive')  # adaptive, center_crop, letterbox
-                            if preprocessing_method == 'center_crop':
-                                p = center_crop_resize(frame, target_size)
-                            else:
-                                p = adaptive_preprocess(frame, target_size)
+                            p = center_crop_resize(frame, target_size)
                         else:
                             # Старая предобработка (для совместимости)
                             p = preprocess_for_model(frame, target_size=target_size, use_hsv=(os.getenv('USE_HSV','false').lower()=='true'))
