@@ -44,9 +44,42 @@
       --liquid-glass-border: rgba(255, 255, 255, 0.18);
       --liquid-glass-shadow: rgba(31, 38, 135, 0.15);
       --liquid-glass-blur: 10px;
+      --liquid-glass-hover: rgba(255, 255, 255, 0.75);
+      --liquid-glass-active: rgba(255, 255, 255, 0.85);
       --journal-glass: var(--liquid-glass-bg);
       --journal-border: var(--liquid-glass-border);
       --radius-md: 12px;
+      --radius-sm: 8px;
+      --text-primary: #1f3d6b;
+      --text-secondary: #2f5078;
+      --accent-color: #2c7be5;
+    }
+    
+    /* Стили для вкладок в стиле liquid glass */
+    .journal-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .journal-tab-btn {
+      background: var(--liquid-glass-bg);
+      backdrop-filter: blur(var(--liquid-glass-blur));
+      border: 1px solid var(--liquid-glass-border);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      font-size: 14px;
+      color: var(--text-primary);
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .journal-tab-btn:hover {
+      background: var(--liquid-glass-hover);
+    }
+    .journal-tab-btn.active {
+      background: var(--liquid-glass-active);
+      border-color: rgba(124, 199, 255, 0.35);
+      box-shadow: 0 4px 12px rgba(31, 38, 135, 0.15);
     }
     .right-col{ padding:8px !important; }
     .right-col .journal-tabs{ margin:0 0 4px 0 !important; }
@@ -63,37 +96,37 @@
 </head>
 <body style="overflow:hidden;">
   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
-            <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding-right:6px; position:fixed; top:0; left:0; right:0; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border-bottom: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
+            <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding:6px 12px; position:fixed; top:12px; left:12px; right:12px; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
       <div class="container toolbar-row-horizontal" style="display:flex; gap:4px; align-items:center; flex-wrap:nowrap;">
         <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
 
         <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
           <div id="streamRadios" class="toggle-group compact"></div>
         </div>
-        <label class="file-input-btn pill nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:4px 8px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; order:4;">
+        <label class="file-input-btn nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:4px 8px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; order:4; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">
           <span id="fileInputName">Файл</span>
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
-        <button id="videoPlayPauseBtn" class="pill nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5;">Старт</button>
-        <div style="display:flex; align-items:center; gap:4px; flex:0 0 auto; order:2;">
-          <label style="font-size:13px; color:#274063;">Транспорт:</label>
-          <select id="transportSelect" style="height:32px;">
+        <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">Старт</button>
+        <div style="display:flex; align-items:center; gap:4px; flex:0 0 auto; order:2; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 8px;">
+          <label style="font-size:13px; color:var(--text-secondary);">Транспорт:</label>
+          <select id="transportSelect" style="height:32px; background: transparent; border: none; color: var(--text-primary); font-weight: 500;">
             <option value="mjpeg">MJPEG</option>
             <option value="webrtc" selected>WebRTC</option>
           </select>
         </div>
-        <button id="fullscreenBtn" class="pill nowrap" aria-label="На весь экран" title="На весь экран"
-                style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3;">
+        <button id="fullscreenBtn" class="nowrap" aria-label="На весь экран" title="На весь экран"
+                style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">
           <!-- icon injected by JS -->
         </button>
-        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">
+        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
-        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:#274063; opacity:.8; margin-left:6px; white-space:nowrap;"></span>
+        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:var(--text-secondary); background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 4px 8px; margin-left:6px; white-space:nowrap;"></span>
       </div>
     </div>
-    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:56px; height:calc(100vh - 56px); position:relative;">
+    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:76px; height:calc(100vh - 76px); position:relative;">
       <div class="container" style="display:flex; gap:0; width:100%; max-width:100%; align-items:stretch; padding:0; margin:0;">
         <div class="left-col" style="flex:1 1 auto; min-width:0; order:0;">
           <div id="videoWrapper" class="video-wrapper" style="position:fixed; inset:0; width:100%; height:100vh; margin:0; border-radius:0; background:#000;">
@@ -107,7 +140,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 380px); min-width:var(--sidebar-width, 380px); max-width:var(--sidebar-width, 380px); box-sizing:border-box; order:1; position:absolute; right:0; top:56px; bottom:0; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 30px var(--liquid-glass-shadow);">
+        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 380px); min-width:var(--sidebar-width, 380px); max-width:var(--sidebar-width, 380px); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
