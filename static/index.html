@@ -999,10 +999,7 @@
     }
 
     function drawOverlay(masks, ids = null) {
-        // Allow drawing overlays if we either have a first rendered video frame
-        // or we already have masks from the backend — this lets users see
-        // segmentation overlays under the WebRTC loading spinner.
-        if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) return;
+        // Рисуем направляющие всегда; маски — когда придут/после первого кадра
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
         const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));

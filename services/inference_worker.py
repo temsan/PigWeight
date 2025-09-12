@@ -196,7 +196,8 @@ class InferenceWorker:
                                             changed = True
                                 except Exception:
                                     changed = True
-                                if changed and (nowt - last) >= MIN_INTERVAL:
+                                must_send_masks = bool(res.get('masks'))
+                                if (changed or must_send_masks) and (nowt - last) >= MIN_INTERVAL:
                                     # Обновляем last_masks для серверного WebRTC-оверлея (нормализованные маски)
                                     try:
                                         stream = STREAM_MANAGER.streams.get(self.stream_id)
