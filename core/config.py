@@ -91,13 +91,24 @@ def load_config() -> Dict[str, Any]:
     return config
 
 def setup_logging(debug: bool = False) -> logging.Logger:
-    """Настройка простого единого логирования для всего проекта."""
+    """Настройка единого логирования.
+
+    - По умолчанию уровень INFO. Можно переопределить переменной окружения LOG_LEVEL.
+    - Шумные сторонние логгеры (aiortc/aioice/av и т.п.) принудительно занижаются до WARNING.
+    """
     # Создаем директорию для логов
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
-    # Определяем уровень логирования
-    level = logging.DEBUG if debug else logging.INFO
+    # Определяем уровень логирования: LOG_LEVEL имеет приоритет над debug
+    level_name = os.getenv("LOG_LEVEL", ("debug" if debug else "info")).lower()
+    level = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+        "critical": logging.CRITICAL,
+    }.get(level_name, logging.INFO)
     
     # Простой формат без лишних деталей
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -119,6 +130,22 @@ def setup_logging(debug: bool = False) -> logging.Logger:
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
+    # Прижимаем шумные логгеры к WARNING независимо от уровня
+    for ln in [
+        "aiortc",
+        "aiortc.rtp",
+        "aiortc.rtcrtpsender",
+        "aiortc.rtcrtpreceiver",
+        "aioice",
+        "av",
+        "ice",
+        "urllib3",
+    ]:
+        try:
+            logging.getLogger(ln).setLevel(max(logging.WARNING, level))
+        except Exception:
+            pass
+
     return logging.getLogger("pigweight")
 
 # Load configuration on import
