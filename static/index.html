@@ -86,7 +86,6 @@
     .right-col{ padding:8px !important; }
     .right-col .journal-tabs{ margin:0 0 4px 0 !important; }
     .right-col .panel-content{ padding:6px !important; }
-    .right-col .journal-container{ padding:4px 6px !important; }
     .right-col .journal-header{ padding:4px 6px !important; margin:0 0 4px 0 !important; }
     .right-col .journal-filters{ gap:4px !important; }
     .right-col .journal-stat-card{ 
@@ -179,8 +178,7 @@
           </div>
 
           <!-- Панель Live (liquid glass стиль) -->
-          <div id="livePanel" class="panel-content active" style="padding:0;">
-            <div class="journal-container">
+          <div id="livePanel" class="panel-content active">
               <!-- Счетчики потока -->
               <div class="journal-stats">
                 <div class="journal-stat-card">
@@ -233,12 +231,10 @@
               <div style="margin-top: 10px; background: var(--liquid-glass-bg); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 8px; backdrop-filter: blur(var(--liquid-glass-blur)); box-shadow: 0 4px 16px var(--liquid-glass-shadow);">
                 <canvas id="liveCountChart" height="160" style="width:100%; height:160px;"></canvas>
               </div>
-            </div>
           </div>
 
           <!-- Панель Взвешивания (liquid glass стиль) -->
-          <div id="weighingPanel" class="panel-content" style="padding:0; display:none;">
-            <div class="journal-container">
+          <div id="weighingPanel" class="panel-content" style="display:none;">
               <div class="journal-header">
                 <div class="journal-title">
                   ⚖️ Журналирование актов взвешивания
@@ -300,12 +296,10 @@
               </div>
 
               <button id="saveWeighingBtn" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">💾 Сохранить акт взвешивания</button>
-            </div>
           </div>
 
           <!-- Панель Журнала (liquid glass стиль) -->
-          <div id="logsPanel" class="panel-content" style="padding:0; display:none;">
-            <div class="journal-container">
+          <div id="logsPanel" class="panel-content" style="display:none;">
               <div class="journal-header">
                 <div class="journal-title">
                   📊 Журнал взвешиваний
@@ -347,12 +341,10 @@
               <div class="journal-list" id="journalList">
                 <div class="journal-loading">Загрузка актов...</div>
               </div>
-            </div>
           </div>
 
           <!-- Панель Сверки (liquid glass стиль) -->
-          <div id="verificationPanel" class="panel-content" style="padding:0; display:none;">
-            <div class="journal-container">
+          <div id="verificationPanel" class="panel-content" style="display:none;">
               <div class="journal-header">
                 <div class="journal-title">
                   📊 Сверка с Excel
@@ -390,7 +382,6 @@
               <div id="verificationResults" class="journal-comparison-result" style="display: none;">
                 <!-- Результаты сверки будут здесь -->
               </div>
-            </div>
           </div>
         </div>
       </div>
@@ -1294,8 +1285,8 @@
             const job = overlayPending; overlayPending = null;
             drawOverlay(job.masks, job.ids);
             overlayLastDraw = now;
-        } else if (!overlayPending && lastMasks && (now - overlayLastDraw >= minDt)) {
-            // redraw last masks periodically to keep UI responsive even without new WS
+        } else if (now - overlayLastDraw >= minDt) {
+            // Всегда перерисовываем направляющие, даже если масок нет
             drawOverlay(lastMasks, lastIds);
             overlayLastDraw = now;
         }
