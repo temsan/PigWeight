@@ -1448,13 +1448,8 @@ class BrokerVideoTrack(VideoStreamTrack):
         except Exception:
             pass
 
-        # convert BGR -> RGB
-        try:
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        except Exception:
-            img_rgb = img
-
-        vf = _VideoFrame.from_ndarray(img_rgb, format='rgb24')
+        # Отправляем напрямую BGR для снижения CPU-накладных (aiortc поддерживает bgr24)
+        vf = _VideoFrame.from_ndarray(img, format='bgr24')
         # Proper timestamping for aiortc pacing
         pts, time_base = await self.next_timestamp()
         vf.pts = pts
@@ -1510,6 +1505,19 @@ async def api_webrtc_offer(payload: Dict[str, Any]):
             logger.exception(f"Failed to add track for peer={peer_id}")
         try:
             answer = await pc.createAnswer()
+            # Настройка параметров отправки видео: увеличить битрейт/фреймрейт для качества
+            try:
+                sender = next((s for s in pc.getSenders() if s.track and s.track.kind == 'video'), None)
+                if sender and sender.getParameters():
+                    params = sender.getParameters()
+                    # Если кодек поддерживает настройки, выставляем приоритет качества
+                    for enc in params.encodings or []:
+                        enc.maxBitrate = int(os.getenv('WEBRTC_MAX_BITRATE', '2500000'))  # ~2.5 Mbps
+                        enc.maxFramerate = int(os.getenv('WEBRTC_MAX_FPS', '25'))
+                        enc.scaleResolutionDownBy = float(os.getenv('WEBRTC_SCALE', '1.0'))
+                    sender.setParameters(params)
+            except Exception:
+                pass
             await pc.setLocalDescription(answer)
         except ValueError as e:
             # handle SDP direction mismatch (aiortc error) gracefully

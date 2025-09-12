@@ -39,7 +39,7 @@
 
     /* Compact right panel (recursive compacting to remove empty space) */
     :root{ 
-      --sidebar-width: 380px; 
+      --sidebar-width: 460px; 
       --liquid-glass-bg: rgba(255, 255, 255, 0.65);
       --liquid-glass-border: rgba(255, 255, 255, 0.18);
       --liquid-glass-shadow: rgba(31, 38, 135, 0.15);
@@ -58,9 +58,11 @@
     /* Стили для вкладок в стиле liquid glass */
     .journal-tabs {
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 8px;
       margin-bottom: 12px;
+      overflow-x: auto;
+      scrollbar-width: thin;
     }
     .journal-tab-btn {
       background: var(--liquid-glass-bg);
@@ -155,7 +157,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 380px); min-width:var(--sidebar-width, 380px); max-width:var(--sidebar-width, 380px); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
+        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 460px); min-width:var(--sidebar-width, 460px); max-width:var(--sidebar-width, 460px); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
