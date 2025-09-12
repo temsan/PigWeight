@@ -161,7 +161,16 @@ class InferenceWorker:
                             try:
                                 if res and 'masks' in res and res['masks']:
                                     mapped = map_polys_to_original(res['masks'], meta['scale'], meta['pad'], orig)
-                                    res['masks'] = mapped
+                                    # Сохраняем пиксельные координаты и нормализованные 0..1
+                                    res['masks_px'] = mapped
+                                    ow, oh = orig
+                                    try:
+                                        if ow and oh:
+                                            res['masks'] = [[(float(x)/float(ow), float(y)/float(oh)) for (x, y) in poly] for poly in mapped]
+                                        else:
+                                            res['masks'] = []
+                                    except Exception:
+                                        res['masks'] = []
                             except Exception:
                                 pass
                             RESULTS_STORE.put(self.stream_id, fid, res)
@@ -188,7 +197,26 @@ class InferenceWorker:
                                 except Exception:
                                     changed = True
                                 if changed and (nowt - last) >= MIN_INTERVAL:
-                                    payload = {"type": "count_update", "count": int(res.get('detections', 0)), "debug": {"confidence": float(res.get('confidence', 0.0)), "model": {"path": os.getenv('MODEL_PATH',''), "name": os.path.basename(os.getenv('MODEL_PATH',''))}}}
+                                    # Обновляем last_masks для серверного WebRTC-оверлея (нормализованные маски)
+                                    try:
+                                        stream = STREAM_MANAGER.streams.get(self.stream_id)
+                                        if stream is not None:
+                                            stream.last_masks = res.get('masks') or []
+                                    except Exception:
+                                        pass
+
+                                    payload = {
+                                        "type": "count_update",
+                                        "count": int(res.get('detections', 0)),
+                                        "debug": {
+                                            "confidence": float(res.get('confidence', 0.0)),
+                                            "model": {
+                                                "path": os.getenv('MODEL_PATH',''),
+                                                "name": os.path.basename(os.getenv('MODEL_PATH',''))
+                                            },
+                                            "masks": res.get('masks', [])
+                                        }
+                                    }
                                     try:
                                         # fire-and-forget
                                         asyncio.create_task(STREAM_MANAGER.broadcast(self.stream_id, payload))
