@@ -1045,13 +1045,7 @@
             ctx.beginPath();
             ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
             ctx.fill();
-            // DEBUG: Display line positions
-            ctx.save();
-            ctx.font = '16px Arial';
-            ctx.fillStyle = 'red';
-            ctx.fillText(`L: ${leftX.toFixed(2)} (${x1.toFixed(0)})`, x1 + 10, rect.y + 30);
-            ctx.fillText(`R: ${rightX.toFixed(2)} (${x2.toFixed(0)})`, x2 - 50, rect.y + 30);
-            ctx.restore();
+            // Подписи к линиям выключены по требованию UX
             // Перетаскивание линий отсечки мышью/тапом
             try {
                 if (!window.__linesDragInit) {
@@ -1547,6 +1541,17 @@
 
     // Seek handlers (single-request logic)
     let isSeeking = false;
+    function _seekTimeFromEvent(e){
+        try{
+            const r = seekRange.getBoundingClientRect();
+            const clientX = e && (e.touches ? e.touches[0].clientX : e.clientX);
+            if (typeof clientX !== 'number') return Number(seekRange.value||0);
+            const ratio = Math.max(0, Math.min(1, (clientX - r.left) / Math.max(1, r.width)));
+            const min = Number(seekRange.min || 0);
+            const max = Number(seekRange.max || 0);
+            return min + ratio * (max - min);
+        } catch(_) { return Number(seekRange.value||0); }
+    }
     seekRange.addEventListener('input', (e) => {
         e.stopPropagation();
         const t = Number(e.target.value || 0);
@@ -1571,14 +1576,22 @@
     // Manage pointer drag to avoid duplicate change/pointerup seeks
     if (seekRange) seekRange.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         isSeeking = true;
         if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
+        // Устанавливаем точное значение по координате клика, чтобы не прыгало на 0
+        const t0 = _seekTimeFromEvent(e);
+        seekRange.value = t0;
+        curTime.textContent = t0.toFixed(1);
     });
     if (seekRange) seekRange.addEventListener('pointerup', async (e) => {
         e.stopPropagation();
+        e.preventDefault();
         const id = activeStreamId;
         const src = streamSources[id] || '';
-        const t = Number(seekRange.value || 0);
+        const t = _seekTimeFromEvent(e);
+        seekRange.value = t;
+        curTime.textContent = t.toFixed(1);
         const finishDrag = () => { isSeeking = false; };
         // блокируем приём серверного t, пока не дойдём до цели
         seekTargetTime = t;
