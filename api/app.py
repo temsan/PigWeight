@@ -802,8 +802,57 @@ class VideoStream(abc.ABC):
             pass
 
     async def _infer_loop(self):
-        # Делегируем в глобальную реализацию, чтобы избежать конфликтов hot-reload
-        return await _global_infer_loop(self)
+        """
+        Основной цикл обработки с использованием UnifiedVideoProcessor.
+        """
+        try:
+            # Получаем инстанс нашего нового процессора
+            processor = get_processor(self.stream_id)
+            if not processor.is_active:
+                logger.warning(f"[{self.stream_id}] Процессор неактивен, обработка не будет запущена.")
+                return
+
+            logger.info(f"[{self.stream_id}] Запуск цикла обработки с UnifiedVideoProcessor.")
+
+            while self.running:
+                jpeg_data = await self.get_jpeg()
+                if not jpeg_data:
+                    await asyncio.sleep(0.1) # Ждем, если нет кадров
+                    continue
+
+                # Декодируем JPEG
+                arr = np.frombuffer(jpeg_data, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame is None:
+                    continue
+
+                # 1. Обработка кадра новым процессором
+                result = processor.process_frame(frame)
+
+                # 2. Обновление состояния и UI (упрощенная версия)
+                if result:
+                    self.last_count = result.detections
+                    # TODO: Восстановить сложную логику трекинга и подсчета пересечений, используя `result.masks`
+                else:
+                    self.last_count = 0
+
+                # Используем оконный максимум для сглаживания
+                wnd_max = self.window_max.update(time.time(), int(self.last_count))
+                self.reported_count = max(self.reported_count, wnd_max)
+
+                # Отправка данных в UI
+                payload = {
+                    "type": "count_update",
+                    "count": int(self.reported_count),
+                    "debug": { "count_raw": int(self.last_count) }
+                }
+                await STREAM_MANAGER.broadcast(self.stream_id, payload)
+
+                # Адаптивная задержка
+                await asyncio.sleep(0.05 if self.last_count > 0 else 0.2)
+
+        except Exception as e:
+            logger.error(f"[{self.stream_id}] Критическая ошибка в цикле обработки: {e}", exc_info=True)
 
     async def get_jpeg(self) -> Optional[bytes]:
         async with self.lock:
@@ -874,269 +923,7 @@ class WindowMaxEstimator:
         return int(max(c for _, c in self.data))
 
 # NOTE: Глобальная реализация инференс-цикла; метод класса делегирует сюда
-async def _global_infer_loop(self):
-        try:
-            from ultralytics import YOLO
-            self.model = YOLO(MODEL_PATH)
-            try:
-                if DEVICE:
-                    self.model.to(DEVICE)
-                if USE_HALF and hasattr(self.model, 'model'):
-                    try:
-                        self.model.model.half()
-                    except Exception:
-                        pass
-            except Exception as _e:
-                logger.warning(f"Model device/half setup warning: {_e}")
-            self.model_loaded = True
-            logger.info(f"YOLO model loaded: {MODEL_PATH}")
-        except Exception as e:
-            self.model_loaded = False
-            logger.error(f"Failed to load YOLO model: {e}")
-            try:
-                await STREAM_MANAGER.broadcast(self.stream_id, {"type": "status", "inference": "disabled", "error": str(e)})
-            except Exception:
-                pass
-            while self.running:
-                await asyncio.sleep(1.0)
-            return
 
-        while self.running:
-            try:
-                jpeg = await self.get_jpeg()
-                if jpeg:
-                    # Исправляем проблему с типами данных
-                    if isinstance(jpeg, dict):
-                        # Если пришел dict вместо bytes, извлекаем jpeg данные
-                        if 'jpeg' in jpeg:
-                            jpeg_data = jpeg['jpeg']
-                        else:
-                            logger.error(f"Invalid jpeg data format: {type(jpeg)}")
-                            continue
-                    else:
-                        jpeg_data = jpeg
-                        
-                    arr = np.frombuffer(jpeg_data, dtype=np.uint8)
-                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                    if frame is not None:
-                        H0, W0, _ = frame.shape
-                        y0, y1 = 0, H0
-                        proc = frame
-                        # imgsz из переменной окружения (по умолчанию 960)
-                        try:
-                            _IMG_SIZE = int(os.getenv("IMG_SIZE", "960"))
-                        except Exception:
-                            _IMG_SIZE = 960
-                        results = self.model.predict(proc, imgsz=_IMG_SIZE, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
-                        r = results[0] if results else None
-                        # Быстрая диагностика кадра
-                        try:
-                            frame_mean = float(np.mean(frame))
-                            frame_size = (int(W0), int(H0))
-                        except Exception:
-                            frame_mean = None
-                            frame_size = (int(W0), int(H0))
-
-                        if r and hasattr(r, "masks") and r.masks is not None:
-                            polys = r.masks.xy
-                            self.last_count = len(polys)
-                            # Build detections by bbox for simple tracking on cropped frame
-                            dets = []
-                            centroids_local: list[tuple[float, float]] = []
-                            for m in polys:
-                                if m is None or len(m) == 0:
-                                    continue
-                                xs = [float(p[0]) for p in m]
-                                ys = [float(p[1]) for p in m]
-                                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-                                dets.append({'bbox': [x1, y1, x2, y2]})
-                                # центроид по вершинам полигона (в координатах proc)
-                                try:
-                                    cx_m = sum(xs) / max(1, len(xs))
-                                    cy_m = sum(ys) / max(1, len(ys))
-                                except Exception:
-                                    cx_m = 0.5 * (x1 + x2)
-                                    cy_m = 0.5 * (y1 + y2)
-                                centroids_local.append((cx_m, cy_m))
-                            tracks = self.tracker.update(dets) if dets else []
-                            ids = [t['id'] for t in tracks] if tracks else []
-                            # Зафиксировать порядок первого появления (входа в кадр)
-                            for tid in ids:
-                                if tid not in self._first_seen_order:
-                                    self._first_seen_order[tid] = self._arrival_counter
-                                    self._arrival_counter += 1
-                            # centers for flow counting (normalized X) — по центроидам масок
-                            centers_x: List[float] = []
-                            centers_y: List[float] = []
-                            for (cxm, cym) in centroids_local:
-                                centers_x.append(float(cxm) / float(W0))
-                                centers_y.append((float(cym) + float(y0)) / float(H0))
-                            # Присваиваем новые метки слева-направо, чтобы цифры были по порядку
-                            if ids:
-                                new_pairs: List[Tuple[int, float]] = []
-                                for i, tid in enumerate(ids):
-                                    if tid not in self._session_id_map:
-                                        xnorm = centers_x[i] if i < len(centers_x) else 0.0
-                                        new_pairs.append((tid, float(xnorm)))
-                                new_pairs.sort(key=lambda t: t[1])
-                                for tid, _ in new_pairs:
-                                    if tid not in self._session_id_map:
-                                        self._session_id_map[tid] = self._next_session_label
-                                        self._next_session_label += 1
-                            # Собираем последовательность меток по трекам текущего кадра
-                            session_labels: List[int] = [self._session_id_map.get(tid, 0) for tid in ids]
-                            # Подготовим стабильные отображаемые метки:
-                            # 1) Для новых треков выдаём следующий номер (_next_display_label) и запоминаем в карте
-                            # 2) Для уже виденных всегда используем прежнюю метку (не прыгает)
-                            # 3) Для удобства человека дополнительно формируем ordered_labels,
-                            #    но не подменяем стабильную карту (используем ordered_labels только если нужно)
-                            try:
-                                n = len(centroids_local)
-                                ordered_labels = [0] * n
-                                display_labels = [0] * n
-                                # Назначаем стабильные метки
-                                for i, tid in enumerate(ids):
-                                    if tid not in self._display_label_map:
-                                        self._display_label_map[tid] = self._next_display_label
-                                        self._next_display_label += 1
-                                    display_labels[i] = self._display_label_map.get(tid, 0)
-                                # Дополнительно сформируем человеко-порядок по левому пересечению / первому появлению
-                                order_idx = list(range(n))
-                                def left_rank(i: int) -> int:
-                                    try:
-                                        tid = ids[i]
-                                        if int(tid) in self._left_cross_rank:
-                                            return int(self._left_cross_rank[int(tid)])
-                                        return int(self._first_seen_order.get(tid, 1_000_000))
-                                    except Exception:
-                                        return 1_000_000
-                                order_idx.sort(key=lambda i: (left_rank(i), -(centroids_local[i][0] if i < len(centroids_local) else 0.0)))
-                                for rank, idx_i in enumerate(order_idx, start=1):
-                                    ordered_labels[idx_i] = rank
-                            except Exception:
-                                ordered_labels = list(range(1, len(centroids_local) + 1))
-                                display_labels = ordered_labels[:]
-                            self._update_line_counters(ids, centers_x, centers_y)
-                            # Normalize masks back to original frame
-                            mapped: list[list[tuple[float, float]]] = []
-                            for m in polys:
-                                pts = []
-                                for p in m:
-                                    x = float(p[0])
-                                    y = float(p[1]) + float(y0)
-                                    pts.append((x / float(W0), y / float(H0)))
-                                mapped.append(pts)
-                            self.last_masks = mapped
-                            try:
-                                self._last_mask_ref_size = (int(W0), int(H0))
-                                self._last_mask_crop = (int(y0), int(y1))
-                            except Exception:
-                                self._last_mask_ref_size = (int(W0), int(H0))
-                                self._last_mask_crop = (0, int(H0))
-                            # Update act-of-weighing metrics
-                            cur_count = len(session_labels)
-                            if cur_count > self._act_peak:
-                                self._act_peak = cur_count
-                            for lab in session_labels:
-                                self._act_seen_labels.add(int(lab))
-                        else:
-                            self.last_count = 0
-                            self.last_masks = []
-                            try:
-                                self._last_mask_ref_size = None
-                                self._last_mask_crop = None
-                            except Exception:
-                                pass
-                        # Статистический максимум: окно + монотоничность
-                        wnd_max = self.window_max.update(time.time(), int(self.last_count))
-                        est = max(self.reported_count, wnd_max)
-                        self.reported_count = est
-                        # Логируем таймлайн для дашборда не чаще 2 раз в секунду
-                        try:
-                            now_ts = time.time()
-                            if (now_ts - getattr(self, '_last_timeline_ts', 0.0)) >= 0.5:
-                                rel_t = float(max(0.0, now_ts - float(self._act_start_ts)))
-                                self._act_timeline.append({"t": rel_t, "count_est": int(est)})
-                                self._last_timeline_ts = now_ts
-                        except Exception:
-                            pass
-                        payload = {
-                            "type": "count_update",
-                            "count": int(round(est)),
-                            "debug": {
-                                "masks": self.last_masks,
-                                "count_raw": int(self.last_count),
-                                "flow": {"left_in": self.left_in, "right_in": self.right_in, "left_flow": self.left_flow, "right_flow": self.right_flow},
-                                "frame_mean": frame_mean,
-                                "size": {"w": frame_size[0], "h": frame_size[1]}
-                            }
-                        }
-                        # model meta for UI
-                        try:
-                            payload["debug"]["model"] = {
-                                "path": str(MODEL_PATH),
-                                "name": os.path.basename(str(MODEL_PATH)),
-                                "device": str(DEVICE) if 'DEVICE' in globals() else 'cpu',
-                                "half": bool(USE_HALF) if 'USE_HALF' in globals() else False,
-                            }
-                        except Exception:
-                            pass
-                        # include imgsz if known
-                        try:
-                            if '_IMG_SIZE' in locals():
-                                payload["debug"]["imgsz"] = int(_IMG_SIZE)
-                        except Exception:
-                            pass
-                        # include line positions for UI
-                        try:
-                            payload["debug"]["lines"] = {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)}
-                        except Exception:
-                            pass
-                        # include recent crossings for UI
-                        try:
-                            if getattr(self, "_recent_crossings", None):
-                                payload["debug"]["crossings"] = list(self._recent_crossings)
-                        except Exception:
-                            pass
-                        # include stable labels and act-of-weighing stats
-                        try:
-                            # По умолчанию отдаём стабильные метки (не прыгают)
-                            if 'display_labels' in locals() and display_labels:
-                                payload["debug"]["labels"] = display_labels
-                            payload["debug"]["act"] = {
-                                "seen_total": int(len(self._act_seen_labels)),
-                                "peak_concurrent": int(self._act_peak),
-                                "duration_sec": float(max(0.0, time.time() - self._act_start_ts))
-                            }
-                        except Exception:
-                            pass
-                        try:
-                            payload["debug"]["ids"] = list(ids) if ids is not None else []
-                        except Exception:
-                            payload["debug"]["ids"] = []
-                        # всегда отправляем счётчики входов, даже если детекций 0
-                        payload["debug"]["flow"] = {"left_in": self.left_in, "right_in": self.right_in, "left_flow": self.left_flow, "right_flow": self.right_flow}
-                        await STREAM_MANAGER.broadcast(self.stream_id, payload)
-            except Exception as e:
-                logger.error(f"Infer loop error on {self.stream_id}: {e}")
-            # Адаптивный интервал цикла инференса для отзывчивых счётчиков
-            try:
-                now2 = time.time()
-                recent = False
-                try:
-                    if getattr(self, "_recent_crossings", None):
-                        recent = any((now2 - float(c.get("ts", 0))) < 0.8 for c in self._recent_crossings)
-                except Exception:
-                    recent = False
-                if recent:
-                    delay = 0.05
-                elif getattr(self, "last_count", 0) > 0:
-                    delay = 0.08
-                else:
-                    delay = 0.2
-            except Exception:
-                delay = 0.2
-            await asyncio.sleep(delay)
 
     
 
@@ -1206,13 +993,7 @@ class RtspStream(VideoStream):
                             async with self.lock:
                                 self.last_jpeg = frame
                             # publish to in-process broker (fire-and-forget)
-                            try:
-                                if FRAME_BROKER is not None:
-                                    asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), frame))
-                                    if start_global_worker_for is not None:
-                                        start_global_worker_for(self.stream_id)
-                            except Exception:
-                                pass
+                            
                             break
                     except Exception:
                         await asyncio.sleep(0.01)
@@ -1221,13 +1002,7 @@ class RtspStream(VideoStream):
                     if jpeg:
                         async with self.lock:
                             self.last_jpeg = jpeg
-                        try:
-                            if FRAME_BROKER is not None:
-                                asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
-                                if start_global_worker_for is not None:
-                                    start_global_worker_for(self.stream_id)
-                        except Exception:
-                            pass
+                        
                     await asyncio.sleep(1.0 / TARGET_FPS)
         except Exception as e:
             logger.error(f"RTSP stream {self.stream_id} error: {e}")
@@ -1301,13 +1076,7 @@ class FileStream(VideoStream):
                     async with self.lock:
                         self.last_jpeg = jpeg
                     self.current_time += (1.0 / self.fps)
-                    try:
-                        if FRAME_BROKER is not None:
-                            asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
-                            if start_global_worker_for is not None:
-                                start_global_worker_for(self.stream_id)
-                    except Exception:
-                        pass
+                    
                 await asyncio.sleep(1.0 / self.fps)
         except Exception as e:
             logger.error(f"File stream {self.stream_id} error: {e}")
@@ -1535,15 +1304,7 @@ class StreamManager:
                 await ws.send_json(data)
 
 STREAM_MANAGER = StreamManager()
-# attach frame broker and start inference workers on-demand
-try:
-    from core.frame_broker import FRAME_BROKER
-    from services.inference_worker import start_global_worker_for
-    from core.results_store import RESULTS_STORE
-except Exception:
-    FRAME_BROKER = None
-    start_global_worker_for = None
-    RESULTS_STORE = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

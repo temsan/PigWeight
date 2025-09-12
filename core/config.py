@@ -13,7 +13,7 @@ ONNX_PATH = "models/yolo11n.onnx"
 # Default configuration values
 DEFAULT_CONFIG = {
     # Model settings
-    "MODEL_PATH": "models/pig_yolo11-seg.v4",  # Базовый путь, расширение выберется автоматически
+    "MODEL_PATH": "models/pig_yolo11-seg.v4",  # Базовый путь, .pt или .onnx выберется автоматически
     "DETECTION_MODE": "pig-only",
     "PIG_CLASS_ID": 0,
     "CONF_THRESHOLD": 0.30,
@@ -24,7 +24,7 @@ DEFAULT_CONFIG = {
 
     # Inference settings
     "IMG_SIZE": 960,
-    "BATCH_SIZE": 4,
+    "BATCH_SIZE": 8, # Увеличено для лучшей производительности
     "MAX_WAIT_MS": 50,
 
     # Broker settings
