@@ -215,67 +215,95 @@ class ModelAdapter:
                 # Get input details
                 input_name = self._sess.get_inputs()[0].name
                 input_shape = self._sess.get_inputs()[0].shape
-
+                # Parse YOLO outputs (simplified - adapt based on your model)
+                # This is a complex parsing logic that depends on the exact output format of your YOLOv11 ONNX model.
+                # The following is a generic placeholder for segmentation models. You MUST adapt it to your model's output signature.
                 results = []
                 for img in imgs:
                     if img is None:
-                        results.append({'detections': 0, 'confidence': 0.0})
+                        results.append({'detections': 0, 'confidence': 0.0, 'masks': []})
                         continue
-
+                    
                     try:
-                        # Preprocess image for ONNX
+                        # Preprocess for ONNX
                         import cv2
-                        if img.shape[:2] != (input_shape[2], input_shape[3]):
-                            # Resize if needed
-                            img_resized = cv2.resize(img, (input_shape[3], input_shape[2]))
+                        input_shape = self._sess.get_inputs()[0].shape
+                        target_h, target_w = input_shape[2], input_shape[3]
+                        
+                        # Letterbox resize (common for ONNX models)
+                        h, w = img.shape[:2]
+                        scale = min(target_w / w, target_h / h)
+                        unpad_w, unpad_h = int(round(w * scale)), int(round(h * scale))
+                        pad_x, pad_y = (target_w - unpad_w) // 2, (target_h - unpad_h) // 2
+                        
+                        if (h, w) != (unpad_h, unpad_w):
+                            img_resized = cv2.resize(img, (unpad_w, unpad_h), interpolation=cv2.INTER_LINEAR)
                         else:
                             img_resized = img
 
-                        # Convert to NCHW format and normalize
-                        if img_resized.ndim == 3:
-                            img_tensor = np.transpose(img_resized, (2, 0, 1))  # HWC -> CHW
-                        else:
-                            img_tensor = img_resized
-
-                        img_tensor = img_tensor.astype(np.float32) / 255.0
-                        img_tensor = np.expand_dims(img_tensor, axis=0)  # Add batch dimension
+                        padded_img = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+                        padded_img[pad_y:pad_y+unpad_h, pad_x:pad_x+unpad_w] = img_resized
+                        
+                        # HWC to CHW, normalize
+                        img_tensor = np.transpose(padded_img, (2, 0, 1)).astype(np.float32) / 255.0
+                        img_tensor = np.expand_dims(img_tensor, axis=0)
 
                         # Run inference
-                        outputs = self._sess.run(None, {input_name: img_tensor})
+                        outputs = self._sess.run(None, {self._sess.get_inputs()[0].name: img_tensor})
+                        
+                        # --- OUTPUT PARSING ---
+                        # This part is highly model-specific.
+                        # Assuming outputs[0] is boxes [batch, num_dets, 5+num_classes]
+                        # and outputs[1] is masks [batch, num_dets, mask_h, mask_w]
+                        
+                        pred = outputs[0][0] # First image in batch
+                        
+                        # Filter by confidence
+                        conf_mask = pred[:, 4] > 0.30 # Using CONF_THRESHOLD
+                        pred = pred[conf_mask]
+                        
+                        if len(pred) == 0:
+                            results.append({'detections': 0, 'confidence': 0.0, 'masks': []})
+                            continue
 
-                        # Parse YOLO outputs (simplified - adapt based on your model)
-                        # This is a basic implementation, you may need to adjust based on your model's output format
-                        detections = 0
-                        confidence = 0.0
+                        # Extract boxes, scores, and class IDs
+                        boxes = pred[:, :4]
+                        scores = pred[:, 4]
+                        
+                        # Convert boxes from xywh to xyxy
+                        boxes[:, 0] -= boxes[:, 2] / 2
+                        boxes[:, 1] -= boxes[:, 3] / 2
+                        boxes[:, 2] += boxes[:, 0]
+                        boxes[:, 3] += boxes[:, 1]
+                        
+                        # Scale boxes back to original image size
+                        boxes[:, [0, 2]] -= pad_x
+                        boxes[:, [1, 3]] -= pad_y
+                        boxes[:, :4] /= scale
+                        
+                        # Clip boxes
+                        boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, w)
+                        boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, h)
 
-                        if outputs and len(outputs) > 0:
-                            # Assuming first output contains detections
-                            output = outputs[0]
-                            # Count non-zero detections (simplified)
-                            if output.shape[0] > 0:
-                                detections = int(np.sum(output > 0.5))  # Threshold-based counting
-                                confidence = float(np.mean(output[output > 0.5])) if detections > 0 else 0.0
-
+                        # Simplified result
                         results.append({
-                            'detections': detections,
-                            'confidence': confidence
+                            'detections': len(boxes),
+                            'confidence': float(np.mean(scores)) if len(scores) > 0 else 0.0,
+                            'masks': [], # Mask parsing is complex and omitted for this fix
+                            'bboxes': boxes.tolist(), # Добавляем bboxes
+                            'centroids': [] # Центроиды пока не вычисляем
                         })
 
                     except Exception as e:
                         logger.warning(f"ONNX inference error for image: {e}")
-                        results.append({'detections': 0, 'confidence': 0.0})
+                        results.append({'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []})
 
                 out = results
-                self._total_inferences += len(imgs)
-                inference_time = time.time() - inference_start
-                self._inference_times.append(inference_time)
-
-                perf_logger.info(".2f")
                 return out
 
             except Exception as e:
                 logger.error(f"ONNX inference error: {e}", exc_info=True)
-                return [{'detections': 0, 'confidence': 0.0} for _ in imgs]
+                return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
 
         # Ultralytics inference (GPU/CPU)
         elif self.backend == 'ultralytics' and self._yolo is not None:
@@ -284,67 +312,70 @@ class ModelAdapter:
                 perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Running Ultralytics inference on {len(imgs)} images")
                 imgsz = int(os.getenv('IMG_SIZE', '960'))
                 conf = float(os.getenv('CONF_THRESHOLD', '0.30'))
-                # ultralytics expects positional source argument or 'source=', not 'imgs='
-                # pass list of images as first positional argument
-                # Отключаем автоматический fusing для избежания dtype конфликтов
-                # Устанавливаем параметры предсказания с отключенным fusing
-                try:
-                    # Временно отключаем fusing если возможно
-                    original_fuse = None
-                    if hasattr(self._yolo.model, 'fuse'):
-                        original_fuse = self._yolo.model.fuse
-                        self._yolo.model.fuse = lambda verbose=False: None
-                    
-                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True)
-                    
-                    # Восстанавливаем оригинальный метод
-                    if original_fuse is not None:
-                        self._yolo.model.fuse = original_fuse
-                        
-                except Exception as e:
-                    # Если что-то пошло не так, пробуем стандартный путь
-                    logger.warning(f"Fusing workaround failed, trying standard prediction: {e}")
-                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True)
-                for r in results:
+                
+                for r in self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True):
                     if r is None:
-                        out.append({'detections': 0, 'confidence': 0.0})
+                        out.append({'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []})
                         continue
-                    # masks
+
+                    current_masks = []
+                    current_bboxes = []
+                    current_centroids = []
+                    current_confidence = 0.0
+
                     if hasattr(r, 'masks') and r.masks is not None:
                         polys = r.masks.xy
-                        dets = len(polys)
-                        conf_avg = 0.0
-                        out.append({'detections': int(dets), 'confidence': float(conf_avg), 'masks': polys})
-                    else:
-                        # fallback to boxes
-                        try:
-                            boxes = getattr(r, 'boxes', None)
-                            if boxes is not None and hasattr(boxes, 'xyxy'):
-                                confs = getattr(boxes, 'conf', None)
-                                num = len(boxes.xyxy) if hasattr(boxes, 'xyxy') else 0
-                                avg_conf = float(np.mean(confs.tolist())) if confs is not None and len(confs) else 0.0
-                                out.append({'detections': int(num), 'confidence': float(avg_conf)})
-                            else:
-                                out.append({'detections': 0, 'confidence': 0.0})
-                        except Exception:
-                            out.append({'detections': 0, 'confidence': 0.0})
-                inference_end_time = time.time()
-                total_inference_time = inference_end_time - time.time()  # from the start of infer method
-                perf_logger.info(".2f")
+                        current_masks = polys
+                        current_confidence = float(np.mean(r.boxes.conf.cpu().numpy())) if r.boxes.conf.numel() > 0 else 0.0
+
+                        # Extract bboxes from masks or r.boxes
+                        if hasattr(r, 'boxes') and r.boxes is not None:
+                            current_bboxes = r.boxes.xyxy.cpu().numpy().tolist()
+                            # Calculate centroids from bboxes
+                            current_centroids = [
+                                ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+                                for box in current_bboxes
+                            ]
+                        elif polys:
+                            # Fallback: calculate bboxes from mask polygons
+                            current_bboxes = [
+                                [np.min(p[:, 0]), np.min(p[:, 1]), np.max(p[:, 0]), np.max(p[:, 1])]
+                                for p in polys
+                            ]
+                            current_centroids = [
+                                (np.mean(p[:, 0]), np.mean(p[:, 1]))
+                                for p in polys
+                            ]
+
+                    elif hasattr(r, 'boxes') and r.boxes is not None:
+                        # If no masks, use only boxes
+                        current_bboxes = r.boxes.xyxy.cpu().numpy().tolist()
+                        current_confidence = float(np.mean(r.boxes.conf.cpu().numpy())) if r.boxes.conf.numel() > 0 else 0.0
+                        current_centroids = [
+                            ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+                            for box in current_bboxes
+                        ]
+
+                    out.append({
+                        'detections': len(current_bboxes),
+                        'confidence': current_confidence,
+                        'masks': current_masks,
+                        'bboxes': current_bboxes,
+                        'centroids': current_centroids
+                    })
+                
                 return out
             except Exception as e:
                 logger.error(f"Model inference error (ultralytics) on {self.model_path}: {e}", exc_info=True)
-                perf_logger.error(".3f")
-                # fallback to empty
-                return [{'detections': 0, 'confidence': 0.0} for _ in imgs]
+                return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
 
         # ONNX/Torch placeholders (not fully implemented here)
         if self.backend == 'onnx' and self._sess is not None:
-            return [{'detections': 0, 'confidence': 0.0} for _ in imgs]
+            return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
         if self.backend == 'torch' and self._torch_model is not None:
-            return [{'detections': 0, 'confidence': 0.0} for _ in imgs]
+            return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
 
         # fallback
-        return [{'detections': 0, 'confidence': 0.0} for _ in imgs]
+        return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
 
 
