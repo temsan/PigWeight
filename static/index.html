@@ -113,33 +113,43 @@
 <body style="overflow:hidden;">
   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
             <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding:6px 12px; position:fixed; top:12px; left:12px; right:12px; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
-      <div class="container toolbar-row-horizontal" style="display:flex; gap:4px; align-items:center; flex-wrap:nowrap;">
-        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>
+      <div class="container toolbar-row-horizontal" style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
+        <!-- Левая группа: Логотип (компактнее) -->
+        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap; font-size:14px; margin-right:6px; opacity:0.8;">PigWeight v3.0</h2>
+        
+        <!-- Центральная группа: Управление воспроизведением (ВАЖНОЕ - крупнее) -->
+        <div class="control-group" style="display:flex; gap:8px; align-items:center; flex:0 0 auto;">
+          <label class="file-input-btn nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="padding:6px 12px; min-width:auto; text-align:center; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 2px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); font-weight:600; font-size:14px; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 2px 8px var(--liquid-glass-shadow);">
+            <span id="fileInputName">📁 Файл</span>
+            <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
+          </label>
+          <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; padding:8px 16px; min-width:auto; height:40px; line-height:24px; font-weight:700; font-size:16px; background: linear-gradient(135deg, var(--accent-color), #1e5fb8); backdrop-filter: blur(var(--liquid-glass-blur)); border: 2px solid rgba(124, 199, 255, 0.4); border-radius: var(--radius-md); color: white; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 4px 16px rgba(44, 123, 229, 0.3); text-shadow: 0 1px 2px rgba(0,0,0,0.2);">▶️ Старт</button>
+        </div>
 
-        <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">
-          <div id="streamRadios" class="toggle-group compact"></div>
-        </div>
-        <label class="file-input-btn nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:4px 8px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; order:4; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">
-          <span id="fileInputName">Файл</span>
-          <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
-        </label>
-        <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">Старт</button>
-        <div style="display:flex; align-items:center; gap:4px; flex:0 0 auto; order:2; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 8px;">
-          <label style="font-size:13px; color:var(--text-secondary);">Транспорт:</label>
-          <select id="transportSelect" style="height:32px; background: transparent; border: none; color: var(--text-primary); font-weight: 500;">
-            <option value="mjpeg">MJPEG</option>
-            <option value="webrtc" selected>WebRTC</option>
-          </select>
-        </div>
-        <button id="fullscreenBtn" class="nowrap" aria-label="На весь экран" title="На весь экран"
-                style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">
-          <!-- icon injected by JS -->
-        </button>
-        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">
+        <!-- Центральная группа: Seekbar -->
+        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 auto; min-width:300px; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
-        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:var(--text-secondary); background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 4px 8px; margin-left:6px; white-space:nowrap;"></span>
+
+        <!-- Правая группа: Настройки и статус (компактнее) -->
+        <div class="settings-group" style="display:flex; gap:4px; align-items:center; flex:0 0 auto;">
+          <div class="toolbar-group" id="streamGroup" style="min-width:100px; white-space:nowrap;">
+            <div id="streamRadios" class="toggle-group compact"></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:2px; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 6px;">
+            <label style="font-size:10px; color:var(--text-secondary); opacity:0.7;">Транспорт:</label>
+            <select id="transportSelect" style="height:28px; background: transparent; border: none; color: var(--text-primary); font-weight: 500; font-size:11px;">
+              <option value="mjpeg">MJPEG</option>
+              <option value="webrtc" selected>WebRTC</option>
+            </select>
+          </div>
+          <button id="fullscreenBtn" class="nowrap" aria-label="На весь экран" title="На весь экран"
+                  style="padding:4px; width:28px; height:28px; line-height:0; display:inline-flex; align-items:center; justify-content:center; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); opacity:0.8; transition: all 0.2s ease; cursor: pointer;">
+            <!-- icon injected by JS -->
+          </button>
+          <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="font-size:10px; color:var(--text-secondary); background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 2px 4px; white-space:nowrap; min-width:50px; text-align:center; opacity:0.8;"></span>
+        </div>
       </div>
     </div>
     <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:76px; height:calc(100vh - 76px); position:relative;">
@@ -156,7 +166,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 32%); min-width:var(--sidebar-width, 32%); max-width:var(--sidebar-width, 32%); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
+        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 32%); min-width:var(--sidebar-width, 32%); max-width:var(--sidebar-width, 32%); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow:hidden; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px; display:flex; flex-direction:column;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -178,63 +188,71 @@
           </div>
 
           <!-- Панель Live (liquid glass стиль) -->
-          <div id="livePanel" class="panel-content active">
-              <!-- Счетчики потока -->
-              <div class="journal-stats">
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="leftIn">0</div>
-                  <div class="journal-stat-label">Слева (вход)</div>
+          <div id="livePanel" class="panel-content active" style="flex:1; overflow:hidden; display:flex; flex-direction:column; gap:8px; padding:8px;">
+
+              <!-- ПОТОК - основные показатели (ВАЖНОЕ - крупно и ярко) -->
+              <div class="journal-header" style="margin:0; padding:0;">
+                <div class="journal-title" style="font-size:18px; font-weight:700; color:var(--accent-color); text-shadow: 0 1px 3px rgba(44, 123, 229, 0.3);">🔄 ПОТОК</div>
+              </div>
+              <div class="journal-stats" style="gap:6px; margin:0;">
+                <div class="journal-stat-card" style="padding:12px 8px; background: linear-gradient(135deg, rgba(44, 123, 229, 0.15), rgba(44, 123, 229, 0.08)); border: 2px solid rgba(44, 123, 229, 0.2);">
+                  <div class="journal-stat-value" id="leftIn" style="font-size:32px; font-weight:800; color:var(--accent-color); text-shadow: 0 1px 2px rgba(44, 123, 229, 0.4);">0</div>
+                  <div class="journal-stat-label" style="font-size:12px; font-weight:600; color:var(--accent-color);">Слева</div>
                 </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="avgFlow">0</div>
-                  <div class="journal-stat-label">Среднее</div>
+                <div class="journal-stat-card" style="padding:12px 8px; background: linear-gradient(135deg, rgba(40, 167, 69, 0.15), rgba(40, 167, 69, 0.08)); border: 2px solid rgba(40, 167, 69, 0.2);">
+                  <div class="journal-stat-value" id="avgFlow" style="font-size:32px; font-weight:800; color:#28a745; text-shadow: 0 1px 2px rgba(40, 167, 69, 0.4);">0</div>
+                  <div class="journal-stat-label" style="font-size:12px; font-weight:600; color:#28a745;">Среднее</div>
                 </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="rightIn">0</div>
-                  <div class="journal-stat-label">Справа (вход)</div>
+                <div class="journal-stat-card" style="padding:12px 8px; background: linear-gradient(135deg, rgba(23, 162, 184, 0.15), rgba(23, 162, 184, 0.08)); border: 2px solid rgba(23, 162, 184, 0.2);">
+                  <div class="journal-stat-value" id="rightIn" style="font-size:32px; font-weight:800; color:#17a2b8; text-shadow: 0 1px 2px rgba(23, 162, 184, 0.4);">0</div>
+                  <div class="journal-stat-label" style="font-size:12px; font-weight:600; color:#17a2b8;">Справа</div>
                 </div>
               </div>
 
-              <!-- Текущий акт взвешивания -->
-              <div class="journal-stats" style="grid-template-columns: 1fr 1fr;">
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="actPeak">0</div>
-                  <div class="journal-stat-label">Пик одновременно</div>
+              <!-- Дополнительная информация потока (компактнее) -->
+              <div class="journal-stats" style="grid-template-columns: 1fr 1fr; gap:4px; margin:0;">
+                <div class="journal-stat-card" style="padding:6px 8px; background: rgba(255, 255, 255, 0.1);">
+                  <div class="journal-stat-value" id="actPeak" style="font-size:18px; font-weight:600; color:var(--text-primary);">0</div>
+                  <div class="journal-stat-label" style="font-size:10px; opacity:0.8;">Пик одновременно</div>
                 </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="actDur">0</div>
-                  <div class="journal-stat-label">Длительность, с</div>
+                <div class="journal-stat-card" style="padding:6px 8px; background: rgba(255, 255, 255, 0.1);">
+                  <div class="journal-stat-value" id="actDur" style="font-size:18px; font-weight:600; color:var(--text-primary);">0</div>
+                  <div class="journal-stat-label" style="font-size:10px; opacity:0.8;">Длительность, с</div>
                 </div>
               </div>
 
-              <!-- Форма ввода данных -->
-              <div class="journal-header">
-                <div class="journal-title">💾 Новый акт взвешивания</div>
+              <!-- ПОКАЗАТЕЛИ ВЕСА - ключевые данные (ВАЖНОЕ - заметно) -->
+              <div class="journal-header" style="margin:0; padding:0;">
+                <div class="journal-title" style="font-size:16px; font-weight:700; color:var(--accent-color);">⚖️ ПОКАЗАТЕЛИ</div>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 0;">
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Количество голов</label>
-                  <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0">
+                  <label style="display: block; font-size: 12px; color: var(--accent-color); margin-bottom: 4px; font-weight:600;">Количество</label>
+                  <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 18px; font-weight: 700; text-align: center; height:40px; padding:8px; background: linear-gradient(135deg, rgba(44, 123, 229, 0.1), rgba(44, 123, 229, 0.05)); border: 2px solid rgba(44, 123, 229, 0.3); color: var(--accent-color); box-shadow: 0 2px 8px rgba(44, 123, 229, 0.2);" placeholder="0" oninput="calculateWeights()">
                 </div>
                 <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Общий вес (кг)</label>
-                  <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0.0">
+                  <label style="display: block; font-size: 12px; color: #28a745; margin-bottom: 4px; font-weight:600;">Средний вес</label>
+                  <input type="number" id="manualAvgWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 18px; font-weight: 700; text-align: center; height:40px; padding:8px; background: linear-gradient(135deg, rgba(40, 167, 69, 0.1), rgba(40, 167, 69, 0.05)); border: 2px solid rgba(40, 167, 69, 0.3); color: #28a745; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);" placeholder="0.0" oninput="calculateTotalFromAvg()">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 12px; color: #ffc107; margin-bottom: 4px; font-weight:600;">Общий вес</label>
+                  <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 18px; font-weight: 700; text-align: center; height:40px; padding:8px; background: linear-gradient(135deg, rgba(255, 193, 7, 0.1), rgba(255, 193, 7, 0.05)); border: 2px solid rgba(255, 193, 7, 0.3); color: #ffc107; box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);" placeholder="0.0" oninput="calculateAvgFromTotal()">
                 </div>
               </div>
 
-              <button id="saveManualBtn" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">
-                💾 Сохранить акт взвешивания
+              <button id="saveManualBtn" style="width: 100%; height: 36px; font-size: 13px; font-weight: 600; background: linear-gradient(135deg, var(--accent-color), #1e5fb8); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid rgba(124, 199, 255, 0.4); border-radius: var(--radius-md); color: white; box-shadow: 0 2px 8px rgba(44, 123, 229, 0.3); cursor: pointer; transition: all 0.2s ease; margin-top:4px;">
+                💾 Сохранить
               </button>
 
-              <!-- График -->
-              <div style="margin-top: 10px; background: var(--liquid-glass-bg); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 8px; backdrop-filter: blur(var(--liquid-glass-blur)); box-shadow: 0 4px 16px var(--liquid-glass-shadow);">
-                <canvas id="liveCountChart" height="160" style="width:100%; height:160px;"></canvas>
+              <!-- График (компактнее) -->
+              <div style="flex:1; min-height:0; background: var(--liquid-glass-bg); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 4px; backdrop-filter: blur(var(--liquid-glass-blur)); box-shadow: 0 2px 8px var(--liquid-glass-shadow);">
+                <canvas id="liveCountChart" height="120" style="width:100%; height:120px;"></canvas>
               </div>
           </div>
 
           <!-- Панель Взвешивания (liquid glass стиль) -->
-          <div id="weighingPanel" class="panel-content" style="display:none;">
+          <div id="weighingPanel" class="panel-content" style="display:none; flex:1; overflow:hidden; padding:8px;">
               <div class="journal-header">
                 <div class="journal-title">
                   ⚖️ Журналирование актов взвешивания
@@ -299,7 +317,7 @@
           </div>
 
           <!-- Панель Журнала (liquid glass стиль) -->
-          <div id="logsPanel" class="panel-content" style="display:none;">
+          <div id="logsPanel" class="panel-content" style="display:none; flex:1; overflow:hidden; padding:8px;">
               <div class="journal-header">
                 <div class="journal-title">
                   📊 Журнал взвешиваний
@@ -528,12 +546,25 @@
         });
     }
 
-    async function startStream(streamId, sourceUri) {
+    async function startStream(streamId, sourceUri, seekTime = null) {
         streamSources[streamId] = sourceUri;
         hasFirstFrame = false;
         showLoader('Запуск…');
         try { videoStream.style.opacity = '1'; } catch (e) {}
         await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
+
+        // Если указано время для перемотки, устанавливаем позицию
+        if (seekTime !== null && seekTime > 0) {
+            try {
+                await fetch(`/api/stream/${streamId}/seek`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ time: seekTime })
+                });
+            } catch (e) {
+                console.warn('Failed to seek to position:', e);
+            }
+        }
 
         const transport = document.getElementById('transportSelect') ? document.getElementById('transportSelect').value : 'mjpeg';
         if (transport === 'webrtc') {
@@ -750,10 +781,8 @@
             const data = JSON.parse(event.data);
             if (data.type === 'count_update') {
                 document.getElementById('manualCount').value = data.count;
-                // Recalculate average weight if total is set
-                if (typeof recalcAvgWeight === 'function') {
-                    recalcAvgWeight();
-                }
+                // Recalculate weights using new functions
+                calculateWeights();
                 if (data.debug && data.debug.masks) {
                     lastMasks = data.debug.masks;
                     lastIds = data.debug.ids || null;
@@ -1439,7 +1468,9 @@
         } else {
             const sourceUri = streamSources[activeStreamId];
             if (activeStreamId && sourceUri) {
-                await startStream(activeStreamId, sourceUri);
+                // Получаем текущую позицию seekbar для возобновления с этой позиции
+                const currentSeekTime = Number(seekRange.value || 0);
+                await startStream(activeStreamId, sourceUri, currentSeekTime);
                 isVideoPlaying = true;
                 videoPlayPauseBtn.textContent = 'Стоп';
             }
@@ -1520,7 +1551,7 @@
                     }
                 }
             }
-            await startStream(streamId, sourceUri);
+            await startStream(streamId, sourceUri, 0);
             // Confirm once more from /info
             try {
                 const response = await fetch(`/api/stream/${streamId}/info`);
@@ -1684,25 +1715,7 @@
         });
     }
 
-    function recalcAvgWeight() {
-        const countEl = document.getElementById('manualCount');
-        const totalEl = document.getElementById('manualTotalWeight');
-        const avgEl = document.getElementById('manualAvgWeight');
-        if (!countEl || !totalEl || !avgEl) return;
-        const count = parseInt(countEl.value);
-        const totalWeight = parseFloat(totalEl.value);
-        if (count > 0 && totalWeight > 0) {
-            const avgWeight = totalWeight / count;
-            avgEl.value = avgWeight.toFixed(2);
-        } else {
-            avgEl.value = '';
-        }
-    }
-
-    const manualCountEl = document.getElementById('manualCount');
-    const manualTotalEl = document.getElementById('manualTotalWeight');
-    if (manualCountEl) manualCountEl.addEventListener('input', recalcAvgWeight);
-    if (manualTotalEl) manualTotalEl.addEventListener('input', recalcAvgWeight);
+    // Старые обработчики удалены, используются новые функции calculateWeights
 
     // === ВЕРИФИКАЦИЯ И АНАЛИЗ ===
 
@@ -2062,8 +2075,58 @@
         if (!totalField.value && leftCount > 0) {
           totalField.value = leftCount;
         }
+
+        // Обновляем общую статистику
+        updateGeneralStats();
       } catch (e) {
         console.error('Error updating weighing counters:', e);
+      }
+    }
+
+    // Обновление общей статистики сессии
+    function updateGeneralStats() {
+      try {
+        // Получаем данные из localStorage или текущих счетчиков
+        const leftCount = parseInt(leftInEl.textContent) || 0;
+        const rightCount = parseInt(rightInEl.textContent) || 0;
+        const totalCount = Math.max(leftCount, rightCount); // берем максимальное значение
+        
+        // Получаем сохраненные акты взвешивания для расчета среднего веса
+        const savedActs = JSON.parse(localStorage.getItem('weighingActs') || '[]');
+        let totalWeight = 0;
+        let totalRecords = 0;
+        
+        savedActs.forEach(act => {
+          if (act.totalWeight && act.count) {
+            totalWeight += parseFloat(act.totalWeight);
+            totalRecords += parseInt(act.count);
+          }
+        });
+        
+        // Добавляем текущий ввод, если есть
+        const manualCount = parseInt(document.getElementById('manualCount').value) || 0;
+        const manualWeight = parseFloat(document.getElementById('manualTotalWeight').value) || 0;
+        const manualAvgWeight = parseFloat(document.getElementById('manualAvgWeight').value) || 0;
+        
+        if (manualCount > 0) {
+          if (manualWeight > 0) {
+            totalWeight += manualWeight;
+            totalRecords += manualCount;
+          } else if (manualAvgWeight > 0) {
+            totalWeight += manualAvgWeight * manualCount;
+            totalRecords += manualCount;
+          }
+        }
+        
+        const avgWeight = totalRecords > 0 ? (totalWeight / totalRecords) : 0;
+        
+        // Обновляем элементы
+        document.getElementById('totalCount').textContent = totalCount;
+        document.getElementById('avgWeight').textContent = avgWeight.toFixed(1);
+        document.getElementById('totalWeight').textContent = totalWeight.toFixed(1);
+        
+      } catch (e) {
+        console.error('Error updating general stats:', e);
       }
     }
 
@@ -2078,6 +2141,54 @@
       } else {
         avgField.value = '';
       }
+    }
+
+    // Пересчет для формы нового акта
+    let isCalculating = false; // флаг для предотвращения циклических вызовов
+
+    function calculateWeights() {
+      if (isCalculating) return;
+      isCalculating = true;
+      
+      const count = parseFloat(document.getElementById('manualCount').value) || 0;
+      const avgWeight = parseFloat(document.getElementById('manualAvgWeight').value) || 0;
+      
+      if (count > 0 && avgWeight > 0) {
+        const totalWeight = count * avgWeight;
+        document.getElementById('manualTotalWeight').value = totalWeight.toFixed(1);
+      }
+      
+      isCalculating = false;
+    }
+
+    function calculateTotalFromAvg() {
+      if (isCalculating) return;
+      isCalculating = true;
+      
+      const count = parseFloat(document.getElementById('manualCount').value) || 0;
+      const avgWeight = parseFloat(document.getElementById('manualAvgWeight').value) || 0;
+      
+      if (count > 0 && avgWeight > 0) {
+        const totalWeight = count * avgWeight;
+        document.getElementById('manualTotalWeight').value = totalWeight.toFixed(1);
+      }
+      
+      isCalculating = false;
+    }
+
+    function calculateAvgFromTotal() {
+      if (isCalculating) return;
+      isCalculating = true;
+      
+      const count = parseFloat(document.getElementById('manualCount').value) || 0;
+      const totalWeight = parseFloat(document.getElementById('manualTotalWeight').value) || 0;
+      
+      if (count > 0 && totalWeight > 0) {
+        const avgWeight = totalWeight / count;
+        document.getElementById('manualAvgWeight').value = avgWeight.toFixed(2);
+      }
+      
+      isCalculating = false;
     }
 
     // Сохранение акта взвешивания
