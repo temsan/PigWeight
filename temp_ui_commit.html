@@ -1,0 +1,2824 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>PigWeight MVP</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <style>
+    .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.56); backdrop-filter: blur(12px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
+    .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; gap: 8px; }
+    .top-toolbar .pill, .top-toolbar .file-input-btn { height: 32px; line-height: 20px; }
+    html, body { margin: 0; padding: 0; }
+    #main-container { padding-top: 64px; }
+    .video-wrapper { position: relative; }
+    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:auto; z-index: 10; background-color: transparent; cursor: crosshair; }
+    #videoStream { display: block; width: 100%; height: auto; object-fit: contain; z-index: 1; opacity: 1 !important; }
+    /* Align numeric inputs on the weights panel to the right */
+    .panel-body input[type="number"] { text-align: right; }
+    .stream-status { display:inline-block; min-width:64px; text-align:right; }
+    /* Loading overlay */
+    #loadingOverlay { position:absolute; inset:0; z-index: 20; display:none; align-items:center; justify-content:center; backdrop-filter: blur(2px); background: rgba(245,248,255,0.72); }
+    #loadingOverlay .box { display:flex; flex-direction:column; align-items:center; gap:10px; padding:16px 18px; border-radius:12px; background: rgba(255,255,255,0.9); border:1px solid rgba(60,90,140,.12); box-shadow: 0 6px 24px rgba(40,60,90,.12); }
+    #loadingOverlay .spinner { width:28px; height:28px; border:3px solid rgba(44,123,229,0.18); border-top-color:#2c7be5; border-radius:50%; animation: spin 0.9s linear infinite; }
+    #loadingOverlay .loading-text { font: 600 14px system-ui, Segoe UI, Arial; color:#1f3d6b; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .flow-row { display:flex; gap:10px; align-items:stretch; justify-content:space-between; }
+    .flow-box { flex:1 1 0; display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; background:rgba(240,245,252,0.85); border:1px solid rgba(60,90,140,.12); text-align:center; }
+    .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
+    .flow-title { font-size:12px; color:#2f5078; opacity:.8; }
+    /* Fullscreen video mode */
+    body.fs, html.fs { overflow:hidden; }
+    body.fs #main-container { padding-top:0; }
+    body.fs #videoWrapper { position: fixed !important; inset: 0 !important; margin:0 !important; border-radius:0 !important; width:100% !important; max-width:100% !important; }
+    body.fs #overlayCanvas { border-radius:0 !important; }
+    body.fs .top-toolbar { position: fixed !important; top:12px; left:12px; right:12px; z-index: 1002; background: rgba(255,255,255,0.56); }
+    body.fs .right-col { display:none !important; }
+    body.fs .left-col { min-width:0 !important; }
+    body.fs .main-flex { justify-content:stretch !important; }
+
+    /* Compact right panel (recursive compacting to remove empty space) */
+    :root{ 
+      --sidebar-width: 32%; 
+      --liquid-glass-bg: rgba(255, 255, 255, 0.65);
+      --liquid-glass-border: rgba(255, 255, 255, 0.18);
+      --liquid-glass-shadow: rgba(31, 38, 135, 0.15);
+      --liquid-glass-blur: 10px;
+      --liquid-glass-hover: rgba(255, 255, 255, 0.75);
+      --liquid-glass-active: rgba(255, 255, 255, 0.85);
+      --journal-glass: var(--liquid-glass-bg);
+      --journal-border: var(--liquid-glass-border);
+      --radius-md: 12px;
+      --radius-sm: 8px;
+      --text-primary: #1f3d6b;
+      --text-secondary: #2f5078;
+      --accent-color: #2c7be5;
+    }
+    
+    /* Стили для вкладок в стиле liquid glass */
+    .journal-tabs {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+    .journal-tab-btn {
+      background: var(--liquid-glass-bg);
+      backdrop-filter: blur(var(--liquid-glass-blur));
+      border: 1px solid var(--liquid-glass-border);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      font-size: 14px;
+      color: var(--text-primary);
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .journal-tab-btn:hover {
+      background: var(--liquid-glass-hover);
+    }
+    .journal-tab-btn.active {
+      background: var(--liquid-glass-active);
+      border-color: rgba(124, 199, 255, 0.35);
+      box-shadow: 0 4px 12px rgba(31, 38, 135, 0.15);
+    }
+    .right-col{ padding:8px !important; }
+    .right-col .journal-tabs{ margin:0 0 4px 0 !important; }
+    .right-col .panel-content{ padding:6px !important; }
+    .right-col .journal-header{ padding:4px 6px !important; margin:0 0 4px 0 !important; }
+    .right-col .journal-filters{ gap:4px !important; }
+    .right-col .journal-stat-card{ 
+      padding:6px 8px !important; 
+      margin:4px 0 !important; 
+      background: var(--liquid-glass-bg); 
+      backdrop-filter: blur(var(--liquid-glass-blur)); 
+      border: 1px solid var(--liquid-glass-border); 
+      border-radius: var(--radius-sm); 
+      box-shadow: 0 2px 8px var(--liquid-glass-shadow);
+    }
+    .right-col .card{ padding:6px !important; }
+    .right-col .journal-comparison-result{ padding:6px 8px !important; }
+    .right-col .journal-btn{ height:30px; line-height:28px; padding:0 10px; }
+    .right-col input, .right-col select{ 
+      height:32px; 
+      background: var(--liquid-glass-bg);
+      border: 1px solid var(--liquid-glass-border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      padding: 0 8px;
+    }
+  </style>
+</head>
+<body style="overflow:hidden;">
+  <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">
+            <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding:6px 12px; position:fixed; top:12px; left:12px; right:12px; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
+      <div class="container toolbar-row-horizontal" style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
+        <!-- Левая группа: Логотип (компактнее) -->
+        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap; font-size:14px; margin-right:6px; opacity:0.8;">PigWeight v3.0</h2>
+        
+        <!-- Центральная группа: Управление воспроизведением (ВАЖНОЕ - крупнее) -->
+        <div class="control-group" style="display:flex; gap:8px; align-items:center; flex:0 0 auto;">
+          <label class="file-input-btn nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="padding:6px 12px; min-width:auto; text-align:center; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 2px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); font-weight:600; font-size:14px; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 2px 8px var(--liquid-glass-shadow);">
+            <span id="fileInputName">📁 Файл</span>
+            <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
+          </label>
+          <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; padding:8px 16px; min-width:auto; height:40px; line-height:24px; font-weight:700; font-size:16px; background: linear-gradient(135deg, var(--accent-color), #1e5fb8); backdrop-filter: blur(var(--liquid-glass-blur)); border: 2px solid rgba(124, 199, 255, 0.4); border-radius: var(--radius-md); color: white; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 4px 16px rgba(44, 123, 229, 0.3); text-shadow: 0 1px 2px rgba(0,0,0,0.2);">▶️ Старт</button>
+        </div>
+
+        <!-- Центральная группа: Seekbar -->
+        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 auto; min-width:300px; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">
+          <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
+          <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
+        </div>
+
+        <!-- Правая группа: Настройки и статус (компактнее) -->
+        <div class="settings-group" style="display:flex; gap:4px; align-items:center; flex:0 0 auto;">
+          <div class="toolbar-group" id="streamGroup" style="min-width:100px; white-space:nowrap;">
+            <div id="streamRadios" class="toggle-group compact"></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:2px; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 6px;">
+            <label style="font-size:10px; color:var(--text-secondary); opacity:0.7;">Транспорт:</label>
+            <select id="transportSelect" style="height:28px; background: transparent; border: none; color: var(--text-primary); font-weight: 500; font-size:11px;">
+              <option value="mjpeg">MJPEG</option>
+              <option value="webrtc" selected>WebRTC</option>
+            </select>
+          </div>
+          <button id="fullscreenBtn" class="nowrap" aria-label="На весь экран" title="На весь экран"
+                  style="padding:4px; width:28px; height:28px; line-height:0; display:inline-flex; align-items:center; justify-content:center; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); opacity:0.8; transition: all 0.2s ease; cursor: pointer;">
+            <!-- icon injected by JS -->
+          </button>
+          <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="font-size:10px; color:var(--text-secondary); background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 2px 4px; white-space:nowrap; min-width:50px; text-align:center; opacity:0.8;"></span>
+        </div>
+      </div>
+    </div>
+    <div class="main-flex" style="display:flex; justify-content:stretch; padding-top:76px; height:calc(100vh - 76px); position:relative;">
+      <div class="container" style="display:flex; gap:0; width:100%; max-width:100%; align-items:stretch; padding:0; margin:0;">
+        <div class="left-col" style="flex:1 1 auto; min-width:0; order:0;">
+          <div id="videoWrapper" class="video-wrapper" style="position:fixed; inset:0; width:100%; height:100vh; margin:0; border-radius:0; background:#000;">
+            <img id="videoStream" style="display:block; width:100%; height:100%; object-fit:contain;" />
+            <video id="webrtcVideo" autoplay playsinline muted style="display:none; width:100%; height:100%; object-fit:contain;"></video>
+            <canvas id="overlayCanvas"></canvas>
+            <div id="loadingOverlay" aria-live="polite">
+              <div class="box">
+                <div class="loading-text" id="loadingText">Готово к пуску</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 32%); min-width:var(--sidebar-width, 32%); max-width:var(--sidebar-width, 32%); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow:hidden; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px; display:flex; flex-direction:column;">
+          <!-- Навигационные вкладки (liquid glass стиль) -->
+          <div class="journal-tabs">
+            <button class="journal-tab-btn active" onclick="switchPanel('live')">
+              <span class="journal-tab-icon">📊</span>
+              <span class="journal-tab-text">Live</span>
+            </button>
+            <button class="journal-tab-btn" onclick="switchPanel('weighing')">
+              <span class="journal-tab-icon">⚖️</span>
+              <span class="journal-tab-text">Взвешивания</span>
+            </button>
+            <button class="journal-tab-btn" onclick="switchPanel('logs')">
+              <span class="journal-tab-icon">📋</span>
+              <span class="journal-tab-text">Журналы</span>
+            </button>
+            <button class="journal-tab-btn" onclick="switchPanel('verification')">
+              <span class="journal-tab-icon">🔍</span>
+              <span class="journal-tab-text">Сверка</span>
+            </button>
+          </div>
+
+          <!-- Панель Live (liquid glass стиль) -->
+          <div id="livePanel" class="panel-content active" style="flex:1; overflow:hidden; display:flex; flex-direction:column; gap:8px; padding:8px;">
+
+              <!-- ПОТОК - основные показатели (ВАЖНОЕ - крупно и ярко) -->
+              <div class="journal-header" style="margin:0; padding:0;">
+                <div class="journal-title" style="font-size:18px; font-weight:700; color:var(--accent-color); text-shadow: 0 1px 3px rgba(44, 123, 229, 0.3);">🔄 ПОТОК</div>
+              </div>
+              <div class="journal-stats" style="gap:6px; margin:0;">
+                <div class="journal-stat-card" style="padding:12px 8px; background: linear-gradient(135deg, rgba(44, 123, 229, 0.15), rgba(44, 123, 229, 0.08)); border: 2px solid rgba(44, 123, 229, 0.2);">
+                  <div class="journal-stat-value" id="leftIn" style="font-size:32px; font-weight:800; color:var(--accent-color); text-shadow: 0 1px 2px rgba(44, 123, 229, 0.4);">0</div>
+                  <div class="journal-stat-label" style="font-size:12px; font-weight:600; color:var(--accent-color);">Слева</div>
+                </div>
+                <div class="journal-stat-card" style="padding:12px 8px; background: linear-gradient(135deg, rgba(40, 167, 69, 0.15), rgba(40, 167, 69, 0.08)); border: 2px solid rgba(40, 167, 69, 0.2);">
+                  <div class="journal-stat-value" id="avgFlow" style="font-size:32px; font-weight:800; color:#28a745; text-shadow: 0 1px 2px rgba(40, 167, 69, 0.4);">0</div>
+                  <div class="journal-stat-label" style="font-size:12px; font-weight:600; color:#28a745;">Среднее</div>
+                </div>
+                <div class="journal-stat-card" style="padding:12px 8px; background: linear-gradient(135deg, rgba(23, 162, 184, 0.15), rgba(23, 162, 184, 0.08)); border: 2px solid rgba(23, 162, 184, 0.2);">
+                  <div class="journal-stat-value" id="rightIn" style="font-size:32px; font-weight:800; color:#17a2b8; text-shadow: 0 1px 2px rgba(23, 162, 184, 0.4);">0</div>
+                  <div class="journal-stat-label" style="font-size:12px; font-weight:600; color:#17a2b8;">Справа</div>
+                </div>
+              </div>
+
+              <!-- Дополнительная информация потока (компактнее) -->
+              <div class="journal-stats" style="grid-template-columns: 1fr 1fr; gap:4px; margin:0;">
+                <div class="journal-stat-card" style="padding:6px 8px; background: rgba(255, 255, 255, 0.1);">
+                  <div class="journal-stat-value" id="actPeak" style="font-size:18px; font-weight:600; color:var(--text-primary);">0</div>
+                  <div class="journal-stat-label" style="font-size:10px; opacity:0.8;">Пик одновременно</div>
+                </div>
+                <div class="journal-stat-card" style="padding:6px 8px; background: rgba(255, 255, 255, 0.1);">
+                  <div class="journal-stat-value" id="actDur" style="font-size:18px; font-weight:600; color:var(--text-primary);">0</div>
+                  <div class="journal-stat-label" style="font-size:10px; opacity:0.8;">Длительность, с</div>
+                </div>
+              </div>
+
+              <!-- ПОКАЗАТЕЛИ ВЕСА - ключевые данные (ВАЖНОЕ - заметно) -->
+              <div class="journal-header" style="margin:0; padding:0;">
+                <div class="journal-title" style="font-size:16px; font-weight:700; color:var(--accent-color);">⚖️ ПОКАЗАТЕЛИ</div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 0;">
+                <div>
+                  <label style="display: block; font-size: 12px; color: var(--accent-color); margin-bottom: 4px; font-weight:600;">Количество</label>
+                  <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 18px; font-weight: 700; text-align: center; height:40px; padding:8px; background: linear-gradient(135deg, rgba(44, 123, 229, 0.1), rgba(44, 123, 229, 0.05)); border: 2px solid rgba(44, 123, 229, 0.3); color: var(--accent-color); box-shadow: 0 2px 8px rgba(44, 123, 229, 0.2);" placeholder="0" oninput="calculateWeights()">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 12px; color: #28a745; margin-bottom: 4px; font-weight:600;">Средний вес</label>
+                  <input type="number" id="manualAvgWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 18px; font-weight: 700; text-align: center; height:40px; padding:8px; background: linear-gradient(135deg, rgba(40, 167, 69, 0.1), rgba(40, 167, 69, 0.05)); border: 2px solid rgba(40, 167, 69, 0.3); color: #28a745; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);" placeholder="0.0" oninput="calculateTotalFromAvg()">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 12px; color: #ffc107; margin-bottom: 4px; font-weight:600;">Общий вес</label>
+                  <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 18px; font-weight: 700; text-align: center; height:40px; padding:8px; background: linear-gradient(135deg, rgba(255, 193, 7, 0.1), rgba(255, 193, 7, 0.05)); border: 2px solid rgba(255, 193, 7, 0.3); color: #ffc107; box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);" placeholder="0.0" oninput="calculateAvgFromTotal()">
+                </div>
+              </div>
+
+              <button id="saveManualBtn" style="width: 100%; height: 36px; font-size: 13px; font-weight: 600; background: linear-gradient(135deg, var(--accent-color), #1e5fb8); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid rgba(124, 199, 255, 0.4); border-radius: var(--radius-md); color: white; box-shadow: 0 2px 8px rgba(44, 123, 229, 0.3); cursor: pointer; transition: all 0.2s ease; margin-top:4px;">
+                💾 Сохранить
+              </button>
+
+              <!-- График (компактнее) -->
+              <div style="flex:1; min-height:0; background: var(--liquid-glass-bg); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 4px; backdrop-filter: blur(var(--liquid-glass-blur)); box-shadow: 0 2px 8px var(--liquid-glass-shadow);">
+                <canvas id="liveCountChart" height="120" style="width:100%; height:120px;"></canvas>
+              </div>
+          </div>
+
+          <!-- Панель Взвешивания (liquid glass стиль) -->
+          <div id="weighingPanel" class="panel-content" style="display:none; flex:1; overflow:hidden; padding:8px;">
+              <div class="journal-header">
+                <div class="journal-title">
+                  ⚖️ Журналирование актов взвешивания
+                </div>
+              </div>
+
+              <!-- Статистика текущего сеанса -->
+              <div class="journal-stats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="weighingLeftCount" style="color: #28a745;">0</div>
+                  <div class="journal-stat-label">Слева</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="weighingRightCount" style="color: #17a2b8;">0</div>
+                  <div class="journal-stat-label">Справа</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="weighingDiff" style="color: #ffc107;">0</div>
+                  <div class="journal-stat-label">Разница</div>
+                </div>
+              </div>
+
+              <!-- Форма записи акта -->
+              <div class="journal-header">
+                <div class="journal-title">📝 Новый акт взвешивания</div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Дата</label>
+                  <input type="date" id="weighingDate" class="journal-filter-input">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Время</label>
+                  <input type="time" id="weighingTime" class="journal-filter-input">
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Группа/Секция</label>
+                  <input type="text" id="weighingGroup" placeholder="6B 4,5" class="journal-filter-input">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Всего свиней</label>
+                  <input type="number" id="weighingTotal" min="1" class="journal-filter-input" style="text-align: center;">
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Общий вес (кг)</label>
+                  <input type="number" id="weighingWeight" step="0.1" min="0" class="journal-filter-input" style="text-align: center;">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Средний вес</label>
+                  <input type="number" id="weighingAvgWeight" step="0.01" readonly class="journal-filter-input" style="text-align: center; background: rgba(255,255,255,0.2);">
+                </div>
+              </div>
+
+              <button id="saveWeighingBtn" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">💾 Сохранить акт взвешивания</button>
+          </div>
+
+          <!-- Панель Журнала (liquid glass стиль) -->
+          <div id="logsPanel" class="panel-content" style="display:none; flex:1; overflow:hidden; padding:8px;">
+              <div class="journal-header">
+                <div class="journal-title">
+                  📊 Журнал взвешиваний
+                </div>
+                <div class="journal-filters">
+                  <input type="date" id="logsDateFrom" class="journal-filter-input" placeholder="От даты">
+                  <input type="date" id="logsDateTo" class="journal-filter-input" placeholder="До даты">
+                  <select id="logsCameraFilter" class="journal-filter-input">
+                    <option value="">Все камеры</option>
+                    <option value="cam1">Камера 1</option>
+                    <option value="cam2">Камера 2</option>
+                  </select>
+                  <button id="refreshLogsBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 500; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">🔄 Обновить</button>
+                  <button id="exportLogsBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 500; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease;">📥 Экспорт</button>
+                </div>
+              </div>
+
+              <!-- Статистика -->
+              <div class="journal-stats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalTotalActs">0</div>
+                  <div class="journal-stat-label">Актов</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalTotalCount">0</div>
+                  <div class="journal-stat-label">Голов</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalTotalWeight">0</div>
+                  <div class="journal-stat-label">кг</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="journalAvgWeight">0</div>
+                  <div class="journal-stat-label">кг/гол</div>
+                </div>
+              </div>
+
+              <!-- Список актов -->
+              <div class="journal-list" id="journalList">
+                <div class="journal-loading">Загрузка актов...</div>
+              </div>
+          </div>
+
+          <!-- Панель Сверки (liquid glass стиль) -->
+          <div id="verificationPanel" class="panel-content" style="display:none;">
+              <div class="journal-header">
+                <div class="journal-title">
+                  📊 Сверка с Excel
+                </div>
+                <button id="startVerificationBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">▶ Проверить</button>
+              </div>
+
+              <!-- Загрузка файла -->
+              <div class="journal-upload-area" id="verificationUploadArea" style="cursor: pointer; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px dashed var(--liquid-glass-border); border-radius: var(--radius-md); margin: 10px 0; transition: all 0.3s ease;">
+                <div style="text-align: center; padding: 24px;">
+                  <div style="font-size: 48px; margin-bottom: 12px;">📎</div>
+                  <div style="font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px;">
+                    Перетащите Excel файл сюда
+                  </div>
+                  <div style="font-size: 13px; color: var(--muted);">
+                    или нажмите для выбора (.xlsx, .xls)
+                  </div>
+                </div>
+                <input type="file" id="verificationFileInput" accept=".xlsx,.xls" style="display: none;">
+              </div>
+
+              <!-- Результаты сверки -->
+              <div class="journal-stats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="verificationMatches" style="color: #28a745;">0</div>
+                  <div class="journal-stat-label">Совпадений</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="verificationDiffs" style="color: #ffc107;">0</div>
+                  <div class="journal-stat-label">Расхождений</div>
+                </div>
+              </div>
+
+              <!-- Детали сверки -->
+              <div id="verificationResults" class="journal-comparison-result" style="display: none;">
+                <!-- Результаты сверки будут здесь -->
+              </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Убрана нижняя таблица истории для полноценного полноэкранного интерфейса -->
+  </div>
+  <script>
+    const videoStream = document.getElementById('videoStream');
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
+    const fileInput = document.getElementById('videoFileInput');
+    const fileInputLabel = document.getElementById('fileInputLabel');
+    const fileInputName = document.getElementById('fileInputName');
+    const streamStatus = document.getElementById('streamStatus');
+    const streamRadios = document.getElementById('streamRadios');
+    const seekRange = document.getElementById('seekRange');
+    const curTime = document.getElementById('curTime');
+    const durTime = document.getElementById('durTime');
+    const liveCountChart = document.getElementById('liveCountChart');
+    // const historyTable = document.getElementById('history').querySelector('tbody'); // history table removed
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingText = document.getElementById('loadingText');
+
+    let activeStreamId = null;
+    let isVideoPlaying = false;
+    let hasFirstFrame = false;
+    let ws = null;
+    let chart = null;
+    const countHistory = [];
+    const avgWindow = 10;
+    const streamSources = {}; // id -> sourceUri (predefined + uploads)
+    let seekTimer = null;
+    let seekDebounce = null;
+    let seekTargetTime = null; // целевое время после drag
+    let seekLockUntil = 0;     // блок приёма t от сервера, пока не дойдём до цели/не истечёт
+    let overlayEnabled = false;
+    let idAliases = {}; // instanceId -> user-defined label
+    let lastIds = null; // last ids from WS
+    let lastMasks = null; // last masks from WS
+    let overlayBlockUntil = 0;
+    const leftInEl = document.getElementById('leftIn');
+    const rightInEl = document.getElementById('rightIn');
+    const avgFlowEl = document.getElementById('avgFlow');
+    const actPeakEl = document.getElementById('actPeak');
+    const actDurEl = document.getElementById('actDur');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+    function aliasesKey(streamId) { return `aliases:${streamId}`; }
+    function loadAliases(streamId) { try { return JSON.parse(localStorage.getItem(aliasesKey(streamId)) || '{}'); } catch { return {}; } }
+    function saveAliases(streamId) { try { localStorage.setItem(aliasesKey(streamId), JSON.stringify(idAliases || {})); } catch {} }
+
+    function updateVideoLayout() {
+        const wrapper = document.getElementById('videoWrapper');
+        if (!wrapper) return;
+        wrapper.style.height = window.innerHeight + 'px';
+        syncOverlaySize();
+    }
+
+    function showLoader(text = 'Загрузка…') {
+        try { loadingText.textContent = text; loadingOverlay.style.display = 'flex'; } catch (e) {}
+    }
+
+    function hideLoader() {
+        try { loadingOverlay.style.display = 'none'; } catch (e) {}
+    }
+
+    function setupFirstFrameWatch() {
+        try {
+            const onFirst = () => {
+                if (!hasFirstFrame) {
+                    hasFirstFrame = true;
+                    try { videoStream.style.opacity = '1'; } catch (e) {}
+                    hideLoader();
+                }
+            };
+            // For MJPEG <img>, load may fire on frames; guard with flag
+            // Also debounce rapid flicker by only treating the first frame event within 500ms
+            let firstFired = false;
+            const wrapped = () => {
+                if (firstFired) return;
+                firstFired = true;
+                setTimeout(() => { firstFired = false; }, 500);
+                onFirst();
+            };
+            videoStream.addEventListener('load', wrapped);
+            // Also ensure loader hides if WebRTC is active and no MJPEG frames
+            try {
+                const v = document.getElementById('webrtcVideo');
+                if (v) v.addEventListener('playing', () => { try { hideLoader(); } catch(e){} });
+            } catch(e) {}
+        } catch (e) {}
+    }
+
+    async function getStreams() {
+        // Fetch camera list only from backend (.env-driven)
+        try {
+            const resp = await fetch('/api/cameras');
+            if (!resp.ok) return {};
+            const data = await resp.json();
+            return (data && typeof data === 'object') ? data : {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    async function populateStreams() {
+        const streams = await getStreams();
+        streamRadios.innerHTML = '';
+        const ids = Object.keys(streams);
+        if (ids.length === 0) {
+            // No cameras configured in .env
+            streamRadios.innerHTML = '<span style="opacity:.6;">Нет камер</span>';
+            return;
+        }
+        ids.forEach((id, idx) => {
+            streamSources[id] = streams[id];
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'streamRadio';
+            radio.value = id;
+            radio.id = 'stream_' + id;
+            if (idx === 0) {
+                radio.checked = true;
+                activeStreamId = id;
+            }
+            radio.style.display = 'none';
+            radio.addEventListener('change', async () => {
+                if (radio.checked) {
+                    const prev = activeStreamId;
+                    if (prev && prev !== id) {
+                        await stopStream(prev);
+                    }
+                    activeStreamId = id;
+                }
+            });
+
+            const label = document.createElement('label');
+            label.htmlFor = radio.id;
+            label.textContent = id;
+            label.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
+
+            streamRadios.appendChild(radio);
+            streamRadios.appendChild(label);
+        });
+    }
+
+    async function startStream(streamId, sourceUri, seekTime = null) {
+        streamSources[streamId] = sourceUri;
+        hasFirstFrame = false;
+        showLoader('Запуск…');
+        try { videoStream.style.opacity = '1'; } catch (e) {}
+        await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
+
+        // Если указано время для перемотки, устанавливаем позицию
+        if (seekTime !== null && seekTime > 0) {
+            try {
+                await fetch(`/api/stream/${streamId}/seek`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ time: seekTime })
+                });
+            } catch (e) {
+                console.warn('Failed to seek to position:', e);
+            }
+        }
+
+        const transport = document.getElementById('transportSelect') ? document.getElementById('transportSelect').value : 'mjpeg';
+        if (transport === 'webrtc') {
+            // start webrtc client
+            try { videoStream.style.display = 'none'; } catch (e) {}
+            try { document.getElementById('webrtcVideo').style.display = 'block'; } catch (e) {}
+            try {
+                showLoader('Подключение WebRTC…');
+                await startWebRTCClient(streamId);
+            } catch (err) {
+                console.error('WebRTC failed, fallback to MJPEG', err);
+                try { await stopWebRTCClient(); } catch(_) {}
+                try { document.getElementById('webrtcVideo').style.display = 'none'; } catch (e) {}
+                try { videoStream.style.display = 'block'; } catch (e) {}
+                videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+                setupFirstFrameWatch();
+            }
+        } else {
+            // classic MJPEG
+            try { document.getElementById('webrtcVideo').style.display = 'none'; } catch (e) {}
+            try { videoStream.style.display = 'block'; } catch (e) {}
+            videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+            setupFirstFrameWatch();
+        }
+
+        isVideoPlaying = true;
+        videoPlayPauseBtn.textContent = 'Стоп';
+        streamStatus.textContent = 'Live';
+        // enable overlay interactions while playing
+        overlayEnabled = true;
+        try {
+            overlayCanvas.style.pointerEvents = 'auto';
+            overlayCanvas.style.cursor = 'crosshair';
+            overlayCanvas.style.opacity = '1';
+        } catch (e) {}
+        connectWebSocket(streamId);
+        initChart();
+        // start overlay loop if not running
+        if (!overlayRaf) overlayRaf = requestAnimationFrame(overlayTick);
+        idAliases = loadAliases(streamId);
+
+        // Configure seek UI (robust): drive state from /info on every poll
+        if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
+        let seekStepSet = false;
+        const poll = async () => {
+            try {
+                const resp = await fetch(`/api/stream/${streamId}/info`);
+                if (!resp.ok) return; // don't flip UI on transient errors
+                const info = await resp.json();
+                if (info && info.type === 'file') {
+                    const dur = Number(info.duration || 0);
+                    const t = Number(info.current_time || 0);
+                    if (!Number.isNaN(dur)) { seekRange.max = dur; durTime.textContent = dur.toFixed(1); }
+                    if (!Number.isNaN(t)) {
+                        // Не блокируем приём серверного времени — обновляем слайдер как есть
+                        seekTargetTime = null; seekLockUntil = 0;
+                        if (!isSeeking) {
+                            seekRange.value = t;
+                            curTime.textContent = t.toFixed(1);
+                        }
+                    }
+                    const fps = Number(info.fps || 0);
+                    if (!seekStepSet && fps > 0) {
+                        seekRange.step = (1/Math.min(60, Math.max(1, fps))).toFixed(2);
+                        seekStepSet = true;
+                    }
+                }
+            } catch (e) {}
+        };
+        await poll();
+        // Poll less frequently to reduce HTTP traffic when using WebRTC
+        const pollInterval = (document.getElementById('transportSelect') && document.getElementById('transportSelect').value === 'webrtc') ? 2000 : 500;
+        seekTimer = setInterval(poll, pollInterval);
+
+        // WebRTC optimizations: reduce polling and add batching hints
+        if (transport === 'webrtc') {
+            // Hint to server about WebRTC mode for optimization
+            fetch('/api/stream/' + streamId + '/optimize?transport=webrtc', { method: 'POST' }).catch(()=>{});
+        }
+    }
+
+    // WebRTC client implementation (uses server signalling endpoints)
+    let _webrtcPc = null;
+    let _webrtcPeerId = null;
+
+    async function startWebRTCClient(streamId) {
+        try {
+            if (_webrtcPc) {
+                await stopWebRTCClient();
+            }
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            _webrtcPc = pc;
+            // Ensure offer contains a video m-line
+            try { pc.addTransceiver('video', { direction: 'recvonly' }); } catch (e) { console.warn('addTransceiver failed', e); }
+
+            pc.ontrack = (evt) => {
+                const v = document.getElementById('webrtcVideo');
+                if (v) {
+                    try { v.style.display = 'block'; v.style.opacity = '1'; v.style.zIndex = '0'; } catch(e){}
+                    v.srcObject = evt.streams[0];
+                    // hide loader immediately when remote track arrives
+                    hideLoader();
+                    // also keep playing listener to ensure opacity on actual playback
+                    const onPlay = () => {
+                        try { hasFirstFrame = true; v.style.opacity = '1'; } catch (e) {}
+                        hideLoader();
+                        v.removeEventListener('playing', onPlay);
+                    };
+                    v.addEventListener('playing', onPlay);
+                }
+            };
+
+            pc.onicecandidate = (event) => {
+                if (!event.candidate || !_webrtcPeerId) return;
+                // send candidate to server
+                fetch('/api/webrtc/candidate', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ peer_id: _webrtcPeerId, candidate: event.candidate })
+                }).catch(()=>{});
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            // send offer to server
+            // send offer to server with backoff on failure
+            let resp = null;
+            let tries = 0;
+            const maxTries = 3;
+            const backoff = (n) => new Promise(r=>setTimeout(r, Math.min(2000, 200*Math.pow(2,n))));
+            while (tries < maxTries) {
+                tries++;
+                resp = await fetch('/api/webrtc/offer', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ sdp: offer.sdp, type: offer.type, stream_id: streamId, fps: Number(document.getElementById('fps')?.value || 12) })
+                }).catch(()=>null);
+                if (resp && resp.ok) break;
+                await backoff(tries);
+            }
+            if (!resp || !resp.ok) {
+                let txt = 'no response';
+                try { if (resp) txt = await resp.text(); } catch (e) {}
+                console.error('webrtc offer failed', resp && resp.status, txt);
+                throw new Error('offer failed: ' + txt);
+            }
+            const data = await resp.json();
+            if (data.peer_id) _webrtcPeerId = data.peer_id;
+            if (data.sdp) {
+                await pc.setRemoteDescription({ type: data.type, sdp: data.sdp });
+            }
+        } catch (e) {
+            console.error('WebRTC start error', e);
+            streamStatus.textContent = 'WebRTC error';
+            hideLoader();
+            throw e; // Re-throw to trigger fallback
+        }
+    }
+
+    async function stopWebRTCClient() {
+        try {
+            if (_webrtcPc) {
+                try { _webrtcPc.close(); } catch (e) {}
+                _webrtcPc = null;
+            }
+            if (_webrtcPeerId) {
+                try {
+                    await fetch('/api/webrtc/stop', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ peer_id: _webrtcPeerId }) });
+                } catch (e) {}
+                _webrtcPeerId = null;
+            }
+        } catch (e) {}
+    }
+
+    async function stopStream(id = activeStreamId) {
+        if (id) {
+            await fetch(`/api/stream/${id}/stop`);
+        }
+        hideLoader();
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        // Destroy chart to free the canvas before reuse
+        if (typeof destroyChart === 'function') { destroyChart(); }
+        if (activeStreamId) { try { saveAliases(activeStreamId); } catch (e) {} try { if (typeof saveColors==='function') saveColors(activeStreamId); } catch(e){} }
+        if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
+        // disable overlay so it doesn't intercept interactions
+        overlayEnabled = false;
+        if (overlayRaf) { cancelAnimationFrame(overlayRaf); overlayRaf = 0; }
+        overlayPending = null;
+        try {
+            const ctx = overlayCanvas.getContext('2d');
+            ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            overlayCanvas.style.pointerEvents = 'none';
+            overlayCanvas.style.cursor = 'default';
+            overlayCanvas.style.opacity = '0';
+        } catch (e) {}
+        // Не сбрасываем счётчики потоков при переключении режимов
+        // try { leftInEl.textContent = '0'; rightInEl.textContent = '0'; avgFlowEl.textContent = '0'; } catch (e) {}
+        setPlaceholder();
+        isVideoPlaying = false;
+        videoPlayPauseBtn.textContent = 'Старт';
+        streamStatus.textContent = 'Остановлено';
+        // Не меняем activeStreamId, чтобы повторный Старт запускал тот же источник
+    }
+
+    function connectWebSocket(streamId) {
+        if (ws) {
+            ws.close();
+        }
+        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+        ws = new WebSocket(`${proto}://${location.host}/ws/count?id=${streamId}`);
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'count_update') {
+                document.getElementById('manualCount').value = data.count;
+                // Recalculate weights using new functions
+                calculateWeights();
+                if (data.debug && data.debug.masks) {
+                    lastMasks = data.debug.masks;
+                    lastIds = data.debug.ids || null;
+                    try {
+                        window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
+                        // анимированные всплывающие +N/-N с порядковым номером
+                        const now = performance.now();
+                        window.__popups = window.__popups || [];
+                        const prevTs = window.__lastPopupTs || 0; // ms
+                        const cr = window.__lastCrossings;
+                        let maxTs = prevTs;
+                        
+                        // Счетчик для последовательной нумерации пересечений
+                        let enterCounter = 0;
+                        let exitCounter = 0;
+                        
+                        cr.forEach(c => {
+                            const tsMs = Number(c.ts || 0) * 1000;
+                            if (tsMs > prevTs) {
+                                const side = String(c.side || 'left');
+                                const mode = String(c.mode || 'enter');
+                                const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
+                                
+                                // Увеличиваем соответствующий счетчик
+                                if (isPositive) {
+                                    enterCounter++;
+                                } else {
+                                    exitCounter++;
+                                }
+                                
+                                // Текст с номером
+                                const text = isPositive ? `+${enterCounter}` : `-${exitCounter}`;
+                                const color = isPositive ? '#51cf66' : '#ff6b6b';
+                                window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
+                            }
+                            if (tsMs > maxTs) maxTs = tsMs;
+                        });
+                        window.__lastPopupTs = maxTs;
+                    } catch (e) {}
+                    try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
+                    scheduleOverlay(lastMasks, lastIds);
+                    try { if (Array.isArray(lastMasks) && lastMasks.length) streamStatus.textContent = 'Live + overlay'; } catch (e) {}
+                }
+                if (data.debug && data.debug.flow) {
+                    const f = data.debug.flow;
+                    const leftInCount = Number(f.left_in ?? 0);
+                    const rightInCount = Number(f.right_in ?? 0);
+                    // Если справа = 0, то для расчета среднего используем значение слева
+                    let av;
+                    if (rightInCount === 0) {
+                        av = leftInCount;
+                    } else {
+                        av = Math.round((leftInCount + rightInCount) / 2);
+                    }
+                    try {
+                        leftInEl.textContent = String(leftInCount);
+                        rightInEl.textContent = String(rightInCount);
+                        avgFlowEl.textContent = String(av);
+                    } catch (e) {}
+                    // Отобразить имя модели (если пришло) и размер входа
+                    let modelInfo = '';
+                    try {
+                        const m = data.debug && data.debug.model ? data.debug.model : null;
+                        const imgsz = data.debug && data.debug.imgsz ? `, ${data.debug.imgsz}` : '';
+                        if (m && m.name) {
+                            const dev = m.device ? `, ${m.device}${m.half?'/fp16':''}` : '';
+                            modelInfo = ` | GPU: ${dev || 'cpu'} | Модель: ${m.name}${imgsz}`;
+                        }
+                    } catch (_) {}
+                    streamStatus.textContent = `Live | Слева (вход): ${leftInCount} | Справа (вход): ${rightInCount}${modelInfo}`;
+                }
+                if (data.debug && data.debug.act) {
+                    const a = data.debug.act;
+                    try {
+                        actSeenEl.textContent = String(Number(a.seen_total||0));
+                        actPeakEl.textContent = String(Number(a.peak_concurrent||0));
+                        actDurEl.textContent = String((Number(a.duration_sec||0)).toFixed(1));
+                    } catch (e) {}
+                }
+                if (data.debug && data.debug.lines) {
+                    try {
+                        // Не перетирать локальное перетаскивание
+                        if (!window.__isDraggingLines) {
+                            window.__lines = data.debug.lines;
+                        }
+                    } catch (e) {}
+                }
+                // Update chart with low overhead
+                if (chart) {
+                    const now = performance.now();
+                    if (!window.__lastChartTs || now - window.__lastChartTs > 400) {
+                        window.__lastChartTs = now;
+                        const tsLabel = new Date().toLocaleTimeString();
+                        countHistory.push(data.count);
+                        if (countHistory.length > 60) countHistory.shift();
+                        const start = Math.max(0, countHistory.length - avgWindow);
+                        const slice = countHistory.slice(start);
+                        const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+
+                        chart.data.labels.push(tsLabel);
+                        chart.data.datasets[0].data.push(data.count);
+                        chart.data.datasets[1].data.push(Number(avg.toFixed(2)));
+                        const maxPoints = 60;
+                        if (chart.data.labels.length > maxPoints) {
+                            chart.data.labels.shift();
+                            chart.data.datasets.forEach(ds => ds.data.shift());
+                        }
+                        chart.update('none');
+                    }
+                }
+            }
+        };
+    }
+
+    function setPlaceholder() {
+        // SVG-заглушка в стиле liquid glass
+        const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720' preserveAspectRatio='xMidYMid meet'>
+  <defs>
+    <linearGradient id='bgGrad' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='#eef6ff'/>
+      <stop offset='48%' stop-color='#e7eef9'/>
+      <stop offset='100%' stop-color='#d9e6fb'/>
+    </linearGradient>
+    <radialGradient id='glow1' cx='80%' cy='-10%' r='80%'>
+      <stop offset='0%' stop-color='rgba(124,199,255,0.35)'/>
+      <stop offset='70%' stop-color='rgba(124,199,255,0.00)'/>
+    </radialGradient>
+    <radialGradient id='glow2' cx='10%' cy='10%' r='70%'>
+      <stop offset='0%' stop-color='rgba(139,182,230,0.25)'/>
+      <stop offset='70%' stop-color='rgba(139,182,230,0.00)'/>
+    </radialGradient>
+    <filter id='blur' x='-50%' y='-50%' width='200%' height='200%'>
+      <feGaussianBlur stdDeviation='30'/>
+    </filter>
+    <linearGradient id='glassFill' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='rgba(255,255,255,0.70)'/>
+      <stop offset='100%' stop-color='rgba(255,255,255,0.35)'/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width='1280' height='720' fill='url(#bgGrad)'/>
+  <rect width='1280' height='720' fill='url(#glow1)'/>
+  <rect width='1280' height='720' fill='url(#glow2)'/>
+
+  <!-- Soft abstract blobs -->
+  <g filter='url(#blur)'>
+    <ellipse cx='250' cy='120' rx='180' ry='90' fill='rgba(124,199,255,0.26)'/>
+    <ellipse cx='1060' cy='180' rx='220' ry='110' fill='rgba(124,199,255,0.18)'/>
+    <ellipse cx='300' cy='590' rx='240' ry='120' fill='rgba(139,182,230,0.18)'/>
+  </g>
+
+  <!-- Glass card frame -->
+  <g>
+    <rect x='80' y='60' width='1120' height='600' rx='22'
+          fill='url(#glassFill)'
+          stroke='rgba(30,64,175,0.12)' stroke-width='2'
+          opacity='0.88'/>
+    <rect x='80' y='60' width='1120' height='600' rx='22'
+          fill='none' stroke='rgba(124,199,255,0.35)'
+          stroke-width='1'/>
+  </g>
+
+  <!-- No badge to avoid flicker before first frame -->
+
+  <!-- Text -->
+  <g font-family='Inter,Segoe UI,Arial' text-anchor='middle'>
+    <text x='640' y='360' font-size='40' fill='#1f3d6b' opacity='0.85' style='letter-spacing:.3px;'>Нет активного потока</text>
+    <text x='640' y='404' font-size='20' fill='#33507a' opacity='0.7'>Нажмите «Старт» или выберите камеру/файл</text>
+  </g>
+</svg>`;
+        const encoded = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        // Only set placeholder when not playing and MJPEG img is visible
+        try {
+            const transportEl = document.getElementById('transportSelect');
+            const transport = transportEl ? transportEl.value : 'mjpeg';
+            if (transport === 'mjpeg' && !isVideoPlaying && (!document.getElementById('webrtcVideo') || document.getElementById('webrtcVideo').style.display === 'none')) {
+                videoStream.src = encoded;
+            }
+        } catch (e) {
+            videoStream.src = encoded;
+        }
+    }
+
+    function syncOverlaySize() {
+        const wrapper = document.getElementById('videoWrapper');
+        const w = wrapper ? wrapper.clientWidth : videoStream.clientWidth;
+        const h = wrapper ? wrapper.clientHeight : videoStream.clientHeight;
+        if (!w || !h) return;
+        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+        const bw = Math.floor(w * dpr);
+        const bh = Math.floor(h * dpr);
+        if (overlayCanvas.width !== bw || overlayCanvas.height !== bh) {
+            overlayCanvas.width = bw;
+            overlayCanvas.height = bh;
+            overlayCanvas.style.width = w + 'px';
+            overlayCanvas.style.height = h + 'px';
+        }
+    }
+
+    function getRenderedImageRect() {
+        // Возвращает реальную область отображения кадра внутри wrapper с учётом object-fit: contain
+        const wrapper = document.getElementById('videoWrapper');
+        const cw = wrapper ? wrapper.clientWidth : overlayCanvas.width;
+        const ch = wrapper ? wrapper.clientHeight : overlayCanvas.height;
+        const webrtcEl = document.getElementById('webrtcVideo');
+        const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none';
+        let iw = 0, ih = 0;
+        if (webrtcVisible) {
+            iw = webrtcEl.videoWidth || 0;
+            ih = webrtcEl.videoHeight || 0;
+        } else {
+            iw = videoStream.naturalWidth || 0;
+            ih = videoStream.naturalHeight || 0;
+        }
+        if (!iw || !ih) return { x: 0, y: 0, w: cw, h: ch };
+        const scale = Math.min(cw / iw, ch / ih);
+        const w = Math.round(iw * scale);
+        const h = Math.round(ih * scale);
+        const x = Math.floor((cw - w) / 2);
+        const y = Math.floor((ch - h) / 2);
+        return { x, y, w, h };
+    }
+
+    // Генерация пастельного цвета заливки по ID инстанса.
+    // Идея: фиксированный "разброс" оттенка (Hue) по модулю 360,
+    // а насыщенность/яркость держим высокими (70%/72%) и добавляем прозрачность 0.35,
+    // поэтому итог — мягкие, но заметные пастельные цвета.
+    // Множитель 57 даёт равномерное распределение оттенков для соседних ID
+    // и снижает шанс близких цветов у подряд идущих объектов.
+    function colorForInstance(instId) {
+        const hue = (Number(instId) * 57) % 360; // псевдослучайное разнесение оттенков
+        return `hsla(${hue}, 70%, 72%, 0.35)`;
+    }
+
+    // Цвет шрифта, если нужен цветной текст: тот же оттенок, но темнее,
+    // чтобы читался поверх светлой пастельной маски. Сейчас цифры белые,
+    // но функция оставлена для гибкости/экспериментов.
+    function labelColorForInstance(instId) {
+        const hue = (Number(instId) * 57) % 360;
+        return `hsl(${hue}, 65%, 32%)`;
+    }
+
+    function drawOverlay(masks, ids = null) {
+        // Рисуем направляющие всегда; маски — когда придут/после первого кадра
+        syncOverlaySize();
+        const ctx = overlayCanvas.getContext('2d');
+        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+        // Обеспечить единый масштаб в device pixels для чёткости
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const cw = overlayCanvas.width;
+        const ch = overlayCanvas.height;
+        ctx.clearRect(0, 0, cw, ch);
+
+        const rect = getRenderedImageRect();
+
+        // Выделенные линии отсечки по третям ширины
+        try {
+            ctx.save();
+            const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
+            const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
+            const x1 = rect.x + rect.w * leftX;
+            const x2 = rect.x + rect.w * rightX;
+            // полупрозрачные направляющие полосы
+            ctx.fillStyle = 'rgba(44,123,229,0.12)';
+            ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
+            ctx.fillStyle = 'rgba(81,207,102,0.12)';
+            ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
+            // основные яркие линии
+            ctx.setLineDash([]);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(44,123,229,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x1, rect.y);
+            ctx.lineTo(x1, rect.y + rect.h);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(81,207,102,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x2, rect.y);
+            ctx.lineTo(x2, rect.y + rect.h);
+            ctx.stroke();
+            // маленькие маркеры вверху
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.beginPath();
+            ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.beginPath();
+            ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            // Подписи к линиям выключены по требованию UX
+            // Перетаскивание линий отсечки мышью/тапом
+            try {
+                if (!window.__linesDragInit) {
+                    window.__linesDragInit = true;
+                    const onPos = (e) => {
+                        const r = overlayCanvas.getBoundingClientRect();
+                        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                        const x = clientX - r.left;
+                        return Math.max(0, Math.min(1, (x - rect.x) / rect.w));
+                    };
+                    let dragging = null; // 'left' | 'right'
+                    const onDown = (e) => {
+                        if (!overlayEnabled) return;
+                        const nx = onPos(e);
+                        const lx = (window.__lines && typeof window.__lines.left_x==='number') ? window.__lines.left_x : 0.25;
+                        const rx = (window.__lines && typeof window.__lines.right_x==='number') ? window.__lines.right_x : 0.75;
+                        const distL = Math.abs(nx - lx);
+                        const distR = Math.abs(nx - rx);
+                        if (distL < 0.02 || distR < 0.02) {
+                            dragging = (distL < distR) ? 'left' : 'right';
+                            window.__isDraggingLines = true;
+                            e.preventDefault();
+                        }
+                    };
+                    const onMove = (e) => {
+                        const nx = onPos(e);
+                        let lx = (window.__lines && typeof window.__lines.left_x==='number') ? window.__lines.left_x : 0.25;
+                        let rx = (window.__lines && typeof window.__lines.right_x==='number') ? window.__lines.right_x : 0.75;
+                        const nearLine = (Math.abs(nx - lx) < 0.02) || (Math.abs(nx - rx) < 0.02);
+                        if (!dragging) {
+                            // Подсказка курсора при наведении
+                            overlayCanvas.style.cursor = nearLine ? 'ew-resize' : 'crosshair';
+                            return;
+                        }
+                        // Перетаскивание
+                        if (dragging === 'left') lx = nx; else rx = nx;
+                        if (lx > rx) { const t = lx; lx = rx; rx = t; }
+                        const minGap = 0.05;
+                        if ((rx - lx) < minGap) {
+                            const mid = (lx + rx) / 2;
+                            lx = Math.max(0, mid - minGap/2);
+                            rx = Math.min(1, mid + minGap/2);
+                        }
+                        window.__lines = { left_x: lx, right_x: rx };
+                        overlayCanvas.style.cursor = 'ew-resize';
+                        scheduleOverlay(lastMasks, lastIds);
+                        e.preventDefault();
+                    };
+                    const onUp = async () => {
+                        if (!dragging) return;
+                        dragging = null;
+                        try {
+                            const { left_x, right_x } = window.__lines || {};
+                            await fetch('/api/lines', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ left_x, right_x }) });
+                            
+                            // Сохраняем линии для конкретного видеофайла
+                            const activeStreamId = document.querySelector('#streamRadios .toggle-btn.active')?.dataset?.streamId;
+                            if (activeStreamId) {
+                                await fetch(`/api/stream/${activeStreamId}/line_positions`, {
+                                    method: 'POST', 
+                                    headers: {'Content-Type':'application/json'}, 
+                                    body: JSON.stringify({ left_x, right_x })
+                                });
+                            }
+                        } catch(_) {}
+                        overlayCanvas.style.cursor = 'crosshair';
+                        window.__isDraggingLines = false;
+                    };
+                    overlayCanvas.addEventListener('mousedown', onDown);
+                    overlayCanvas.addEventListener('mousemove', onMove);
+                    overlayCanvas.addEventListener('mouseup', onUp);
+                    overlayCanvas.addEventListener('mouseleave', () => { dragging = null; overlayCanvas.style.cursor = 'crosshair'; });
+                    overlayCanvas.addEventListener('touchstart', onDown, {passive:false});
+                    overlayCanvas.addEventListener('touchmove', onMove, {passive:false});
+                    overlayCanvas.addEventListener('touchend', onUp);
+                }
+            } catch(_) {}
+            ctx.restore();
+        } catch (e) {}
+
+        // Отрисовать кратковременные маркеры пересечений (если пришли)
+        try {
+            const cr = window.__lastCrossings || [];
+            if (Array.isArray(cr) && cr.length) {
+                ctx.save();
+                cr.forEach(c => {
+                    const cx = rect.x + (Number(c.x) || 0) * rect.w;
+                    const cy = rect.y + (Number(c.y) || 0.5) * rect.h;
+                    ctx.beginPath();
+                    ctx.fillStyle = c.side === 'left' ? 'rgba(44,123,229,0.9)' : 'rgba(80,200,120,0.9)';
+                    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.restore();
+            }
+        } catch (e) {}
+
+        // Всплывающие кругляши "+1/-1" над точкой пересечения
+        try {
+            if (Array.isArray(window.__popups) && window.__popups.length) {
+                const now = performance.now();
+                ctx.save();
+                const keep = [];
+                window.__popups.forEach(p => {
+                    const k = Math.min(1, Math.max(0, (now - p.t0) / (p.dur || 900)));
+                    const alpha = 1 - k;                 // плавное исчезание
+                    const ease = k * (2 - k);             // ease-out для подъёма
+                    const px = rect.x + (Number(p.x) || 0.5) * rect.w;
+                    const py = rect.y + (Number(p.y) || 0.5) * rect.h - ease * (p.rise || 28);
+                    const r = 13;                         // радиус пузыря
+                    // фон пузыря
+                    ctx.globalAlpha = Math.max(0, alpha);
+                    ctx.beginPath();
+                    ctx.fillStyle = (p.color || '#2c7be5').replace('0.9', '1');
+                    ctx.arc(px, py, r, 0, Math.PI * 2);
+                    ctx.fill();
+                    // тонкая окантовка
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+                    ctx.stroke();
+                    // текст
+                    ctx.font = '700 14px system-ui, Segoe UI, Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(String(p.text || '+1'), px, py + 0.5);
+                    if (k < 1) keep.push(p);
+                });
+                ctx.restore();
+                window.__popups = keep;
+                // пока есть активные попапы — продолжаем анимацию
+                if (keep.length) {
+                    try { scheduleOverlay(lastMasks, lastIds); } catch (_) {}
+                }
+            }
+        } catch (e) {}
+
+        if (!masks || !masks.length) return;
+
+        // Soft pastel segmentation overlays, optional instance ids (from backend)
+        masks.forEach((poly, idx) => {
+            if (!Array.isArray(poly) || poly.length < 3) return;
+            const labelArr = (window.__lastLabels && Array.isArray(window.__lastLabels)) ? window.__lastLabels : null;
+            const instId = labelArr ? (labelArr[idx] || (idx + 1)) : ((ids && ids[idx]) ? ids[idx] : (idx + 1));
+            const fill = colorForInstance(instId);
+            ctx.beginPath();
+            // Decimate polygon points adaptively to reduce path complexity
+            const plen = poly.length;
+            const step = Math.max(1, Math.floor(plen / 200));
+            for (let i = 0; i < plen; i += step) {
+                const nx = poly[i][0], ny = poly[i][1];
+                const x = rect.x + nx * rect.w;
+                const y = rect.y + ny * rect.h;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            // Fill without expensive filters (avoid canvas blur to prevent jank)
+            ctx.save();
+            // мягкая, но более заметная заливка
+            ctx.fillStyle = fill;
+            ctx.globalAlpha = 0.60;
+            ctx.fill();
+            // лёгкий контур для читаемости
+            ctx.globalAlpha = 0.50;
+            ctx.lineWidth = 1.0;
+            ctx.strokeStyle = 'rgba(30,50,80,0.20)';
+            ctx.stroke();
+            ctx.restore();
+
+            // Number centered inside the object, colored like the mask
+            // Compute simple centroid of polygon points (average)
+            // Labeling: order instances right-to-left within the frame
+            let sx = 0, sy = 0, pc = 0;
+            poly.forEach(([nx, ny]) => { sx += nx; sy += ny; pc++; });
+            if (pc > 0) {
+                const cx = rect.x + (sx / pc) * rect.w;
+                const cy = rect.y + (sy / pc) * rect.h;
+                // compute display label: if labels array exists use it, otherwise compute order based on x position
+                let displayLabel = (labelArr && labelArr[idx]) ? labelArr[idx] : null;
+                if (!displayLabel) {
+                    // derive rank right-to-left: higher x => smaller index
+                    const ranks = (window.__lastLabelsOrder || []);
+                    if (ranks.length === 0) {
+                        // build order by x of current lastMasks
+                        try {
+                            const arr = (lastMasks || []).map((m, i) => {
+                                let sx2 = 0, pc2 = 0;
+                                m.forEach(([nx2, ny2]) => { sx2 += nx2; pc2++; });
+                                return { i, cx: pc2? (sx2/pc2) : 0 };
+                            });
+                            arr.sort((a,b) => b.cx - a.cx); // right-to-left
+                            window.__lastLabelsOrder = arr.map(a=>a.i);
+                        } catch(e) { window.__lastLabelsOrder = []; }
+                    }
+                    const pos = (window.__lastLabelsOrder || []).indexOf(idx);
+                    displayLabel = (pos >= 0) ? (pos + 1) : (idx + 1);
+                }
+                const label = String(idAliases[displayLabel] ?? displayLabel);
+                ctx.save();
+                ctx.font = '700 14px system-ui, Segoe UI, Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                // Outline for readability
+                ctx.lineWidth = 3.5;
+                ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+                ctx.strokeText(label, cx, cy);
+                // Белая цифра поверх пастельной маски
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(label, cx, cy);
+                ctx.restore();
+            }
+        });
+    }
+
+    // Overlay draw: decoupled loop with max FPS to avoid blocking video decode
+    let overlayPending = null;
+    let overlayRaf = 0;
+    let overlayLastDraw = 0;
+    const overlayMaxFps = 12; // cap overlay to 12 fps for smoothness
+    function scheduleOverlay(masks, ids) {
+        if (performance.now() < overlayBlockUntil) return;
+        overlayPending = { masks, ids };
+    }
+    function overlayTick() {
+        const now = performance.now();
+        const minDt = 1000 / overlayMaxFps;
+        if (overlayPending && (now - overlayLastDraw >= minDt)) {
+            const job = overlayPending; overlayPending = null;
+            drawOverlay(job.masks, job.ids);
+            overlayLastDraw = now;
+        } else if (now - overlayLastDraw >= minDt) {
+            // Всегда перерисовываем направляющие, даже если масок нет
+            drawOverlay(lastMasks, lastIds);
+            overlayLastDraw = now;
+        }
+        overlayRaf = requestAnimationFrame(overlayTick);
+    }
+
+    function pointInPoly(px, py, poly, rect) {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const xi = rect.x + poly[i][0] * rect.w;
+            const yi = rect.y + poly[i][1] * rect.h;
+            const xj = rect.x + poly[j][0] * rect.w;
+            const yj = rect.y + poly[j][1] * rect.h;
+            const intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-6) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    overlayCanvas.addEventListener('click', (e) => {
+        if (!lastMasks || !lastMasks.length) return;
+        const rectDom = overlayCanvas.getBoundingClientRect();
+        const px = e.clientX - rectDom.left;
+        const py = e.clientY - rectDom.top;
+        const imgRect = getRenderedImageRect();
+        // check topmost polygon first: iterate reversed
+        let foundIdx = -1;
+        for (let i = lastMasks.length - 1; i >= 0; i--) {
+            if (pointInPoly(px, py, lastMasks[i], imgRect)) { foundIdx = i; break; }
+        }
+        if (foundIdx < 0) return;
+        const instId = (lastIds && lastIds[foundIdx]) ? lastIds[foundIdx] : (foundIdx + 1);
+        const current = idAliases[instId] ?? instId;
+        const val = prompt('Номер свиньи для ID ' + instId + ':', String(current));
+        if (val === null) return;
+        const trimmed = String(val).trim();
+        if (trimmed === '') { delete idAliases[instId]; } else { idAliases[instId] = trimmed; }
+        if (activeStreamId) saveAliases(activeStreamId);
+        drawOverlay(lastMasks, lastIds);
+    });
+
+    // Keyboard seek (Left/Right arrows). Shift=±1s, Ctrl=±5s, иначе ±step
+    function setSeekUIVal(t) {
+        let max = Number(seekRange.max || 0);
+        let clamped = Math.max(0, Math.min(max, Number(t) || 0));
+        seekRange.value = clamped;
+        try { 
+            curTime.textContent = clamped.toFixed(1);
+            // Обновляем индикатор позиции в процентах от длительности
+            const percent = max > 0 ? Math.round((clamped / max) * 100) : 0;
+            streamStatus.textContent = `${percent}%`;
+        } catch (_) {}
+        return clamped;
+    }
+    async function requestSeekTo(t) {
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        // блокируем приём времени до прихода к цели
+        seekTargetTime = Number(t) || 0;
+        seekLockUntil = performance.now() + 1200;
+        overlayBlockUntil = performance.now() + 180;
+        if (!/^rtsp:\/\//i.test(src)) {
+            try { await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(seekTargetTime)}`); } catch (_) {}
+        }
+    }
+    document.addEventListener('keydown', (e) => {
+        const ae = document.activeElement;
+        const tag = (ae && ae.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || (ae && ae.isContentEditable)) return;
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            const id = activeStreamId;
+            const src = streamSources[id] || '';
+            // Только для файловых источников
+            if (!id || !src || /^rtsp:\/\//i.test(src) || !isVideoPlaying) return;
+            e.preventDefault();
+            
+            // Определяем шаг перемотки: Ctrl+стрелка = 5 секунд, Shift+стрелка = 1 секунда, иначе - шаг из настроек
+            const base = Math.max(0.05, parseFloat(seekRange.step || '0.1') || 0.1);
+            const step = e.ctrlKey ? 5.0 : (e.shiftKey ? 1.0 : base);
+            const cur = Number(seekRange.value || 0);
+            const dir = (e.key === 'ArrowRight') ? 1 : -1;
+            
+            // Устанавливаем новое значение и запускаем перемотку
+            const target = setSeekUIVal(cur + dir * step);
+            requestSeekTo(target);
+            
+            // Визуальная обратная связь - мигаем индикатором времени
+            const timeElement = document.getElementById('curTime');
+            timeElement.style.color = '#2c7be5';
+            setTimeout(() => { timeElement.style.color = ''; }, 200);
+        }
+    });
+
+    // Note: reset button removed per request
+
+    function destroyChart() {
+        if (chart) {
+            try { chart.destroy(); } catch (e) {}
+            chart = null;
+        }
+    }
+
+    function initChart() {
+        // Ensure previous chart instance is gone before reusing the canvas
+        destroyChart();
+        const ctx = liveCountChart.getContext('2d');
+        const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+        gradient.addColorStop(0, 'rgba(44, 123, 229, 0.35)');
+        gradient.addColorStop(1, 'rgba(44, 123, 229, 0)');
+
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Count',
+                        data: [],
+                        borderColor: '#2c7be5',
+                        backgroundColor: gradient,
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'Avg',
+                        data: [],
+                        borderColor: '#51cf66',
+                        borderDash: [6, 4],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.2
+                    }
+                ]
+            },
+            options: {
+                responsive: false,
+                maintainAspectRatio: true,
+                animation: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    videoPlayPauseBtn.addEventListener('click', async () => {
+        if (isVideoPlaying) {
+            // Стоп без запуска демо — остаёмся на текущем файле, можно возобновить
+            await stopStream();
+            isVideoPlaying = false;
+            videoPlayPauseBtn.textContent = 'Старт';
+            // не меняем activeStreamId и streamSources
+        } else {
+            const sourceUri = streamSources[activeStreamId];
+            if (activeStreamId && sourceUri) {
+                // Получаем текущую позицию seekbar для возобновления с этой позиции
+                const currentSeekTime = Number(seekRange.value || 0);
+                await startStream(activeStreamId, sourceUri, currentSeekTime);
+                isVideoPlaying = true;
+                videoPlayPauseBtn.textContent = 'Стоп';
+            }
+        }
+    });
+
+    // Fullscreen toggle (overlay UI over video)
+    function setFsState(on) {
+        if (on) { document.body.classList.add('fs'); document.documentElement.classList.add('fs'); }
+        else { document.body.classList.remove('fs'); document.documentElement.classList.remove('fs'); }
+        // update icon
+        fullscreenBtn.innerHTML = on
+          ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/><path d="M10 14l-4 4M14 10l4-4" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/></svg>'
+          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h4V5H5v6h2V7ZM13 7h4v4h2V5h-6v2ZM7 13H5v6h6v-2H7v-4ZM17 17h-4v2h6v-6h-2v4Z" fill="#1f3d6b"/></svg>';
+        updateVideoLayout();
+    }
+    fullscreenBtn.addEventListener('click', () => {
+        const on = !document.body.classList.contains('fs');
+        setFsState(on);
+    });
+    // Ensure icon is set initially
+    try { setFsState(document.body.classList.contains('fs')); } catch (e) {}
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.body.classList.contains('fs')) setFsState(false);
+    });
+
+    function shortenFileName(name, max = 28) {
+        if (!name) return '';
+        if (name.length <= max) return name;
+        const extIdx = name.lastIndexOf('.');
+        const ext = extIdx > 0 ? name.slice(extIdx) : '';
+        const keep = Math.max(4, max - ext.length - 3);
+        const head = name.slice(0, Math.ceil(keep/2));
+        const tail = name.slice(ext ? -Math.floor(keep/2) - ext.length : -Math.floor(keep/2));
+        return `${head}…${tail}${ext}`;
+    }
+
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) {
+            fileInputName.textContent = 'Файл';
+            fileInputLabel.title = 'Открыть видеофайл';
+            return;
+        }
+
+        // Reflect selected filename on the button
+        fileInputName.textContent = shortenFileName(file.name);
+        fileInputLabel.title = file.name;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const uploadResponse = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const uploadData = await uploadResponse.json();
+
+        if (uploadResponse.ok) {
+            const streamId = 'file_' + Date.now();
+            const sourceUri = uploadData.file_path;
+            
+            await stopStream();
+            activeStreamId = streamId;
+            streamSources[streamId] = sourceUri;
+            // Seed duration from upload meta if available
+            if (uploadData.duration) {
+                const dur = Number(uploadData.duration || 0);
+                if (!Number.isNaN(dur) && dur > 0) {
+                    seekRange.max = dur;
+                    durTime.textContent = dur.toFixed(1);
+                }
+                if (uploadData.fps) {
+                    const fps = Number(uploadData.fps || 0);
+                    if (!Number.isNaN(fps) && fps > 0) {
+                        seekRange.step = (1/Math.min(60, Math.max(1, fps))).toFixed(2);
+                    }
+                }
+            }
+            await startStream(streamId, sourceUri, 0);
+            // Confirm once more from /info
+            try {
+                const response = await fetch(`/api/stream/${streamId}/info`);
+                if (response.ok) {
+                    const info = await response.json();
+                    const dur = Number(info.duration || 0);
+                    if (!Number.isNaN(dur) && dur > 0) {
+                        seekRange.max = dur;
+                        durTime.textContent = dur.toFixed(1);
+                    }
+                }
+            } catch (_) {}
+            // keep slider always enabled; just update values
+        } else {
+            streamStatus.textContent = `Error uploading file: ${uploadData.error}`;
+        }
+    });
+
+    // Seek handlers (single-request logic)
+    let isSeeking = false;
+    function _seekTimeFromEvent(e){
+        try{
+            const r = seekRange.getBoundingClientRect();
+            const clientX = e && (e.touches ? e.touches[0].clientX : e.clientX);
+            if (typeof clientX !== 'number') return Number(seekRange.value||0);
+            const ratio = Math.max(0, Math.min(1, (clientX - r.left) / Math.max(1, r.width)));
+            const min = Number(seekRange.min || 0);
+            const max = Number(seekRange.max || 0);
+            return min + ratio * (max - min);
+        } catch(_) { return Number(seekRange.value||0); }
+    }
+    seekRange.addEventListener('input', (e) => {
+        e.stopPropagation();
+        const t = Number(e.target.value || 0);
+        curTime.textContent = t.toFixed(1);
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        if (/^rtsp:\/\//i.test(src)) return;
+        // Во время drag отправляем только на pointerup — не дёргаем бекенд из input
+        if (isSeeking) {
+            if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
+            return;
+        }
+        // Клавиатурная/программная смена — мягкий дебаунс
+        if (seekDebounce) clearTimeout(seekDebounce);
+        seekDebounce = setTimeout(async () => {
+            try {
+                overlayBlockUntil = performance.now() + 120;
+                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
+            } catch (_) {}
+        }, 150);
+    });
+    // Manage pointer drag to avoid duplicate change/pointerup seeks
+    if (seekRange) seekRange.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        isSeeking = true;
+        if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
+        // Устанавливаем точное значение по координате клика, чтобы не прыгало на 0
+        const t0 = _seekTimeFromEvent(e);
+        seekRange.value = t0;
+        curTime.textContent = t0.toFixed(1);
+    });
+    if (seekRange) seekRange.addEventListener('pointerup', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        const t = _seekTimeFromEvent(e);
+        seekRange.value = t;
+        curTime.textContent = t.toFixed(1);
+        const finishDrag = () => { isSeeking = false; };
+        // блокируем приём серверного t, пока не дойдём до цели
+        seekTargetTime = t;
+        seekLockUntil = performance.now() + 1200;
+        if (!/^rtsp:\/\//i.test(src)) {
+            try {
+                if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
+                overlayBlockUntil = performance.now() + 180;
+                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
+            } catch (_) {
+            } finally {
+                finishDrag();
+            }
+        } else {
+            // Для RTSP ничего не дергаем на бек — просто выходим из режима
+            finishDrag();
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Принудительно устанавливаем WebRTC как приоритетный транспорт
+        const transportSelect = document.getElementById('transportSelect');
+        if (transportSelect) {
+            transportSelect.value = 'webrtc';
+            // Убеждаемся что WebRTC выбран по умолчанию
+            const webrtcOption = transportSelect.querySelector('option[value="webrtc"]');
+            if (webrtcOption) {
+                webrtcOption.selected = true;
+            }
+        }
+        
+        populateStreams();
+        updateVideoLayout();
+        window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
+        setPlaceholder();
+        // Initialize fullscreen button icon
+        try { setFsState(false); } catch (e) {}
+        // Worker disabled for now to avoid seek freezes
+        // Load and display history from localStorage
+        const history = JSON.parse(localStorage.getItem('history') || '[]');
+        history.forEach(item => {
+            const row = historyTable.insertRow();
+            row.insertCell().textContent = item.date;
+            row.insertCell().textContent = item.camera;
+            row.insertCell().textContent = item.count;
+            row.insertCell().textContent = item.total_weight;
+            row.insertCell().textContent = item.avg_weight;
+        });
+
+        // Save button logic
+        document.getElementById('saveManualBtn').addEventListener('click', () => {
+            const history = JSON.parse(localStorage.getItem('history') || '[]');
+            const newEntry = {
+                date: new Date().toLocaleString(),
+                camera: activeStreamId,
+                count: document.getElementById('manualCount').value,
+                total_weight: document.getElementById('manualTotalWeight').value,
+                avg_weight: document.getElementById('manualAvgWeight').value
+            };
+            history.unshift(newEntry);
+            localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+            updateHistory();
+        });
+
+        // Autostart the default stream
+        const streams = await getStreams();
+        const defaultStreamId = Object.keys(streams)[0];
+        const defaultSourceUri = streams[defaultStreamId];
+        if (defaultStreamId && defaultSourceUri) {
+            // Не автозапускаем демо; просто инициализируем источники
+            activeStreamId = defaultStreamId;
+            streamSources[defaultStreamId] = defaultSourceUri;
+            isVideoPlaying = false;
+            videoPlayPauseBtn.textContent = 'Старт';
+        }
+    });
+
+    function updateHistory() {
+        const historyTable = document.getElementById('historyTable');
+        if (!historyTable) return;
+        historyTable.innerHTML = '';
+        const history = JSON.parse(localStorage.getItem('history') || '[]');
+        history.forEach(item => {
+            const row = historyTable.insertRow();
+            row.insertCell().textContent = item.date;
+            row.insertCell().textContent = item.camera;
+            row.insertCell().textContent = item.count;
+            row.insertCell().textContent = item.total_weight;
+            row.insertCell().textContent = item.avg_weight;
+        });
+    }
+
+    // Старые обработчики удалены, используются новые функции calculateWeights
+
+    // === ВЕРИФИКАЦИЯ И АНАЛИЗ ===
+
+    // Переключение панелей (обновлено для liquid glass стиля)
+    function switchPanel(panelName) {
+      // Скрываем все панели
+      document.querySelectorAll('.panel-content').forEach(panel => {
+        panel.style.display = 'none';
+        panel.classList.remove('active');
+      });
+
+      // Убираем активные стили у всех вкладок
+      document.querySelectorAll('.journal-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+
+      // Показываем выбранную панель
+      const targetPanel = document.getElementById(panelName + 'Panel');
+      if (targetPanel) {
+        targetPanel.style.display = 'block';
+        targetPanel.classList.add('active');
+      }
+
+      // Активируем вкладку
+      const targetBtn = document.querySelector(`[onclick="switchPanel('${panelName}')"]`);
+      if (targetBtn) {
+        targetBtn.classList.add('active');
+      }
+
+      // Загружаем данные для журнала при переключении на него
+      if (panelName === 'logs') {
+        loadJournalActs();
+      }
+
+      // Загружаем данные для панели
+      if (panelName === 'weighing') {
+        loadWeighingData();
+      } else if (panelName === 'logs') {
+        loadLogsData();
+      } else if (panelName === 'verification') {
+        loadVerificationData();
+      }
+    }
+
+    // Загрузка данных верификации
+    async function loadVerificationData() {
+      try {
+        const response = await fetch('/api/verification/stats');
+        const data = await response.json();
+
+        if (data.error) {
+          console.error('Verification error:', data.error);
+          return;
+        }
+
+        // Обновляем статистику
+        const verifiedCount = data.results.filter(r => r.status === 'success' &&
+          r.verification && r.verification.verified).length;
+        const discrepancyCount = data.results.filter(r => r.status === 'success' &&
+          r.verification && !r.verification.verified).length;
+
+        document.getElementById('verifiedCount').textContent = verifiedCount;
+        document.getElementById('discrepancyCount').textContent = discrepancyCount;
+
+        // Заполняем список актов
+        const container = document.getElementById('verificationItems');
+        container.innerHTML = '';
+
+        if (data.results && data.results.length > 0) {
+          // Показываем последние 10 актов
+          const recentResults = data.results.slice(0, 10);
+          recentResults.forEach(act => {
+            if (act.status === 'success') {
+              const verification = act.verification || {};
+              const item = document.createElement('div');
+              item.style.cssText = `
+                padding: 8px 10px;
+                border-radius: 6px;
+                background: rgba(255,255,255,0.7);
+                border: 1px solid rgba(60,90,140,0.1);
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+              `;
+              item.onmouseover = () => item.style.background = 'rgba(0,123,255,0.1)';
+              item.onmouseout = () => item.style.background = 'rgba(255,255,255,0.7)';
+              item.onclick = () => showActDetails(act.act_file);
+
+              const statusColor = verification.verified ? '#28a745' : '#ffc107';
+              const statusText = verification.verified ? '✓' : '⚠';
+
+              item.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <strong style="color:#1f3d6b;">${act.act_file}</strong>
+                  <span style="color:${statusColor}; font-weight:bold;">${statusText}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:#666;">
+                  <span>Слева: ${act.flow?.left_in || 0}</span>
+                  <span>Справа: ${act.flow?.right_in || 0}</span>
+                </div>
+                ${verification.message ? `<div style="font-size:11px; color:#856404; margin-top:2px;">${verification.message}</div>` : ''}
+              `;
+
+              container.appendChild(item);
+            }
+          });
+        } else {
+          container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">Нет данных для верификации</div>';
+        }
+
+      } catch (error) {
+        console.error('Error loading verification data:', error);
+      }
+    }
+
+    // Показать детали акта
+    function showActDetails(actName) {
+      // Открываем dashboard с конкретным актом
+      const dashboardUrl = `/dashboard?act=${encodeURIComponent(actName)}`;
+      window.open(dashboardUrl, '_blank');
+    }
+
+    // Загрузка файлов для анализа
+    let analysisFiles = [];
+
+    const fileUploadArea = document.getElementById('fileUploadArea');
+    const analysisFileInput = document.getElementById('analysisFileInput');
+    const analyzeFilesBtn = document.getElementById('analyzeFilesBtn');
+    const analysisResults = document.getElementById('analysisResults');
+
+    fileUploadArea.addEventListener('click', () => analysisFileInput.click());
+    fileUploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      fileUploadArea.style.borderColor = '#007bff';
+      fileUploadArea.style.background = 'rgba(0,123,255,0.05)';
+    });
+    fileUploadArea.addEventListener('dragleave', () => {
+      fileUploadArea.style.borderColor = '#ccc';
+      fileUploadArea.style.background = 'rgba(255,255,255,0.5)';
+    });
+    fileUploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      fileUploadArea.style.borderColor = '#ccc';
+      fileUploadArea.style.background = 'rgba(255,255,255,0.5)';
+      handleAnalysisFiles(e.dataTransfer.files);
+    });
+
+    analysisFileInput.addEventListener('change', (e) => handleAnalysisFiles(e.target.files));
+
+    function handleAnalysisFiles(files) {
+      analysisFiles = [];
+      for (let file of files) {
+        if (file.name.match(/\.(xlsx?|csv)$/i)) {
+          analysisFiles.push(file);
+        }
+      }
+
+      updateAnalysisFileList();
+      analyzeFilesBtn.disabled = analysisFiles.length === 0;
+    }
+
+    function updateAnalysisFileList() {
+      analysisResults.innerHTML = '';
+
+      if (analysisFiles.length === 0) {
+        analysisResults.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">Файлы не загружены</div>';
+        return;
+      }
+
+      analysisFiles.forEach((file, index) => {
+        const item = document.createElement('div');
+        item.style.cssText = `
+          padding: 8px 12px;
+          border-radius: 6px;
+          background: rgba(255,255,255,0.7);
+          border: 1px solid rgba(60,90,140,0.1);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        `;
+
+        const fileName = file.name.length > 25 ? file.name.substring(0, 22) + '...' : file.name;
+        const fileSize = formatFileSize(file.size);
+
+        item.innerHTML = `
+          <div>
+            <div style="font-weight:500; color:#1f3d6b;">${fileName}</div>
+            <div style="font-size:11px; color:#666;">${fileSize}</div>
+          </div>
+          <button class="btn secondary" onclick="removeAnalysisFile(${index})" style="font-size:12px; padding:4px 8px; height:auto;">×</button>
+        `;
+
+        analysisResults.appendChild(item);
+      });
+    }
+
+    function removeAnalysisFile(index) {
+      analysisFiles.splice(index, 1);
+      updateAnalysisFileList();
+      analyzeFilesBtn.disabled = analysisFiles.length === 0;
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // Анализ загруженных файлов
+    analyzeFilesBtn.addEventListener('click', async () => {
+      if (analysisFiles.length === 0) return;
+
+      analyzeFilesBtn.disabled = true;
+      analyzeFilesBtn.textContent = 'Анализ...';
+
+      try {
+        for (let i = 0; i < analysisFiles.length; i++) {
+          const file = analysisFiles[i];
+          const fileItem = analysisResults.children[i];
+
+          // Обновляем статус файла
+          const statusDiv = fileItem.querySelector('div');
+          statusDiv.innerHTML += '<div style="color:#007bff; font-size:11px;">Анализ...</div>';
+
+          try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch('/api/verification/analyze_excel', {
+              method: 'POST',
+              body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+              statusDiv.innerHTML += `
+                <div style="color:#28a745; font-size:11px;">✓ Анализ завершён</div>
+                <div style="font-size:10px; color:#666;">
+                  Строк: ${result.analysis.total_rows},
+                  Столбцов: ${Object.keys(result.analysis.summary || {}).length}
+                </div>
+              `;
+            } else {
+              statusDiv.innerHTML += `<div style="color:#dc3545; font-size:11px;">✗ ${result.message}</div>`;
+            }
+
+          } catch (error) {
+            statusDiv.innerHTML += `<div style="color:#dc3545; font-size:11px;">✗ Ошибка: ${error.message}</div>`;
+          }
+        }
+
+      } catch (error) {
+        console.error('Analysis error:', error);
+      } finally {
+        analyzeFilesBtn.disabled = false;
+        analyzeFilesBtn.textContent = 'Анализировать';
+      }
+    });
+
+    // Обновление верификации
+    document.getElementById('refreshVerificationBtn').addEventListener('click', loadVerificationData);
+
+
+
+    // Генерация отчета
+    document.getElementById('generateReportBtn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/verification/report');
+        const report = await response.json();
+
+        if (report.error) {
+          alert('Ошибка при генерации отчета: ' + report.error);
+          return;
+        }
+
+        // Формируем текст отчета
+        let reportText = `ОТЧЕТ О ВЕРИФИКАЦИИ АКТОВ ВЗВЕШИВАНИЯ\n`;
+        reportText += `==========================================\n\n`;
+        reportText += `Дата генерации: ${new Date(report.generated_at).toLocaleString('ru-RU')}\n\n`;
+
+        reportText += `ОБЩАЯ СТАТИСТИКА:\n`;
+        reportText += `- Всего актов: ${report.summary.total_acts}\n`;
+        reportText += `- Проверено: ${report.summary.verified_acts}\n`;
+        reportText += `- Расхождения: ${report.summary.discrepancy_acts}\n`;
+        reportText += `- Ошибки: ${report.summary.error_acts}\n`;
+        reportText += `- Всего свиней: ${report.summary.total_pigs_counted}\n`;
+        reportText += `- Уровень соответствия: ${report.summary.verification_rate.toFixed(1)}%\n`;
+        reportText += `- Средняя длительность: ${Math.round(report.summary.avg_duration_sec || 0)} сек\n\n`;
+
+        if (report.issues.length > 0) {
+          reportText += `ПРОБЛЕМНЫЕ АКТЫ:\n`;
+          report.issues.forEach((issue, index) => {
+            reportText += `${index + 1}. ${issue.act_file}\n`;
+            reportText += `   Слева: ${issue.left_count}, Справа: ${issue.right_count}\n`;
+            reportText += `   Разница: ${issue.difference} (${(issue.relative_difference * 100).toFixed(1)}%)\n`;
+            reportText += `   Статус: ${issue.status}\n`;
+            if (issue.message) reportText += `   Примечание: ${issue.message}\n`;
+            reportText += `\n`;
+          });
+        }
+
+        if (report.recommendations.length > 0) {
+          reportText += `РЕКОМЕНДАЦИИ:\n`;
+          report.recommendations.forEach((rec, index) => {
+            const priorityIcon = rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : 'ℹ️';
+            reportText += `${priorityIcon} ${rec.message}\n`;
+            reportText += `   Действие: ${rec.action}\n\n`;
+          });
+        }
+
+        // Скачиваем отчет как текстовый файл
+        const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `verification_report_${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+      } catch (error) {
+        console.error('Error generating report:', error);
+        alert('Ошибка при генерации отчета: ' + error.message);
+      }
+    });
+
+    // === ФУНКЦИИ ДЛЯ НОВЫХ ПАНЕЛЕЙ ===
+
+    // Загрузка данных взвешивания
+    function loadWeighingData() {
+      // Устанавливаем текущие дату и время
+      const now = new Date();
+      document.getElementById('weighingDate').value = now.toISOString().split('T')[0];
+      document.getElementById('weighingTime').value = now.toTimeString().slice(0, 5);
+      
+      // Обновляем счетчики из текущего потока
+      updateWeighingCounters();
+    }
+
+    // Обновление счетчиков взвешивания
+    function updateWeighingCounters() {
+      try {
+        const leftCount = parseInt(leftInEl.textContent) || 0;
+        const rightCount = parseInt(rightInEl.textContent) || 0;
+        const diff = Math.abs(leftCount - rightCount);
+        
+        document.getElementById('weighingLeftCount').textContent = leftCount;
+        document.getElementById('weighingRightCount').textContent = rightCount;
+        document.getElementById('weighingDiff').textContent = diff;
+        
+        // Автоматически заполняем общее количество
+        const totalField = document.getElementById('weighingTotal');
+        if (!totalField.value && leftCount > 0) {
+          totalField.value = leftCount;
+        }
+
+        // Обновляем общую статистику
+        updateGeneralStats();
+      } catch (e) {
+        console.error('Error updating weighing counters:', e);
+      }
+    }
+
+    // Обновление общей статистики сессии
+    function updateGeneralStats() {
+      try {
+        // Получаем данные из localStorage или текущих счетчиков
+        const leftCount = parseInt(leftInEl.textContent) || 0;
+        const rightCount = parseInt(rightInEl.textContent) || 0;
+        const totalCount = Math.max(leftCount, rightCount); // берем максимальное значение
+        
+        // Получаем сохраненные акты взвешивания для расчета среднего веса
+        const savedActs = JSON.parse(localStorage.getItem('weighingActs') || '[]');
+        let totalWeight = 0;
+        let totalRecords = 0;
+        
+        savedActs.forEach(act => {
+          if (act.totalWeight && act.count) {
+            totalWeight += parseFloat(act.totalWeight);
+            totalRecords += parseInt(act.count);
+          }
+        });
+        
+        // Добавляем текущий ввод, если есть
+        const manualCount = parseInt(document.getElementById('manualCount').value) || 0;
+        const manualWeight = parseFloat(document.getElementById('manualTotalWeight').value) || 0;
+        const manualAvgWeight = parseFloat(document.getElementById('manualAvgWeight').value) || 0;
+        
+        if (manualCount > 0) {
+          if (manualWeight > 0) {
+            totalWeight += manualWeight;
+            totalRecords += manualCount;
+          } else if (manualAvgWeight > 0) {
+            totalWeight += manualAvgWeight * manualCount;
+            totalRecords += manualCount;
+          }
+        }
+        
+        const avgWeight = totalRecords > 0 ? (totalWeight / totalRecords) : 0;
+        
+        // Обновляем элементы
+        document.getElementById('totalCount').textContent = totalCount;
+        document.getElementById('avgWeight').textContent = avgWeight.toFixed(1);
+        document.getElementById('totalWeight').textContent = totalWeight.toFixed(1);
+        
+      } catch (e) {
+        console.error('Error updating general stats:', e);
+      }
+    }
+
+    // Расчет среднего веса
+    function calculateAvgWeight() {
+      const total = parseFloat(document.getElementById('weighingTotal').value) || 0;
+      const weight = parseFloat(document.getElementById('weighingWeight').value) || 0;
+      const avgField = document.getElementById('weighingAvgWeight');
+      
+      if (total > 0 && weight > 0) {
+        avgField.value = (weight / total).toFixed(2);
+      } else {
+        avgField.value = '';
+      }
+    }
+
+    // Пересчет для формы нового акта
+    let isCalculating = false; // флаг для предотвращения циклических вызовов
+
+    function calculateWeights() {
+      if (isCalculating) return;
+      isCalculating = true;
+      
+      const count = parseFloat(document.getElementById('manualCount').value) || 0;
+      const avgWeight = parseFloat(document.getElementById('manualAvgWeight').value) || 0;
+      
+      if (count > 0 && avgWeight > 0) {
+        const totalWeight = count * avgWeight;
+        document.getElementById('manualTotalWeight').value = totalWeight.toFixed(1);
+      }
+      
+      isCalculating = false;
+    }
+
+    function calculateTotalFromAvg() {
+      if (isCalculating) return;
+      isCalculating = true;
+      
+      const count = parseFloat(document.getElementById('manualCount').value) || 0;
+      const avgWeight = parseFloat(document.getElementById('manualAvgWeight').value) || 0;
+      
+      if (count > 0 && avgWeight > 0) {
+        const totalWeight = count * avgWeight;
+        document.getElementById('manualTotalWeight').value = totalWeight.toFixed(1);
+      }
+      
+      isCalculating = false;
+    }
+
+    function calculateAvgFromTotal() {
+      if (isCalculating) return;
+      isCalculating = true;
+      
+      const count = parseFloat(document.getElementById('manualCount').value) || 0;
+      const totalWeight = parseFloat(document.getElementById('manualTotalWeight').value) || 0;
+      
+      if (count > 0 && totalWeight > 0) {
+        const avgWeight = totalWeight / count;
+        document.getElementById('manualAvgWeight').value = avgWeight.toFixed(2);
+      }
+      
+      isCalculating = false;
+    }
+
+    // Сохранение акта взвешивания
+    async function saveWeighingAct() {
+      try {
+        const data = {
+          date: document.getElementById('weighingDate').value,
+          time: document.getElementById('weighingTime').value,
+          group: document.getElementById('weighingGroup').value,
+          total: parseInt(document.getElementById('weighingTotal').value) || 0,
+          weight: parseFloat(document.getElementById('weighingWeight').value) || 0,
+          avg_weight: parseFloat(document.getElementById('weighingAvgWeight').value) || 0,
+          left_count: parseInt(document.getElementById('weighingLeftCount').textContent) || 0,
+          right_count: parseInt(document.getElementById('weighingRightCount').textContent) || 0,
+          stream_id: activeStreamId
+        };
+
+        if (!data.date || !data.group || data.total <= 0 || data.weight <= 0) {
+          alert('Пожалуйста, заполните все обязательные поля');
+          return;
+        }
+
+        const response = await fetch('/api/weighing/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          alert('Акт взвешивания сохранен успешно!');
+          // Очищаем форму
+          document.getElementById('weighingGroup').value = '';
+          document.getElementById('weighingTotal').value = '';
+          document.getElementById('weighingWeight').value = '';
+          document.getElementById('weighingAvgWeight').value = '';
+        } else {
+          const error = await response.json();
+          alert('Ошибка сохранения: ' + (error.detail || 'Неизвестная ошибка'));
+        }
+      } catch (error) {
+        console.error('Error saving weighing act:', error);
+        alert('Ошибка сохранения: ' + error.message);
+      }
+    }
+
+    // Загрузка данных журналов
+    async function loadLogsData() {
+      try {
+        // Устанавливаем диапазон дат (последние 30 дней)
+        const now = new Date();
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        
+        document.getElementById('logsDateTo').value = now.toISOString().split('T')[0];
+        document.getElementById('logsDateFrom').value = monthAgo.toISOString().split('T')[0];
+        
+        await refreshLogs();
+      } catch (error) {
+        console.error('Error loading logs data:', error);
+      }
+    }
+
+    // Обновление журналов
+    async function refreshLogs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        
+        const response = await fetch(`/api/weighing/logs?date_from=${dateFrom}&date_to=${dateTo}`);
+        const data = await response.json();
+
+        const logsList = document.getElementById('logsList');
+        logsList.innerHTML = '';
+
+        if (data.length === 0) {
+          logsList.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет записей за выбранный период</div>';
+          return;
+        }
+
+        // Группируем по датам
+        const groupedByDate = {};
+        data.forEach(log => {
+          const date = log.date;
+          if (!groupedByDate[date]) {
+            groupedByDate[date] = [];
+          }
+          groupedByDate[date].push(log);
+        });
+
+        // Создаем группы с возможностью сворачивания
+        Object.keys(groupedByDate).sort().reverse().forEach(date => {
+          const logs = groupedByDate[date];
+          const dateGroup = document.createElement('div');
+          dateGroup.className = 'date-group';
+          
+          const dateHeader = document.createElement('div');
+          dateHeader.style.cssText = `
+            background: rgba(0,123,255,0.1); 
+            padding: 8px 12px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-weight: 600; 
+            font-size: 13px; 
+            color: #0066cc;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          `;
+          
+          const totalWeight = logs.reduce((sum, log) => sum + (log.weight || 0), 0);
+          const totalCount = logs.reduce((sum, log) => sum + (log.total || 0), 0);
+          
+          dateHeader.innerHTML = `
+            <span>📅 ${date} (${logs.length} актов)</span>
+            <span style="font-size:11px;">🐷 ${totalCount} шт, ⚖️ ${totalWeight.toFixed(1)} кг</span>
+          `;
+          
+          const logsContainer = document.createElement('div');
+          logsContainer.style.cssText = 'margin-left: 16px; margin-top: 4px;';
+          
+          logs.forEach(log => {
+            const logItem = document.createElement('div');
+            logItem.style.cssText = `
+              background: rgba(255,255,255,0.7);
+              border: 1px solid rgba(60,90,140,0.1);
+              border-radius: 4px;
+              padding: 6px 8px;
+              margin-bottom: 4px;
+              font-size: 11px;
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 8px;
+            `;
+            
+            logItem.innerHTML = `
+              <div><strong>${log.group}</strong><br/><span style="color:#666;">${log.time}</span></div>
+              <div>🐷 ${log.total} шт<br/>⚖️ ${log.weight} кг</div>
+              <div>📊 ${log.avg_weight} кг/шт<br/><span style="color:#666;">±${Math.abs(log.left_count - log.right_count)}</span></div>
+            `;
+            
+            logsContainer.appendChild(logItem);
+          });
+          
+          // Логика сворачивания/разворачивания
+          let isExpanded = true;
+          dateHeader.onclick = () => {
+            isExpanded = !isExpanded;
+            logsContainer.style.display = isExpanded ? 'block' : 'none';
+            dateHeader.style.opacity = isExpanded ? '1' : '0.7';
+          };
+          
+          dateGroup.appendChild(dateHeader);
+          dateGroup.appendChild(logsContainer);
+          logsList.appendChild(dateGroup);
+        });
+
+      } catch (error) {
+        console.error('Error refreshing logs:', error);
+        document.getElementById('logsList').innerHTML = '<div style="text-align:center; color:#dc3545; padding:20px;">Ошибка загрузки данных</div>';
+      }
+    }
+
+    // Экспорт журналов
+    async function exportLogs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        
+        const response = await fetch(`/api/weighing/export?date_from=${dateFrom}&date_to=${dateTo}`);
+        const blob = await response.blob();
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `weighing_logs_${dateFrom}_${dateTo}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error('Error exporting logs:', error);
+        alert('Ошибка экспорта: ' + error.message);
+      }
+    }
+
+    // Новая функция загрузки данных верификации
+    async function loadVerificationData() {
+      // Пока оставляем заглушку, будет доработана позже
+      console.log('Loading verification data...');
+    }
+
+    // === ОБРАБОТЧИКИ СОБЫТИЙ ===
+
+    // Обработчики для панели взвешивания
+    document.addEventListener('DOMContentLoaded', () => {
+      // Автоматический расчет среднего веса
+      document.getElementById('weighingTotal').addEventListener('input', calculateAvgWeight);
+      document.getElementById('weighingWeight').addEventListener('input', calculateAvgWeight);
+      
+      // Сохранение акта
+      document.getElementById('saveWeighingBtn').addEventListener('click', saveWeighingAct);
+      
+      // Обработчики для панели журналов
+      document.getElementById('refreshLogsBtn').addEventListener('click', refreshLogs);
+      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
+      document.getElementById('logsDateFrom').addEventListener('change', refreshLogs);
+      document.getElementById('logsDateTo').addEventListener('change', refreshLogs);
+      
+      // Обработчики для панели сверки
+      const verificationUploadArea = document.getElementById('verificationUploadArea');
+      const verificationFileInput = document.getElementById('verificationFileInput');
+      
+      verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
+      verificationUploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        verificationUploadArea.style.borderColor = '#007bff';
+        verificationUploadArea.style.background = 'rgba(0,123,255,0.1)';
+      });
+      verificationUploadArea.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        verificationUploadArea.style.borderColor = '#ccc';
+        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+      });
+      verificationUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        verificationUploadArea.style.borderColor = '#ccc';
+        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+        if (e.dataTransfer.files.length > 0) {
+          verificationFileInput.files = e.dataTransfer.files;
+          handleVerificationFile();
+        }
+      });
+      
+      verificationFileInput.addEventListener('change', handleVerificationFile);
+      document.getElementById('startVerificationBtn').addEventListener('click', () => {
+        const fileInput = document.getElementById('verificationFileInput');
+        if (!fileInput.files[0]) {
+          fileInput.click();
+          return;
+        }
+        startVerification();
+      });
+    });
+
+    // Обработка файла для сверки
+    function handleVerificationFile() {
+      const file = document.getElementById('verificationFileInput').files[0];
+      const startBtn = document.getElementById('startVerificationBtn');
+      
+      if (file) {
+        document.querySelector('#verificationUploadArea div div').textContent = `📎 ${file.name}`;
+        startBtn.disabled = false;
+      } else {
+        startBtn.disabled = true;
+      }
+    }
+
+    // Начало сверки
+    async function startVerification() {
+      try {
+        const fileInput = document.getElementById('verificationFileInput');
+        if (!fileInput.files[0]) {
+          alert('Пожалуйста, выберите файл для сверки');
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        const response = await fetch('/api/journal/compare', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          displayVerificationResults(result);
+        } else {
+          alert('Ошибка сверки: ' + (result.detail || 'Неизвестная ошибка'));
+        }
+      } catch (error) {
+        console.error('Error during verification:', error);
+        alert('Ошибка сверки: ' + error.message);
+      }
+    }
+
+    // Отображение результатов сверки
+    function displayVerificationResults(result) {
+      document.getElementById('verificationMatches').textContent = result.matches || 0;
+      document.getElementById('verificationDiffs').textContent = result.differences || 0;
+      document.getElementById('verificationMissing').textContent = result.missing || 0;
+
+      const resultsContainer = document.getElementById('verificationResults');
+      resultsContainer.innerHTML = '';
+
+      if (result.details && result.details.length > 0) {
+        result.details.forEach(item => {
+          const resultItem = document.createElement('div');
+          resultItem.style.cssText = `
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-bottom: 4px;
+            ${item.status === 'match' ? 'background: rgba(40,167,69,0.1); border: 1px solid rgba(40,167,69,0.2);' :
+              item.status === 'diff' ? 'background: rgba(255,193,7,0.1); border: 1px solid rgba(255,193,7,0.2);' :
+              'background: rgba(220,53,69,0.1); border: 1px solid rgba(220,53,69,0.2);'}
+          `;
+          
+          const statusIcon = item.status === 'match' ? '✅' : item.status === 'diff' ? '⚠️' : '❌';
+          resultItem.innerHTML = `
+            <div><strong>${statusIcon} ${item.group} (${item.date})</strong></div>
+            <div style="margin-top:2px;">
+              Система: ${item.system_weight}кг (${item.system_count}шт) | 
+              Файл: ${item.file_weight}кг (${item.file_count}шт)
+            </div>
+          `;
+          
+          resultsContainer.appendChild(resultItem);
+        });
+      } else {
+        resultsContainer.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет данных для отображения</div>';
+      }
+    }
+
+    // Автоматическая загрузка данных при запуске
+    document.addEventListener('DOMContentLoaded', () => {
+      // Обновляем счетчики взвешивания каждые 2 секунды, если панель активна
+      setInterval(() => {
+        const weighingPanel = document.getElementById('weighingPanel');
+        if (weighingPanel && weighingPanel.classList.contains('active')) {
+          updateWeighingCounters();
+        }
+      }, 2000);
+
+      // === ИНИЦИАЛИЗАЦИЯ НОВОГО LIQUID GLASS ИНТЕРФЕЙСА ===
+
+      // Обработчик кнопки сохранения акта
+      document.getElementById('saveManualBtn').addEventListener('click', saveNewAct);
+
+      // Обработчик кнопки обновления журнала
+      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
+
+      // Обработчик изменения фильтров
+      document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
+      document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
+      document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
+
+      // Обработчики для загрузки Excel файла
+      const uploadArea = document.getElementById('verificationUploadArea');
+      const fileInput = document.getElementById('verificationFileInput');
+
+      uploadArea.addEventListener('click', () => fileInput.click());
+      uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+      });
+      uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+      });
+      uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+          handleExcelFile(files[0]);
+        }
+      });
+
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          handleExcelFile(e.target.files[0]);
+        }
+      });
+
+      // Обработчик кнопки проверки (унифицирован)
+      const startBtn2 = document.getElementById('startVerificationBtn');
+      startBtn2.addEventListener('click', () => {
+        const file = fileInput.files[0];
+        if (file) {
+          compareWithExcel(file);
+        } else {
+          fileInput.click();
+        }
+      });
+
+      function handleExcelFile(file) {
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+          document.getElementById('startVerificationBtn').disabled = false;
+          showNotification('📄 Файл загружен: ' + file.name, 'success');
+        } else {
+          showNotification('❌ Поддерживаются только Excel файлы', 'error');
+        }
+      }
+    });
+
+    // === ФУНКЦИИ ДЛЯ LIQUID GLASS ИНТЕРФЕЙСА ===
+
+    // Загрузка и отображение журнала актов
+    async function loadJournalActs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        const camera = document.getElementById('logsCameraFilter').value;
+        
+        const params = new URLSearchParams();
+        if (dateFrom) params.append('date_from', dateFrom);
+        if (dateTo) params.append('date_to', dateTo);
+        if (camera) params.append('camera', camera);
+        
+        const response = await fetch(`/api/journal/acts?${params}`);
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        displayJournalActs(data);
+        
+      } catch (error) {
+        console.error('Ошибка загрузки актов:', error);
+        document.getElementById('journalList').innerHTML = `
+          <div class="journal-empty">❌ Ошибка загрузки: ${error.message}</div>
+        `;
+      }
+    }
+
+    // Отображение актов в журнале
+    function displayJournalActs(data) {
+      // Обновляем статистику
+      document.getElementById('journalTotalActs').textContent = data.summary.total_acts;
+      document.getElementById('journalTotalCount').textContent = data.summary.total_count;
+      document.getElementById('journalTotalWeight').textContent = data.summary.total_weight;
+      document.getElementById('journalAvgWeight').textContent = data.summary.avg_weight;
+      
+      // Отображаем список актов
+      const journalList = document.getElementById('journalList');
+      
+      if (data.acts.length === 0) {
+        journalList.innerHTML = '<div class="journal-empty">📝 Нет актов взвешивания</div>';
+        return;
+      }
+      
+      journalList.innerHTML = data.acts.map(act => `
+        <div class="journal-item">
+          <div class="journal-item-info">
+            <div class="journal-item-date">${act.date}</div>
+            <div class="journal-item-time">${act.time}</div>
+            <div class="journal-item-metrics">
+              <div class="journal-item-metric">
+                <div class="journal-item-metric-value">${act.count}</div>
+                <div class="journal-item-metric-label">голов</div>
+              </div>
+              <div class="journal-item-metric">
+                <div class="journal-item-metric-value">${act.weight}</div>
+                <div class="journal-item-metric-label">кг</div>
+              </div>
+              <div class="journal-item-metric">
+                <div class="journal-item-metric-value">${(act.weight / act.count).toFixed(1)}</div>
+                <div class="journal-item-metric-label">кг/гол</div>
+              </div>
+            </div>
+          </div>
+          <div class="journal-item-camera">${act.camera}</div>
+        </div>
+      `).join('');
+    }
+
+    // Сохранение нового акта
+    async function saveNewAct() {
+      try {
+        const count = parseInt(document.getElementById('manualCount').value);
+        const weight = parseFloat(document.getElementById('manualTotalWeight').value);
+        
+        if (!count || count <= 0) {
+          showNotification('⚠️ Введите количество голов', 'warning');
+          return;
+        }
+        
+        if (!weight || weight <= 0) {
+          showNotification('⚠️ Введите общий вес', 'warning');
+          return;
+        }
+        
+        const response = await fetch('/api/journal/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            count: count,
+            weight: weight,
+            camera: 'cam1'
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        
+        // Очищаем форму
+        document.getElementById('manualCount').value = '';
+        document.getElementById('manualTotalWeight').value = '';
+        
+        // Обновляем журнал если он открыт
+        if (document.getElementById('logsPanel').style.display !== 'none') {
+          loadJournalActs();
+        }
+        
+        showNotification('✅ Акт взвешивания сохранен', 'success');
+        
+      } catch (error) {
+        console.error('Ошибка сохранения акта:', error);
+        showNotification('❌ Ошибка: ' + error.message, 'error');
+      }
+    }
+
+    // Сверка с Excel файлом
+    async function compareWithExcel(file) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/journal/compare', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        
+        displayComparisonResults(result);
+        
+      } catch (error) {
+        console.error('Ошибка сверки:', error);
+        showNotification('❌ Ошибка сверки: ' + error.message, 'error');
+      }
+    }
+
+    // Отображение результатов сверки
+    function displayComparisonResults(result) {
+      document.getElementById('verificationMatches').textContent = result.matches || 0;
+      document.getElementById('verificationDiffs').textContent = result.differences || 0;
+      
+      const resultsContainer = document.getElementById('verificationResults');
+      resultsContainer.style.display = 'block';
+      
+      const statusClass = result.status === 'success' ? 'journal-comparison-success' : 
+                         result.status === 'warning' ? 'journal-comparison-warning' : 
+                         'journal-comparison-error';
+      
+      resultsContainer.className = `journal-comparison-result ${statusClass}`;
+      
+      resultsContainer.innerHTML = `
+        <h4 style="margin: 0 0 12px 0; color: var(--text);">${result.message}</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Excel файл:</h5>
+            <p style="margin: 0; font-size: 13px;">
+              Количество: ${result.comparison.excel.total_count}<br>
+              Вес: ${result.comparison.excel.total_weight} кг<br>
+              Записей: ${result.comparison.excel.rows}
+            </p>
+          </div>
+          <div>
+            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Наши акты:</h5>
+            <p style="margin: 0; font-size: 13px;">
+              Количество: ${result.comparison.acts.total_count}<br>
+              Вес: ${result.comparison.acts.total_weight} кг<br>
+              Записей: ${result.comparison.acts.rows}
+            </p>
+          </div>
+        </div>
+        ${result.comparison.differences ? `
+          <div style="margin-top: 12px; padding: 8px; background: rgba(255,193,7,0.1); border-radius: 6px; font-size: 12px;">
+            <strong>Расхождения:</strong><br>
+            Количество: ±${result.comparison.differences.count_diff} (${result.comparison.differences.count_diff_percent}%)<br>
+            Вес: ±${result.comparison.differences.weight_diff} кг (${result.comparison.differences.weight_diff_percent}%)
+          </div>
+        ` : ''}
+      `;
+      
+      showNotification('📊 Сверка выполнена', 'info');
+    }
+
+    // Уведомления
+    function showNotification(message, type = 'info') {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: var(--journal-glass);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--journal-border);
+        border-radius: var(--radius-md);
+        padding: 12px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        z-index: 10000;
+        transition: all 0.3s ease;
+        transform: translateX(100%);
+        opacity: 0;
+        max-width: 300px;
+        border-left-width: 4px;
+      `;
+      
+      if (type === 'success') notification.style.borderLeftColor = '#28a745';
+      else if (type === 'error') notification.style.borderLeftColor = '#dc3545';
+      else if (type === 'warning') notification.style.borderLeftColor = '#ffc107';
+      else notification.style.borderLeftColor = '#10addd';
+      
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+        notification.style.opacity = '1';
+      }, 100);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 300);
+      }, 3000);
+    }
+
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</body>
+</html>
