@@ -25,10 +25,10 @@ class InferenceWorker:
     Uses model adapter (simple ultralytics fallback here).
     """
 
-    def __init__(self, stream_id: str, batch_size: int = 8, max_wait_ms: int = 50):
+    def __init__(self, stream_id: str, batch_size: int = 1, max_wait_ms: int = 20):
         self.stream_id = stream_id
-        self.batch_size = int(batch_size)  # Увеличено до 8 по умолчанию
-        self.max_wait_ms = int(max_wait_ms)
+        self.batch_size = int(batch_size)  # Минимальный батч для максимального приоритета лайва
+        self.max_wait_ms = int(max_wait_ms)  # Еще быстрее для максимального приоритета лайва
         self._task: Optional[asyncio.Task] = None
         self._running = False
 
@@ -82,17 +82,17 @@ class InferenceWorker:
         logger.info(f"{self.stream_id}: размер={batch_size}, обнаружено={detections}, fps={fps:.1f}, инференс={inference_time*1000:.0f}мс")
 
     async def _run(self):
-        q = FRAME_BROKER.subscribe(self.stream_id, max_queue=32)
+        q = FRAME_BROKER.subscribe(self.stream_id, max_queue=4)  # Минимальная очередь для максимального приоритета лайва
         try:
             while self._running:
                 # gather first item
                 batch_start = time.time()
                 try:
-                    first = await asyncio.wait_for(q.get(), timeout=1.0)
+                    first = await asyncio.wait_for(q.get(), timeout=0.05)  # Максимально быстрый timeout для лайва
                 except asyncio.TimeoutError:
                     continue
                 batch = [first]
-                # collect until batch_size or max_wait
+                # collect until batch_size or max_wait (очень агрессивно)
                 while len(batch) < self.batch_size:
                     remaining = max(0.0, (self.max_wait_ms / 1000.0) - (time.time() - batch_start))
                     if remaining <= 0:
@@ -180,7 +180,7 @@ class InferenceWorker:
                                 from core.results_store import RESULTS_STORE as _RS
                                 from api.app import STREAM_MANAGER
                                 nowt = time.time()
-                                MIN_INTERVAL = float(os.getenv('BROADCAST_MIN_INTERVAL', '0.09'))  # seconds ~11 Hz
+                                MIN_INTERVAL = float(os.getenv('BROADCAST_MIN_INTERVAL', '0.05'))  # seconds ~20 Hz для плавности видео
                                 if not hasattr(self, '_last_broadcast'):
                                     self._last_broadcast = {}
                                 last = self._last_broadcast.get(self.stream_id, 0.0)
@@ -196,8 +196,7 @@ class InferenceWorker:
                                             changed = True
                                 except Exception:
                                     changed = True
-                                must_send_masks = bool(res.get('masks'))
-                                if (changed or must_send_masks) and (nowt - last) >= MIN_INTERVAL:
+                                if changed and (nowt - last) >= MIN_INTERVAL:
                                     # Обновляем last_masks для серверного WebRTC-оверлея (нормализованные маски)
                                     try:
                                         stream = STREAM_MANAGER.streams.get(self.stream_id)

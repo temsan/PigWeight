@@ -25,11 +25,7 @@ ONNX_PATH = os.getenv("ONNX_PATH", "models/yolo11n.onnx")
 MODEL_URL = os.getenv("MODEL_URL", "")
 
 # Debug and hot-reload settings
-# DEBUG=false по умолчанию; LOG_LEVEL можно задать напрямую
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-if not DEBUG and not os.getenv("LOG_LEVEL"):
-    # Явно задаём INFO, чтобы исключить случайный debug от uvicorn
-    os.environ["LOG_LEVEL"] = "info"
 RELOAD = os.getenv("RELOAD", "true" if DEBUG else "false").lower() == "true"
 
 # Set model path based on detection mode
@@ -154,7 +150,7 @@ def main():
                 host=HOST,
                 port=PORT,
                 reload=RELOAD or DEBUG,  # Релоад включается, если включён RELOAD или DEBUG
-                log_level=os.getenv("LOG_LEVEL", ("debug" if DEBUG else "info")),
+                log_level="debug" if DEBUG else "info",
                 # Явно указываем, ЧТО отслеживать, чтобы не реагировать на записи в logs/*
                 reload_dirs=[
                     str(Path(__file__).parent / "api"),
