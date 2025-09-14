@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PigWeight MVP</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -59,9 +60,16 @@
     /* Стили для вкладок в стиле liquid glass */
     .journal-tabs {
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap; /* Prevent wrapping */
       gap: 8px;
       margin-bottom: 12px;
+      overflow-x: auto; /* Allow horizontal scrolling */
+      /* Hide scrollbar for a cleaner look */
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none;  /* IE and Edge */
+    }
+    .journal-tabs::-webkit-scrollbar {
+      display: none; /* Chrome, Safari, and Opera */
     }
     .journal-tab-btn {
       background: var(--liquid-glass-bg);
@@ -74,13 +82,15 @@
       transition: all 0.2s ease;
       cursor: pointer;
     }
-    .journal-tab-btn:hover {
-      background: var(--liquid-glass-hover);
+    .journal-tab-btn:not(.active):hover {
+      background: var(--accent-color);
+      color: #fff;
     }
     .journal-tab-btn.active {
       background: var(--liquid-glass-active);
       border-color: rgba(124, 199, 255, 0.35);
       box-shadow: 0 4px 12px rgba(31, 38, 135, 0.15);
+      color: var(--text-primary);
     }
     .right-col{ padding:8px !important; }
     .right-col .journal-tabs{ margin:0 0 4px 0 !important; }
@@ -108,6 +118,42 @@
       color: var(--text-primary);
       padding: 0 8px;
     }
+
+    /* Responsive Adjustments */
+    @media (max-width: 1024px) {
+      .top-toolbar .container {
+        flex-wrap: wrap !important;
+      }
+      .seek-wrap {
+        min-width: 320px !important;
+      }
+    }
+
+    @media (max-width: 768px) {
+      body, html {
+        overflow: auto !important;
+      }
+      .main-flex {
+        flex-direction: column;
+        height: auto !important;
+        padding-top: 150px !important; /* Adjust based on new toolbar height */
+      }
+      .left-col, .right-col {
+        position: static !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        margin-bottom: 12px;
+      }
+      #videoWrapper {
+        position: relative !important;
+        height: 50vh !important; /* Or any other suitable height */
+      }
+      .right-col {
+        top: auto; right: auto; bottom: auto;
+        height: auto;
+      }
+    }
   </style>
 </head>
 <body style="overflow:hidden;">
@@ -124,8 +170,8 @@
           <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">
         </label>
         <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">Старт</button>
-        <div style="display:flex; align-items:center; gap:4px; flex:0 0 auto; order:2; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 8px;">
-          <label style="font-size:13px; color:var(--text-secondary);">Транспорт:</label>
+        <div style="display:flex; align-items:center; gap:2px; flex:0 0 auto; order:2; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 6px;">
+          <label style="font-size:12px; color:var(--text-secondary); padding-left: 2px;">Транспорт:</label>
           <select id="transportSelect" style="height:32px; background: transparent; border: none; color: var(--text-primary); font-weight: 500;">
             <option value="mjpeg">MJPEG</option>
             <option value="webrtc" selected>WebRTC</option>
@@ -135,7 +181,7 @@
                 style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">
           <!-- icon injected by JS -->
         </button>
-        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">
+        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px; resize: horizontal; overflow: hidden;">
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
@@ -156,7 +202,7 @@
             </div>
           </div>
         </div>
-        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 380px); min-width:var(--sidebar-width, 380px); max-width:var(--sidebar-width, 380px); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow:auto; scrollbar-gutter: stable both-edges; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
+        <div class="right-col rounded-xl" style="width:var(--sidebar-width, 380px); min-width:var(--sidebar-width, 380px); max-width:var(--sidebar-width, 380px); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow-y:auto; scrollbar-width: none; -ms-overflow-style: none; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
             <button class="journal-tab-btn active" onclick="switchPanel('live')">
@@ -216,11 +262,11 @@
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                 <div>
                   <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Количество голов</label>
-                  <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0">
+                  <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center; width: 100%; box-sizing: border-box;" placeholder="0">
                 </div>
                 <div>
                   <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Общий вес (кг)</label>
-                  <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center;" placeholder="0.0">
+                  <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center; width: 100%; box-sizing: border-box;" placeholder="0.0">
                 </div>
               </div>
 
@@ -560,43 +606,49 @@
 
     async function populateStreams() {
         const streams = await getStreams();
+        const streamRadios = document.getElementById('streamRadios');
         streamRadios.innerHTML = '';
         const ids = Object.keys(streams);
+
         if (ids.length === 0) {
-            // No cameras configured in .env
-            streamRadios.innerHTML = '<span style="opacity:.6;">Нет камер</span>';
+            streamRadios.innerHTML = '<span style="opacity:.6; padding: 6px 10px; display: inline-block;">Нет камер</span>';
             return;
         }
+
+        const select = document.createElement('select');
+        select.id = 'streamSelect';
+        select.style.cssText = `
+            height: 32px;
+            background: var(--liquid-glass-bg);
+            border: 1px solid var(--liquid-glass-border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            padding: 0 8px;
+            font-weight: 500;
+            min-width: 100px;
+        `;
+
         ids.forEach((id, idx) => {
             streamSources[id] = streams[id];
-            const radio = document.createElement('input');
-            radio.type = 'radio';
-            radio.name = 'streamRadio';
-            radio.value = id;
-            radio.id = 'stream_' + id;
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = id;
             if (idx === 0) {
-                radio.checked = true;
+                option.selected = true;
                 activeStreamId = id;
             }
-            radio.style.display = 'none';
-            radio.addEventListener('change', async () => {
-                if (radio.checked) {
-                    const prev = activeStreamId;
-                    if (prev && prev !== id) {
-                        await stopStream(prev);
-                    }
-                    activeStreamId = id;
-                }
-            });
-
-            const label = document.createElement('label');
-            label.htmlFor = radio.id;
-            label.textContent = id;
-            label.className = 'toggle-btn' + (idx === 0 ? ' selected' : '');
-
-            streamRadios.appendChild(radio);
-            streamRadios.appendChild(label);
+            select.appendChild(option);
         });
+
+        select.addEventListener('change', async (e) => {
+            const newStreamId = e.target.value;
+            if (activeStreamId && activeStreamId !== newStreamId) {
+                await stopStream(activeStreamId);
+            }
+            activeStreamId = newStreamId;
+        });
+
+        streamRadios.appendChild(select);
     }
 
     async function startStream(streamId, sourceUri) {
