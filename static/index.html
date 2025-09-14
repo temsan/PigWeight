@@ -30,6 +30,8 @@
     .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
     .flow-title { font-size:12px; color:#2f5078; opacity:.8; }
     .journal-stat-value { font-size: 28px !important; font-weight: 700; color: var(--text-primary); line-height: 1; }
+    .journal-stat-card.stat-minor .journal-stat-value { font-size: 22px !important; font-weight: 600; }
+    .journal-stat-card.stat-minor .journal-stat-label { font-size: 11px; opacity: 0.8; }
     /* Fullscreen video mode */
     body.fs, html.fs { overflow:hidden; }
     body.fs #main-container { padding-top:0; }
@@ -227,7 +229,7 @@
           <div id="livePanel" class="panel-content active" style="padding:0;">
             <div class="journal-container">
               <!-- Счетчики потока -->
-              <div class="journal-stats" style="grid-template-columns: 1fr 1fr;">
+              <div class="journal-stats" style="grid-template-columns: 1fr 1fr 1fr;">
                 <div class="journal-stat-card">
                   <div class="journal-stat-value" id="leftIn" style="transition: color 0.3s ease;">0</div>
                   <div class="journal-stat-label">Слева (вход)</div>
@@ -235,6 +237,10 @@
                 <div class="journal-stat-card">
                   <div class="journal-stat-value" id="rightIn" style="transition: color 0.3s ease;">0</div>
                   <div class="journal-stat-label">Справа (вход)</div>
+                </div>
+                <div class="journal-stat-card stat-minor">
+                  <div class="journal-stat-value" id="totalCrossings" style="transition: color 0.3s ease;">0</div>
+                  <div class="journal-stat-label">Всего пересечений</div>
                 </div>
               </div>
 
@@ -439,6 +445,25 @@
     <!-- Убрана нижняя таблица истории для полноценного полноэкранного интерфейса -->
   </div>
   <script>
+    // --- TABS and PANELS --- 
+    function switchPanel(panelName) {
+      const panels = document.querySelectorAll('.panel-content');
+      const tabs = document.querySelectorAll('.journal-tab-btn');
+      
+      panels.forEach(p => p.style.display = 'none');
+      tabs.forEach(t => t.classList.remove('active'));
+      
+      document.getElementById(`${panelName}Panel`).style.display = 'block';
+      const activeTab = document.querySelector(`.journal-tab-btn[onclick="switchPanel('${panelName}')"]`);
+      if (activeTab) activeTab.classList.add('active');
+
+      // Load data for panel if it's the first time opening it
+      if (panelName === 'logs' && !document.getElementById('logsPanel').dataset.loaded) {
+        loadJournalActs();
+        document.getElementById('logsPanel').dataset.loaded = 'true';
+      }
+    }
+
     const videoStream = document.getElementById('videoStream');
     const overlayCanvas = document.getElementById('overlayCanvas');
     const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
@@ -472,13 +497,17 @@
     let lastIds = null; // last ids from WS
     let lastMasks = null; // last masks from WS
     let overlayBlockUntil = 0;
-    const leftInEl = document.getElementById('leftIn');
-    const rightInEl = document.getElementById('rightIn');
-    
     // Переменные для отслеживания изменений
     let lastTotalCrossings = 0;
     let lastLeftIn = 0;
     let lastRightIn = 0;
+    // Переменные для отслеживания изменений
+    let lastTotalCrossings = 0;
+    let lastLeftIn = 0;
+    let lastRightIn = 0;
+    const leftInEl = document.getElementById('leftIn');
+    const rightInEl = document.getElementById('rightIn');
+    const totalCrossingsEl = document.getElementById('totalCrossings');
     const actPeakEl = document.getElementById('actPeak');
     const actDurEl = document.getElementById('actDur');
     const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -853,6 +882,7 @@
         try { 
             leftInEl.textContent = '0'; 
             rightInEl.textContent = '0'; 
+            totalCrossingsEl.textContent = '0';
             // Сбрасываем отслеживание изменений
             lastLeftIn = 0;
             lastRightIn = 0;
@@ -940,7 +970,139 @@
                             animateCounterChange(rightInEl, rightInCount, lastRightIn);
                             lastRightIn = rightInCount;
                         }
-                        
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
+                        if (totalCrossingsCount !== lastTotalCrossings) {
+                            totalCrossingsEl.textContent = String(totalCrossingsCount);
+                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+                            lastTotalCrossings = totalCrossingsCount;
+                        }
+
                         if (totalCrossingsCount !== lastTotalCrossings) {
                             totalCrossingsEl.textContent = String(totalCrossingsCount);
                             animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
@@ -1075,18 +1237,9 @@
 
     function syncOverlaySize() {
         const wrapper = document.getElementById('videoWrapper');
-        const w = wrapper ? wrapper.clientWidth : videoStream.clientWidth;
-        const h = wrapper ? wrapper.clientHeight : videoStream.clientHeight;
-        if (!w || !h) return;
-        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-        const bw = Math.floor(w * dpr);
-        const bh = Math.floor(h * dpr);
-        if (overlayCanvas.width !== bw || overlayCanvas.height !== bh) {
-            overlayCanvas.width = bw;
-            overlayCanvas.height = bh;
-            overlayCanvas.style.width = w + 'px';
-            overlayCanvas.style.height = h + 'px';
-        }
+        if (!wrapper) return;
+        wrapper.style.height = window.innerHeight + 'px';
+        syncOverlaySize();
     }
 
     function getRenderedImageRect() {
@@ -1182,7 +1335,7 @@
             ctx.beginPath();
             ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
             ctx.fill();
-            // Подписи к линиям выключены по требованию UX
+            // Подписы к линиям выключены по требованию UX
             // Перетаскивание линий отсечки мышью/тапом
             try {
                 if (!window.__linesDragInit) {
@@ -1251,9 +1404,9 @@
                             // Сохраняем в localStorage для текущего файла
                             const currentFileName = fileInputLabel.title;
                             if (currentFileName && currentFileName !== 'Открыть видеофайл') {
-                                saveLinePositions(currentFileName, left_x, right_x);
+                                saveLinePositions(currentFileName, leftX, rightX);
                             }
-                        } catch(_) {}
+                        } catch (_) {}
                         overlayCanvas.style.cursor = 'crosshair';
                         window.__isDraggingLines = false;
                     };
@@ -1265,7 +1418,7 @@
                     overlayCanvas.addEventListener('touchmove', onMove, {passive:false});
                     overlayCanvas.addEventListener('touchend', onUp);
                 }
-            } catch(_) {}
+            } catch (_) {}
             ctx.restore();
         } catch (e) {}
 
@@ -1446,6 +1599,7 @@
         const px = e.clientX - rectDom.left;
         const py = e.clientY - rectDom.top;
         const imgRect = getRenderedImageRect();
+
         // check topmost polygon first: iterate reversed
         let foundIdx = -1;
         for (let i = lastMasks.length - 1; i >= 0; i--) {
@@ -1460,7 +1614,7 @@
         if (trimmed === '') { delete idAliases[instId]; } else { idAliases[instId] = trimmed; }
         if (activeStreamId) saveAliases(activeStreamId);
         drawOverlay(lastMasks, lastIds);
-    });
+    }
 
     // Keyboard seek (Left/Right arrows). Shift=±1s, Ctrl=±5s, иначе ±step
     function setSeekUIVal(t) {
@@ -1656,7 +1810,7 @@
         // update icon
         fullscreenBtn.innerHTML = on
           ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/><path d="M10 14l-4 4M14 10l4-4" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/></svg>'
-          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h4V5H5v6h2V7ZM13 7h4v4h2V5h-6v2ZM7 13H5v6h6v-2H7v-4ZM17 17h-4v2h6v-6h-2v4Z" fill="#1f3d6b"/></svg>';
+          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h4V5H5v6h2V7ZM13 7h4v4h2V5h-6v2ZM7 13H5v6h6v-2H7v-4ZM17 13h-4v2h6v-6h-2v4Z" fill="#1f3d6b"/></svg>';
         updateVideoLayout();
     }
     fullscreenBtn.addEventListener('click', () => {
@@ -1808,91 +1962,91 @@
     });
 
     document.addEventListener('DOMContentLoaded', async () => {
-        // Принудительно устанавливаем WebRTC как приоритетный транспорт
-        const transportSelect = document.getElementById('transportSelect');
-        if (transportSelect) {
-            transportSelect.value = 'webrtc';
-            // Убеждаемся что WebRTC выбран по умолчанию
-            const webrtcOption = transportSelect.querySelector('option[value="webrtc"]');
-            if (webrtcOption) {
-                webrtcOption.selected = true;
-            }
+      // Принудительно устанавливаем WebRTC как приоритетный транспорт
+      const transportSelect = document.getElementById('transportSelect');
+      if (transportSelect) {
+        transportSelect.value = 'webrtc';
+        // Убеждаемся что WebRTC выбран по умолчанию
+        const webrtcOption = transportSelect.querySelector('option[value="webrtc"]');
+        if (webrtcOption) {
+          webrtcOption.selected = true;
         }
-        
-        populateStreams();
-        updateVideoLayout();
-        window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
-        setPlaceholder();
-        // Initialize fullscreen button icon
-        try { setFsState(false); } catch (e) {}
-        // Worker disabled for now to avoid seek freezes
-        // Load and display history from localStorage
+      }
+      
+      populateStreams();
+      updateVideoLayout();
+      window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
+      setPlaceholder();
+      // Initialize fullscreen button icon
+      try { setFsState(false); } catch (e) {}
+      // Worker disabled for now to avoid seek freezes
+      // Load and display history from localStorage
+      const history = JSON.parse(localStorage.getItem('history') || '[]');
+      history.forEach(item => {
+        const row = historyTable.insertRow();
+        row.insertCell().textContent = item.date;
+        row.insertCell().textContent = item.camera;
+        row.insertCell().textContent = item.count;
+        row.insertCell().textContent = item.total_weight;
+        row.insertCell().textContent = item.avg_weight;
+      });
+
+      // Save button logic
+      document.getElementById('saveManualBtn').addEventListener('click', () => {
         const history = JSON.parse(localStorage.getItem('history') || '[]');
-        history.forEach(item => {
-            const row = historyTable.insertRow();
-            row.insertCell().textContent = item.date;
-            row.insertCell().textContent = item.camera;
-            row.insertCell().textContent = item.count;
-            row.insertCell().textContent = item.total_weight;
-            row.insertCell().textContent = item.avg_weight;
-        });
+        const newEntry = {
+          date: new Date().toLocaleString(),
+          camera: activeStreamId,
+          count: document.getElementById('manualCount').value,
+          total_weight: document.getElementById('manualTotalWeight').value,
+          avg_weight: document.getElementById('manualAvgWeight').value
+        };
+        history.unshift(newEntry);
+        localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+        updateHistory();
+      });
 
-        // Save button logic
-        document.getElementById('saveManualBtn').addEventListener('click', () => {
-            const history = JSON.parse(localStorage.getItem('history') || '[]');
-            const newEntry = {
-                date: new Date().toLocaleString(),
-                camera: activeStreamId,
-                count: document.getElementById('manualCount').value,
-                total_weight: document.getElementById('manualTotalWeight').value,
-                avg_weight: document.getElementById('manualAvgWeight').value
-            };
-            history.unshift(newEntry);
-            localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
-            updateHistory();
-        });
-
-        // Autostart the default stream
-        const streams = await getStreams();
-        const defaultStreamId = Object.keys(streams)[0];
-        const defaultSourceUri = streams[defaultStreamId];
-        if (defaultStreamId && defaultSourceUri) {
-            // Не автозапускаем демо; просто инициализируем источники
-            activeStreamId = defaultStreamId;
-            streamSources[defaultStreamId] = defaultSourceUri;
-            isVideoPlaying = false;
-            videoPlayPauseBtn.textContent = 'Старт';
-        }
+      // Autostart the default stream
+      const streams = await getStreams();
+      const defaultStreamId = Object.keys(streams)[0];
+      const defaultSourceUri = streams[defaultStreamId];
+      if (defaultStreamId && defaultSourceUri) {
+        // Не автозапускаем демо; просто инициализируем источники
+        activeStreamId = defaultStreamId;
+        streamSources[defaultStreamId] = defaultSourceUri;
+        isVideoPlaying = false;
+        videoPlayPauseBtn.textContent = 'Старт';
+      }
     });
 
     function updateHistory() {
-        const historyTable = document.getElementById('historyTable');
-        if (!historyTable) return;
-        historyTable.innerHTML = '';
-        const history = JSON.parse(localStorage.getItem('history') || '[]');
-        history.forEach(item => {
-            const row = historyTable.insertRow();
-            row.insertCell().textContent = item.date;
-            row.insertCell().textContent = item.camera;
-            row.insertCell().textContent = item.count;
-            row.insertCell().textContent = item.total_weight;
-            row.insertCell().textContent = item.avg_weight;
-        });
+      const historyTable = document.getElementById('historyTable');
+      if (!historyTable) return;
+      historyTable.innerHTML = '';
+      const history = JSON.parse(localStorage.getItem('history') || '[]');
+      history.forEach(item => {
+        const row = historyTable.insertRow();
+        row.insertCell().textContent = item.date;
+        row.insertCell().textContent = item.camera;
+        row.insertCell().textContent = item.count;
+        row.insertCell().textContent = item.total_weight;
+        row.insertCell().textContent = item.avg_weight;
+      });
     }
 
     function recalcAvgWeight() {
-        const countEl = document.getElementById('manualCount');
-        const totalEl = document.getElementById('manualTotalWeight');
-        const avgEl = document.getElementById('manualAvgWeight');
-        if (!countEl || !totalEl || !avgEl) return;
-        const count = parseInt(countEl.value);
-        const totalWeight = parseFloat(totalEl.value);
-        if (count > 0 && totalWeight > 0) {
-            const avgWeight = totalWeight / count;
-            avgEl.value = avgWeight.toFixed(2);
-        } else {
-            avgEl.value = '';
-        }
+      const countEl = document.getElementById('manualCount');
+      const totalEl = document.getElementById('manualTotalWeight');
+      const avgEl = document.getElementById('manualAvgWeight');
+      if (!countEl || !totalEl || !avgEl) return;
+      const count = parseInt(countEl.value);
+      const totalWeight = parseFloat(totalEl.value);
+      if (count > 0 && totalWeight > 0) {
+        const avgWeight = totalWeight / count;
+        avgEl.value = avgWeight.toFixed(2);
+      } else {
+        avgEl.value = '';
+      }
     }
 
     const manualCountEl = document.getElementById('manualCount');
@@ -1973,7 +2127,7 @@
                 padding: 8px 10px;
                 border-radius: 6px;
                 background: rgba(255,255,255,0.7);
-                border: 1px solid rgba(60,90,140,0.1);
+                border: 1px solid rgba(60,90,140,.12);
                 font-size: 12px;
                 cursor: pointer;
                 transition: all 0.2s ease;
@@ -2069,7 +2223,7 @@
           padding: 8px 12px;
           border-radius: 6px;
           background: rgba(255,255,255,0.7);
-          border: 1px solid rgba(60,90,140,0.1);
+          border: 1px solid rgba(60,90,140,.12);
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -2154,7 +2308,7 @@
         analyzeFilesBtn.disabled = false;
         analyzeFilesBtn.textContent = 'Анализировать';
       }
-    });
+    };
 
     // Обновление верификации
     document.getElementById('refreshVerificationBtn').addEventListener('click', loadVerificationData);
@@ -2222,7 +2376,7 @@
         console.error('Error generating report:', error);
         alert('Ошибка при генерации отчета: ' + error.message);
       }
-    });
+    };
 
 
     // === ОБРАБОТЧИКИ СОБЫТИЙ ===
@@ -2248,102 +2402,33 @@
       uploadArea.addEventListener('click', () => fileInput.click());
       uploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        uploadArea.classList.add('dragover');
+        uploadArea.style.borderColor = '#007bff';
+        uploadArea.style.background = 'rgba(0,123,255,0.05)';
       });
       uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
+        uploadArea.style.borderColor = '#ccc';
+        uploadArea.style.background = 'rgba(255,255,255,0.5)';
       });
       uploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadArea.classList.remove('dragover');
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-          handleExcelFile(files[0]);
-        }
+        uploadArea.style.borderColor = '#ccc';
+        uploadArea.style.background = 'rgba(255,255,255,0.5)';
+        handleExcelFile(e.dataTransfer.files);
       });
 
-      fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-          handleExcelFile(e.target.files[0]);
-    // Обработка файла для сверки
-    function handleVerificationFile() {
-      const file = document.getElementById('verificationFileInput').files[0];
-      const startBtn = document.getElementById('startVerificationBtn');
-      if (file) {
-        document.querySelector('#verificationUploadArea div div').textContent = `📎 ${file.name}`;
-        startBtn.disabled = false;
-      } else {
-        startBtn.disabled = true;
-      }
-    }
+      fileInput.addEventListener('change', (e) => handleExcelFile(e.target.files));
 
-    // Начало сверки
-    async function startVerification() {
-      try {
-        const fileInput = document.getElementById('verificationFileInput');
-        if (!fileInput.files[0]) {
-          alert('Пожалуйста, выберите файл для сверки');
-          return;
-        }
+      // === ВЕРИФИКАЦИЯ И АНАЛИЗ ===
 
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
+      // Обработчик кнопки сверки
+      document.getElementById('startVerificationBtn').addEventListener('click', startVerification);
 
-        const response = await fetch('/api/journal/compare', {
-          method: 'POST',
-          body: formData
-        });
+      // Обработчик кнопки экспорта журнала
+      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
 
-        const result = await response.json();
-
-        if (response.ok) {
-          displayVerificationResults(result);
-        } else {
-          alert('Ошибка сверки: ' + (result.detail || 'Неизвестная ошибка'));
-        }
-      } catch (error) {
-        console.error('Error during verification:', error);
-        alert('Ошибка сверки: ' + error.message);
-      }
-    }
-
-    // Отображение результатов сверки
-    function displayVerificationResults(result) {
-      document.getElementById('verificationMatches').textContent = result.matches || 0;
-      document.getElementById('verificationDiffs').textContent = result.differences || 0;
-      document.getElementById('verificationMissing').textContent = result.missing || 0;
-
-      const resultsContainer = document.getElementById('verificationResults');
-      resultsContainer.innerHTML = '';
-
-      if (result.details && result.details.length > 0) {
-        result.details.forEach(item => {
-          const resultItem = document.createElement('div');
-          resultItem.style.cssText = `
-            padding: 6px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            margin-bottom: 4px;
-            ${item.status === 'match' ? 'background: rgba(40,167,69,0.1); border: 1px solid rgba(40,167,69,0.2);' :
-              item.status === 'diff' ? 'background: rgba(255,193,7,0.1); border: 1px solid rgba(255,193,7,0.2);' :
-              'background: rgba(220,53,69,0.1); border: 1px solid rgba(220,53,69,0.2);'}
-          `;
-          
-          const statusIcon = item.status === 'match' ? '✅' : item.status === 'diff' ? '⚠️' : '❌';
-          resultItem.innerHTML = `
-            <div><strong>${statusIcon} ${item.group} (${item.date})</strong></div>
-            <div style="margin-top:2px;">
-              Система: ${item.system_weight}кг (${item.system_count}шт) | 
-              Файл: ${item.file_weight}кг (${item.file_count}шт)
-            </div>
-          `;
-          
-          resultsContainer.appendChild(resultItem);
-        });
-      } else {
-        resultsContainer.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет данных для отображения</div>';
-      }
-    }
+      // Обработчик кнопки экспорта результатов сверки
+      document.getElementById('exportVerificationResultsBtn').addEventListener('click', exportVerificationResults);
+    });
 
     // === ФУНКЦИИ ДЛЯ LIQUID GLASS ИНТЕРФЕЙСА ===
 
@@ -2511,16 +2596,16 @@
           <div>
             <h5 style="margin: 0 0 8px 0; color: var(--muted);">Excel файл:</h5>
             <p style="margin: 0; font-size: 13px;">
-              Количество: ${result.comparison.excel.total_count}<br>
-              Вес: ${result.comparison.excel.total_weight} кг<br>
+              Количество: ${result.comparison.excel.total_count},
+              Вес: ${result.comparison.excel.total_weight} кг,
               Записей: ${result.comparison.excel.rows}
             </p>
           </div>
           <div>
             <h5 style="margin: 0 0 8px 0; color: var(--muted);">Наши акты:</h5>
             <p style="margin: 0; font-size: 13px;">
-              Количество: ${result.comparison.acts.total_count}<br>
-              Вес: ${result.comparison.acts.total_weight} кг<br>
+              Количество: ${result.comparison.acts.total_count},
+              Вес: ${result.comparison.acts.total_weight} кг,
               Записей: ${result.comparison.acts.rows}
             </p>
           </div>
@@ -2581,5 +2666,38 @@
 
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // --- ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ СТРАНИЦЫ ---
+    document.addEventListener('DOMContentLoaded', () => {
+      // Инициализация вкладок
+      switchPanel('live');
+
+      // Обработчики для панели взвешивания
+      document.getElementById('saveWeighingBtn').addEventListener('click', saveWeighingAct);
+      document.getElementById('weighingTotal').addEventListener('input', calculateAvgWeight);
+      document.getElementById('weighingWeight').addEventListener('input', calculateAvgWeight);
+
+      // Обработчики для панели журнала
+      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
+      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
+
+      // Обработчики для панели сверки
+      const verificationUploadArea = document.getElementById('verificationUploadArea');
+      const verificationFileInput = document.getElementById('verificationFileInput');
+      verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
+      verificationUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); verificationUploadArea.style.borderColor = '#007bff'; });
+      verificationUploadArea.addEventListener('dragleave', () => { verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)'; });
+      verificationUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)';
+        if (e.dataTransfer.files.length > 0) {
+          verificationFileInput.files = e.dataTransfer.files;
+          handleVerificationFileChange();
+        }
+      });
+      verificationFileInput.addEventListener('change', handleVerificationFileChange);
+      document.getElementById('startVerificationBtn').addEventListener('click', startVerification);
+    });
+  </script>
 </body>
 </html>
