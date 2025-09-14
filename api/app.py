@@ -2411,26 +2411,6 @@ async def save_weighing_act(data: Dict[str, Any]):
         logger.error(f"Error saving weighing act: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-@app.get("/api/weighing/logs")
-async def get_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
-    """Получение журнала актов взвешивания за период"""
-    try:
-        acts = load_weighing_acts()
-        
-        # Фильтруем по датам
-        filtered_acts = []
-        for act in acts:
-            if date_from <= act['date'] <= date_to:
-                filtered_acts.append(act)
-        
-        # Сортируем по дате и времени (новые сначала)
-        filtered_acts.sort(key=lambda x: (x['date'], x['time']), reverse=True)
-        
-        return filtered_acts
-        
-    except Exception as e:
-        logger.error(f"Error getting weighing logs: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/weighing/export")
 async def export_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):

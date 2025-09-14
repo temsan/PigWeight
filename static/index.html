@@ -29,6 +29,7 @@
     .flow-box { flex:1 1 0; display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; background:rgba(240,245,252,0.85); border:1px solid rgba(60,90,140,.12); text-align:center; }
     .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
     .flow-title { font-size:12px; color:#2f5078; opacity:.8; }
+    .journal-stat-value { font-size: 28px !important; font-weight: 700; color: var(--text-primary); line-height: 1; }
     /* Fullscreen video mode */
     body.fs, html.fs { overflow:hidden; }
     body.fs #main-container { padding-top:0; }
@@ -171,7 +172,6 @@
         </label>
         <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">Старт</button>
         <div style="display:flex; align-items:center; gap:2px; flex:0 0 auto; order:2; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 6px;">
-          <label style="font-size:12px; color:var(--text-secondary); padding-left: 2px;">Транспорт:</label>
           <select id="transportSelect" style="height:32px; background: transparent; border: none; color: var(--text-primary); font-weight: 500;">
             <option value="mjpeg">MJPEG</option>
             <option value="webrtc" selected>WebRTC</option>
@@ -227,14 +227,10 @@
           <div id="livePanel" class="panel-content active" style="padding:0;">
             <div class="journal-container">
               <!-- Счетчики потока -->
-              <div class="journal-stats">
+              <div class="journal-stats" style="grid-template-columns: 1fr 1fr;">
                 <div class="journal-stat-card">
                   <div class="journal-stat-value" id="leftIn" style="transition: color 0.3s ease;">0</div>
                   <div class="journal-stat-label">Слева (вход)</div>
-                </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="totalCrossings" style="transition: color 0.3s ease;">0</div>
-                  <div class="journal-stat-label">Всего пересечений</div>
                 </div>
                 <div class="journal-stat-card">
                   <div class="journal-stat-value" id="rightIn" style="transition: color 0.3s ease;">0</div>
@@ -478,7 +474,6 @@
     let overlayBlockUntil = 0;
     const leftInEl = document.getElementById('leftIn');
     const rightInEl = document.getElementById('rightIn');
-    const totalCrossingsEl = document.getElementById('totalCrossings');
     
     // Переменные для отслеживания изменений
     let lastTotalCrossings = 0;
@@ -858,7 +853,6 @@
         try { 
             leftInEl.textContent = '0'; 
             rightInEl.textContent = '0'; 
-            totalCrossingsEl.textContent = '0';
             // Сбрасываем отслеживание изменений
             lastLeftIn = 0;
             lastRightIn = 0;
@@ -963,7 +957,7 @@
                             modelInfo = ` | GPU: ${dev || 'cpu'} | Модель: ${m.name}${imgsz}`;
                         }
                     } catch (_) {}
-                    streamStatus.textContent = `Live | Всего пересечений: ${totalCrossingsCount} | Слева: ${leftInCount} | Справа: ${rightInCount}${modelInfo}`;
+                    streamStatus.textContent = `Слева: ${leftInCount} | Справа: ${rightInCount}${modelInfo}`;
                 }
                 if (data.debug && data.debug.act) {
                     const a = data.debug.act;
@@ -1934,16 +1928,11 @@
         targetBtn.classList.add('active');
       }
 
-      // Загружаем данные для журнала при переключении на него
-      if (panelName === 'logs') {
-        loadJournalActs();
-      }
-
       // Загружаем данные для панели
       if (panelName === 'weighing') {
         loadWeighingData();
       } else if (panelName === 'logs') {
-        loadLogsData();
+        loadJournalActs();
       } else if (panelName === 'verification') {
         loadVerificationData();
       }
@@ -2235,299 +2224,51 @@
       }
     });
 
-    // === ФУНКЦИИ ДЛЯ НОВЫХ ПАНЕЛЕЙ ===
-
-    // Загрузка данных взвешивания
-    function loadWeighingData() {
-      // Устанавливаем текущие дату и время
-      const now = new Date();
-      document.getElementById('weighingDate').value = now.toISOString().split('T')[0];
-      document.getElementById('weighingTime').value = now.toTimeString().slice(0, 5);
-      
-      // Обновляем счетчики из текущего потока
-      updateWeighingCounters();
-    }
-
-    // Обновление счетчиков взвешивания
-    function updateWeighingCounters() {
-      try {
-        const leftCount = parseInt(leftInEl.textContent) || 0;
-        const rightCount = parseInt(rightInEl.textContent) || 0;
-        const diff = Math.abs(leftCount - rightCount);
-        
-        document.getElementById('weighingLeftCount').textContent = leftCount;
-        document.getElementById('weighingRightCount').textContent = rightCount;
-        document.getElementById('weighingDiff').textContent = diff;
-        
-        // Автоматически заполняем общее количество
-        const totalField = document.getElementById('weighingTotal');
-        if (!totalField.value && leftCount > 0) {
-          totalField.value = leftCount;
-        }
-      } catch (e) {
-        console.error('Error updating weighing counters:', e);
-      }
-    }
-
-    // Расчет среднего веса
-    function calculateAvgWeight() {
-      const total = parseFloat(document.getElementById('weighingTotal').value) || 0;
-      const weight = parseFloat(document.getElementById('weighingWeight').value) || 0;
-      const avgField = document.getElementById('weighingAvgWeight');
-      
-      if (total > 0 && weight > 0) {
-        avgField.value = (weight / total).toFixed(2);
-      } else {
-        avgField.value = '';
-      }
-    }
-
-    // Сохранение акта взвешивания
-    async function saveWeighingAct() {
-      try {
-        const data = {
-          date: document.getElementById('weighingDate').value,
-          time: document.getElementById('weighingTime').value,
-          group: document.getElementById('weighingGroup').value,
-          total: parseInt(document.getElementById('weighingTotal').value) || 0,
-          weight: parseFloat(document.getElementById('weighingWeight').value) || 0,
-          avg_weight: parseFloat(document.getElementById('weighingAvgWeight').value) || 0,
-          left_count: parseInt(document.getElementById('weighingLeftCount').textContent) || 0,
-          right_count: parseInt(document.getElementById('weighingRightCount').textContent) || 0,
-          stream_id: activeStreamId
-        };
-
-        if (!data.date || !data.group || data.total <= 0 || data.weight <= 0) {
-          alert('Пожалуйста, заполните все обязательные поля');
-          return;
-        }
-
-        const response = await fetch('/api/weighing/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-
-        if (response.ok) {
-          alert('Акт взвешивания сохранен успешно!');
-          // Очищаем форму
-          document.getElementById('weighingGroup').value = '';
-          document.getElementById('weighingTotal').value = '';
-          document.getElementById('weighingWeight').value = '';
-          document.getElementById('weighingAvgWeight').value = '';
-        } else {
-          const error = await response.json();
-          alert('Ошибка сохранения: ' + (error.detail || 'Неизвестная ошибка'));
-        }
-      } catch (error) {
-        console.error('Error saving weighing act:', error);
-        alert('Ошибка сохранения: ' + error.message);
-      }
-    }
-
-    // Загрузка данных журналов
-    async function loadLogsData() {
-      try {
-        // Устанавливаем диапазон дат (последние 30 дней)
-        const now = new Date();
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        
-        document.getElementById('logsDateTo').value = now.toISOString().split('T')[0];
-        document.getElementById('logsDateFrom').value = monthAgo.toISOString().split('T')[0];
-        
-        await refreshLogs();
-      } catch (error) {
-        console.error('Error loading logs data:', error);
-      }
-    }
-
-    // Обновление журналов
-    async function refreshLogs() {
-      try {
-        const dateFrom = document.getElementById('logsDateFrom').value;
-        const dateTo = document.getElementById('logsDateTo').value;
-        
-        const response = await fetch(`/api/weighing/logs?date_from=${dateFrom}&date_to=${dateTo}`);
-        const data = await response.json();
-
-        const logsList = document.getElementById('logsList');
-        logsList.innerHTML = '';
-
-        if (data.length === 0) {
-          logsList.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет записей за выбранный период</div>';
-          return;
-        }
-
-        // Группируем по датам
-        const groupedByDate = {};
-        data.forEach(log => {
-          const date = log.date;
-          if (!groupedByDate[date]) {
-            groupedByDate[date] = [];
-          }
-          groupedByDate[date].push(log);
-        });
-
-        // Создаем группы с возможностью сворачивания
-        Object.keys(groupedByDate).sort().reverse().forEach(date => {
-          const logs = groupedByDate[date];
-          const dateGroup = document.createElement('div');
-          dateGroup.className = 'date-group';
-          
-          const dateHeader = document.createElement('div');
-          dateHeader.style.cssText = `
-            background: rgba(0,123,255,0.1); 
-            padding: 8px 12px; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            font-weight: 600; 
-            font-size: 13px; 
-            color: #0066cc;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          `;
-          
-          const totalWeight = logs.reduce((sum, log) => sum + (log.weight || 0), 0);
-          const totalCount = logs.reduce((sum, log) => sum + (log.total || 0), 0);
-          
-          dateHeader.innerHTML = `
-            <span>📅 ${date} (${logs.length} актов)</span>
-            <span style="font-size:11px;">🐷 ${totalCount} шт, ⚖️ ${totalWeight.toFixed(1)} кг</span>
-          `;
-          
-          const logsContainer = document.createElement('div');
-          logsContainer.style.cssText = 'margin-left: 16px; margin-top: 4px;';
-          
-          logs.forEach(log => {
-            const logItem = document.createElement('div');
-            logItem.style.cssText = `
-              background: rgba(255,255,255,0.7);
-              border: 1px solid rgba(60,90,140,0.1);
-              border-radius: 4px;
-              padding: 6px 8px;
-              margin-bottom: 4px;
-              font-size: 11px;
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 8px;
-            `;
-            
-            logItem.innerHTML = `
-              <div><strong>${log.group}</strong><br/><span style="color:#666;">${log.time}</span></div>
-              <div>🐷 ${log.total} шт<br/>⚖️ ${log.weight} кг</div>
-              <div>📊 ${log.avg_weight} кг/шт<br/><span style="color:#666;">±${Math.abs(log.left_count - log.right_count)}</span></div>
-            `;
-            
-            logsContainer.appendChild(logItem);
-          });
-          
-          // Логика сворачивания/разворачивания
-          let isExpanded = true;
-          dateHeader.onclick = () => {
-            isExpanded = !isExpanded;
-            logsContainer.style.display = isExpanded ? 'block' : 'none';
-            dateHeader.style.opacity = isExpanded ? '1' : '0.7';
-          };
-          
-          dateGroup.appendChild(dateHeader);
-          dateGroup.appendChild(logsContainer);
-          logsList.appendChild(dateGroup);
-        });
-
-      } catch (error) {
-        console.error('Error refreshing logs:', error);
-        document.getElementById('logsList').innerHTML = '<div style="text-align:center; color:#dc3545; padding:20px;">Ошибка загрузки данных</div>';
-      }
-    }
-
-    // Экспорт журналов
-    async function exportLogs() {
-      try {
-        const dateFrom = document.getElementById('logsDateFrom').value;
-        const dateTo = document.getElementById('logsDateTo').value;
-        
-        const response = await fetch(`/api/weighing/export?date_from=${dateFrom}&date_to=${dateTo}`);
-        const blob = await response.blob();
-        
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `weighing_logs_${dateFrom}_${dateTo}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (error) {
-        console.error('Error exporting logs:', error);
-        alert('Ошибка экспорта: ' + error.message);
-      }
-    }
-
-    // Новая функция загрузки данных верификации
-    async function loadVerificationData() {
-      // Пока оставляем заглушку, будет доработана позже
-      console.log('Loading verification data...');
-    }
 
     // === ОБРАБОТЧИКИ СОБЫТИЙ ===
 
-    // Обработчики для панели взвешивания
     document.addEventListener('DOMContentLoaded', () => {
-      // Автоматический расчет среднего веса
-      document.getElementById('weighingTotal').addEventListener('input', calculateAvgWeight);
-      document.getElementById('weighingWeight').addEventListener('input', calculateAvgWeight);
-      
-      // Сохранение акта
-      document.getElementById('saveWeighingBtn').addEventListener('click', saveWeighingAct);
-      
-      // Обработчики для панели журналов
-      document.getElementById('refreshLogsBtn').addEventListener('click', refreshLogs);
-      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
-      document.getElementById('logsDateFrom').addEventListener('change', refreshLogs);
-      document.getElementById('logsDateTo').addEventListener('change', refreshLogs);
-      
-      // Обработчики для панели сверки
-      const verificationUploadArea = document.getElementById('verificationUploadArea');
-      const verificationFileInput = document.getElementById('verificationFileInput');
-      
-      verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
-      verificationUploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        verificationUploadArea.style.borderColor = '#007bff';
-        verificationUploadArea.style.background = 'rgba(0,123,255,0.1)';
-      });
-      verificationUploadArea.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
-      });
-      verificationUploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
-        if (e.dataTransfer.files.length > 0) {
-          verificationFileInput.files = e.dataTransfer.files;
-          handleVerificationFile();
-        }
-      });
-      
-      verificationFileInput.addEventListener('change', handleVerificationFile);
-      document.getElementById('startVerificationBtn').addEventListener('click', () => {
-        const fileInput = document.getElementById('verificationFileInput');
-        if (!fileInput.files[0]) {
-          fileInput.click();
-          return;
-        }
-        startVerification();
-      });
-    });
+      // === ИНИЦИАЛИЗАЦИЯ НОВОГО LIQUID GLASS ИНТЕРФЕЙСА ===
 
+      // Обработчик кнопки сохранения акта
+      document.getElementById('saveManualBtn').addEventListener('click', saveNewAct);
+
+      // Обработчик кнопки обновления журнала
+      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
+
+      // Обработчик изменения фильтров
+      document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
+      document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
+      document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
+
+      // Обработчики для загрузки Excel файла
+      const uploadArea = document.getElementById('verificationUploadArea');
+      const fileInput = document.getElementById('verificationFileInput');
+
+      uploadArea.addEventListener('click', () => fileInput.click());
+      uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+      });
+      uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+      });
+      uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+          handleExcelFile(files[0]);
+        }
+      });
+
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          handleExcelFile(e.target.files[0]);
     // Обработка файла для сверки
     function handleVerificationFile() {
       const file = document.getElementById('verificationFileInput').files[0];
       const startBtn = document.getElementById('startVerificationBtn');
-      
       if (file) {
         document.querySelector('#verificationUploadArea div div').textContent = `📎 ${file.name}`;
         startBtn.disabled = false;
@@ -2603,77 +2344,6 @@
         resultsContainer.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет данных для отображения</div>';
       }
     }
-
-    // Автоматическая загрузка данных при запуске
-    document.addEventListener('DOMContentLoaded', () => {
-      // Обновляем счетчики взвешивания каждые 2 секунды, если панель активна
-      setInterval(() => {
-        const weighingPanel = document.getElementById('weighingPanel');
-        if (weighingPanel && weighingPanel.classList.contains('active')) {
-          updateWeighingCounters();
-        }
-      }, 2000);
-
-      // === ИНИЦИАЛИЗАЦИЯ НОВОГО LIQUID GLASS ИНТЕРФЕЙСА ===
-
-      // Обработчик кнопки сохранения акта
-      document.getElementById('saveManualBtn').addEventListener('click', saveNewAct);
-
-      // Обработчик кнопки обновления журнала
-      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
-
-      // Обработчик изменения фильтров
-      document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
-      document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
-      document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
-
-      // Обработчики для загрузки Excel файла
-      const uploadArea = document.getElementById('verificationUploadArea');
-      const fileInput = document.getElementById('verificationFileInput');
-
-      uploadArea.addEventListener('click', () => fileInput.click());
-      uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('dragover');
-      });
-      uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
-      });
-      uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.classList.remove('dragover');
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-          handleExcelFile(files[0]);
-        }
-      });
-
-      fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-          handleExcelFile(e.target.files[0]);
-        }
-      });
-
-      // Обработчик кнопки проверки (унифицирован)
-      const startBtn2 = document.getElementById('startVerificationBtn');
-      startBtn2.addEventListener('click', () => {
-        const file = fileInput.files[0];
-        if (file) {
-          compareWithExcel(file);
-        } else {
-          fileInput.click();
-        }
-      });
-
-      function handleExcelFile(file) {
-        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-          document.getElementById('startVerificationBtn').disabled = false;
-          showNotification('📄 Файл загружен: ' + file.name, 'success');
-        } else {
-          showNotification('❌ Поддерживаются только Excel файлы', 'error');
-        }
-      }
-    });
 
     // === ФУНКЦИИ ДЛЯ LIQUID GLASS ИНТЕРФЕЙСА ===
 
