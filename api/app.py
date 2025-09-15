@@ -78,15 +78,20 @@ BASE_DIR = Path(__file__).parent.parent
 if load_dotenv:
     load_dotenv(BASE_DIR / ".env")
 
-# Импорт упрощенной системы логирования
+# Импорт упрощенной системы логирования и конфигурации
 try:
-    from core.config import setup_logging
+    from core.config import setup_logging, get_config
     logger = setup_logging(debug=os.getenv("DEBUG", "false").lower() == "true")
+    config = get_config()
+    BATCH_SIZE = config.get("BATCH_SIZE", 8)
+    MAX_WAIT_MS = config.get("MAX_WAIT_MS", 50)
 except ImportError:
     # Fallback если core.config недоступен
     import logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("api")
+    BATCH_SIZE = int(os.getenv("BATCH_SIZE", "8"))
+    MAX_WAIT_MS = int(os.getenv("MAX_WAIT_MS", "50"))
 
 # --- Config from environment ---
 CAM_DEFAULT = os.getenv("CAM_DEFAULT", "rtsp://admin:Qwerty.123@10.15.6.24/1/1")
@@ -1217,7 +1222,7 @@ class RtspStream(VideoStream):
                                 if FRAME_BROKER is not None:
                                     asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), frame))
                                     if start_global_worker_for is not None:
-                                        start_global_worker_for(self.stream_id)
+                                        start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
                             except Exception:
                                 pass
                             break
@@ -1232,7 +1237,7 @@ class RtspStream(VideoStream):
                             if FRAME_BROKER is not None:
                                 asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
                                 if start_global_worker_for is not None:
-                                    start_global_worker_for(self.stream_id)
+                                    start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
                         except Exception:
                             pass
                     await asyncio.sleep(1.0 / TARGET_FPS)
@@ -1312,7 +1317,7 @@ class FileStream(VideoStream):
                         if FRAME_BROKER is not None:
                             asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
                             if start_global_worker_for is not None:
-                                start_global_worker_for(self.stream_id)
+                                start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
                     except Exception:
                         pass
                 await asyncio.sleep(1.0 / self.fps)
@@ -1394,7 +1399,7 @@ class DemoStream(VideoStream):
         
         # Запускаем инференс
         if start_global_worker_for and FRAME_BROKER:
-            self._infer_task = asyncio.create_task(start_global_worker_for(self.stream_id))
+            self._infer_task = asyncio.create_task(start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS))
     
     async def _demo_loop(self):
         """Основной цикл генерации демо кадров"""

@@ -7,6 +7,9 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
+  
+  <!-- Модульная архитектура JavaScript -->
+  <script type="module" src="/static/js/app.js"></script>
   <style>
     .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.56); backdrop-filter: blur(12px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
     .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; gap: 8px; }
@@ -29,9 +32,6 @@
     .flow-box { flex:1 1 0; display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; background:rgba(240,245,252,0.85); border:1px solid rgba(60,90,140,.12); text-align:center; }
     .flow-val { font-size:28px; font-weight:700; color:#1f3d6b; line-height:1; }
     .flow-title { font-size:12px; color:#2f5078; opacity:.8; }
-    .journal-stat-value { font-size: 28px !important; font-weight: 700; color: var(--text-primary); line-height: 1; }
-    .journal-stat-card.stat-minor .journal-stat-value { font-size: 22px !important; font-weight: 600; }
-    .journal-stat-card.stat-minor .journal-stat-label { font-size: 11px; opacity: 0.8; }
     /* Fullscreen video mode */
     body.fs, html.fs { overflow:hidden; }
     body.fs #main-container { padding-top:0; }
@@ -110,6 +110,9 @@
       border-radius: var(--radius-sm); 
       box-shadow: 0 2px 8px var(--liquid-glass-shadow);
     }
+    .journal-stat-value { font-size: 28px !important; font-weight: 700; color: var(--text-primary); line-height: 1; }
+    .journal-stat-card.stat-minor .journal-stat-value { font-size: 22px !important; font-weight: 600; }
+    .journal-stat-card.stat-minor .journal-stat-label { font-size: 11px; opacity: 0.8; }
     .right-col .card{ padding:6px !important; }
     .right-col .journal-comparison-result{ padding:6px 8px !important; }
     .right-col .journal-btn{ height:30px; line-height:28px; padding:0 10px; }
@@ -174,6 +177,7 @@
         </label>
         <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">Старт</button>
         <div style="display:flex; align-items:center; gap:2px; flex:0 0 auto; order:2; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 6px;">
+          <label style="font-size:12px; color:var(--text-secondary); padding-left: 2px;">Транспорт:</label>
           <select id="transportSelect" style="height:32px; background: transparent; border: none; color: var(--text-primary); font-weight: 500;">
             <option value="mjpeg">MJPEG</option>
             <option value="webrtc" selected>WebRTC</option>
@@ -236,7 +240,7 @@
                 </div>
                 <div class="journal-stat-card">
                   <div class="journal-stat-value" id="rightIn" style="transition: color 0.3s ease;">0</div>
-                  <div class="journal-stat-label">Справа (вход)</div>
+                  <div class="journal-stat-label">Справа (выход)</div>
                 </div>
                 <div class="journal-stat-card stat-minor">
                   <div class="journal-stat-value" id="totalCrossings" style="transition: color 0.3s ease;">0</div>
@@ -445,25 +449,6 @@
     <!-- Убрана нижняя таблица истории для полноценного полноэкранного интерфейса -->
   </div>
   <script>
-    // --- TABS and PANELS --- 
-    function switchPanel(panelName) {
-      const panels = document.querySelectorAll('.panel-content');
-      const tabs = document.querySelectorAll('.journal-tab-btn');
-      
-      panels.forEach(p => p.style.display = 'none');
-      tabs.forEach(t => t.classList.remove('active'));
-      
-      document.getElementById(`${panelName}Panel`).style.display = 'block';
-      const activeTab = document.querySelector(`.journal-tab-btn[onclick="switchPanel('${panelName}')"]`);
-      if (activeTab) activeTab.classList.add('active');
-
-      // Load data for panel if it's the first time opening it
-      if (panelName === 'logs' && !document.getElementById('logsPanel').dataset.loaded) {
-        loadJournalActs();
-        document.getElementById('logsPanel').dataset.loaded = 'true';
-      }
-    }
-
     const videoStream = document.getElementById('videoStream');
     const overlayCanvas = document.getElementById('overlayCanvas');
     const videoPlayPauseBtn = document.getElementById('videoPlayPauseBtn');
@@ -497,17 +482,14 @@
     let lastIds = null; // last ids from WS
     let lastMasks = null; // last masks from WS
     let overlayBlockUntil = 0;
-    // Переменные для отслеживания изменений
-    let lastTotalCrossings = 0;
-    let lastLeftIn = 0;
-    let lastRightIn = 0;
-    // Переменные для отслеживания изменений
-    let lastTotalCrossings = 0;
-    let lastLeftIn = 0;
-    let lastRightIn = 0;
     const leftInEl = document.getElementById('leftIn');
     const rightInEl = document.getElementById('rightIn');
     const totalCrossingsEl = document.getElementById('totalCrossings');
+    
+    // Переменные для отслеживания изменений
+    let lastTotalCrossings = 0;
+    let lastLeftIn = 0;
+    let lastRightIn = 0;
     const actPeakEl = document.getElementById('actPeak');
     const actDurEl = document.getElementById('actDur');
     const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -904,6 +886,10 @@
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === 'count_update') {
+                // Throttling для UI обновлений - уменьшаем частоту обновлений
+                const now = performance.now();
+                if (!window.__lastUIUpdate || now - window.__lastUIUpdate > 100) {
+                    window.__lastUIUpdate = now;
                 document.getElementById('manualCount').value = data.count;
                 // Recalculate average weight if total is set
                 if (typeof recalcAvgWeight === 'function') {
@@ -970,139 +956,7 @@
                             animateCounterChange(rightInEl, rightInCount, lastRightIn);
                             lastRightIn = rightInCount;
                         }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-
+                        
                         if (totalCrossingsCount !== lastTotalCrossings) {
                             totalCrossingsEl.textContent = String(totalCrossingsCount);
                             animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
@@ -1119,7 +973,11 @@
                             modelInfo = ` | GPU: ${dev || 'cpu'} | Модель: ${m.name}${imgsz}`;
                         }
                     } catch (_) {}
-                    streamStatus.textContent = `Слева: ${leftInCount} | Справа: ${rightInCount}${modelInfo}`;
+                    // Обновляем статус только если значения изменились
+                    const newStatus = `Live | Всего пересечений: ${totalCrossingsCount} | Слева: ${leftInCount} | Справа: ${rightInCount}${modelInfo}`;
+                    if (streamStatus.textContent !== newStatus) {
+                        streamStatus.textContent = newStatus;
+                    }
                 }
                 if (data.debug && data.debug.act) {
                     const a = data.debug.act;
@@ -1160,6 +1018,7 @@
                         chart.update('none');
                     }
                 }
+                } // Закрытие throttling блока
             }
         };
     }
@@ -1237,9 +1096,18 @@
 
     function syncOverlaySize() {
         const wrapper = document.getElementById('videoWrapper');
-        if (!wrapper) return;
-        wrapper.style.height = window.innerHeight + 'px';
-        syncOverlaySize();
+        const w = wrapper ? wrapper.clientWidth : videoStream.clientWidth;
+        const h = wrapper ? wrapper.clientHeight : videoStream.clientHeight;
+        if (!w || !h) return;
+        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+        const bw = Math.floor(w * dpr);
+        const bh = Math.floor(h * dpr);
+        if (overlayCanvas.width !== bw || overlayCanvas.height !== bh) {
+            overlayCanvas.width = bw;
+            overlayCanvas.height = bh;
+            overlayCanvas.style.width = w + 'px';
+            overlayCanvas.style.height = h + 'px';
+        }
     }
 
     function getRenderedImageRect() {
@@ -1335,7 +1203,7 @@
             ctx.beginPath();
             ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
             ctx.fill();
-            // Подписы к линиям выключены по требованию UX
+            // Подписи к линиям выключены по требованию UX
             // Перетаскивание линий отсечки мышью/тапом
             try {
                 if (!window.__linesDragInit) {
@@ -1404,9 +1272,9 @@
                             // Сохраняем в localStorage для текущего файла
                             const currentFileName = fileInputLabel.title;
                             if (currentFileName && currentFileName !== 'Открыть видеофайл') {
-                                saveLinePositions(currentFileName, leftX, rightX);
+                                saveLinePositions(currentFileName, left_x, right_x);
                             }
-                        } catch (_) {}
+                        } catch(_) {}
                         overlayCanvas.style.cursor = 'crosshair';
                         window.__isDraggingLines = false;
                     };
@@ -1418,7 +1286,7 @@
                     overlayCanvas.addEventListener('touchmove', onMove, {passive:false});
                     overlayCanvas.addEventListener('touchend', onUp);
                 }
-            } catch (_) {}
+            } catch(_) {}
             ctx.restore();
         } catch (e) {}
 
@@ -1599,7 +1467,6 @@
         const px = e.clientX - rectDom.left;
         const py = e.clientY - rectDom.top;
         const imgRect = getRenderedImageRect();
-
         // check topmost polygon first: iterate reversed
         let foundIdx = -1;
         for (let i = lastMasks.length - 1; i >= 0; i--) {
@@ -1614,7 +1481,7 @@
         if (trimmed === '') { delete idAliases[instId]; } else { idAliases[instId] = trimmed; }
         if (activeStreamId) saveAliases(activeStreamId);
         drawOverlay(lastMasks, lastIds);
-    }
+    });
 
     // Keyboard seek (Left/Right arrows). Shift=±1s, Ctrl=±5s, иначе ±step
     function setSeekUIVal(t) {
@@ -1810,7 +1677,7 @@
         // update icon
         fullscreenBtn.innerHTML = on
           ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/><path d="M10 14l-4 4M14 10l4-4" stroke="#1f3d6b" stroke-width="2" stroke-linecap="round"/></svg>'
-          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h4V5H5v6h2V7ZM13 7h4v4h2V5h-6v2ZM7 13H5v6h6v-2H7v-4ZM17 13h-4v2h6v-6h-2v4Z" fill="#1f3d6b"/></svg>';
+          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7h4V5H5v6h2V7ZM13 7h4v4h2V5h-6v2ZM7 13H5v6h6v-2H7v-4ZM17 17h-4v2h6v-6h-2v4Z" fill="#1f3d6b"/></svg>';
         updateVideoLayout();
     }
     fullscreenBtn.addEventListener('click', () => {
@@ -1962,91 +1829,91 @@
     });
 
     document.addEventListener('DOMContentLoaded', async () => {
-      // Принудительно устанавливаем WebRTC как приоритетный транспорт
-      const transportSelect = document.getElementById('transportSelect');
-      if (transportSelect) {
-        transportSelect.value = 'webrtc';
-        // Убеждаемся что WebRTC выбран по умолчанию
-        const webrtcOption = transportSelect.querySelector('option[value="webrtc"]');
-        if (webrtcOption) {
-          webrtcOption.selected = true;
+        // Принудительно устанавливаем WebRTC как приоритетный транспорт
+        const transportSelect = document.getElementById('transportSelect');
+        if (transportSelect) {
+            transportSelect.value = 'webrtc';
+            // Убеждаемся что WebRTC выбран по умолчанию
+            const webrtcOption = transportSelect.querySelector('option[value="webrtc"]');
+            if (webrtcOption) {
+                webrtcOption.selected = true;
+            }
         }
-      }
-      
-      populateStreams();
-      updateVideoLayout();
-      window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
-      setPlaceholder();
-      // Initialize fullscreen button icon
-      try { setFsState(false); } catch (e) {}
-      // Worker disabled for now to avoid seek freezes
-      // Load and display history from localStorage
-      const history = JSON.parse(localStorage.getItem('history') || '[]');
-      history.forEach(item => {
-        const row = historyTable.insertRow();
-        row.insertCell().textContent = item.date;
-        row.insertCell().textContent = item.camera;
-        row.insertCell().textContent = item.count;
-        row.insertCell().textContent = item.total_weight;
-        row.insertCell().textContent = item.avg_weight;
-      });
-
-      // Save button logic
-      document.getElementById('saveManualBtn').addEventListener('click', () => {
+        
+        populateStreams();
+        updateVideoLayout();
+        window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
+        setPlaceholder();
+        // Initialize fullscreen button icon
+        try { setFsState(false); } catch (e) {}
+        // Worker disabled for now to avoid seek freezes
+        // Load and display history from localStorage
         const history = JSON.parse(localStorage.getItem('history') || '[]');
-        const newEntry = {
-          date: new Date().toLocaleString(),
-          camera: activeStreamId,
-          count: document.getElementById('manualCount').value,
-          total_weight: document.getElementById('manualTotalWeight').value,
-          avg_weight: document.getElementById('manualAvgWeight').value
-        };
-        history.unshift(newEntry);
-        localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
-        updateHistory();
-      });
+        history.forEach(item => {
+            const row = historyTable.insertRow();
+            row.insertCell().textContent = item.date;
+            row.insertCell().textContent = item.camera;
+            row.insertCell().textContent = item.count;
+            row.insertCell().textContent = item.total_weight;
+            row.insertCell().textContent = item.avg_weight;
+        });
 
-      // Autostart the default stream
-      const streams = await getStreams();
-      const defaultStreamId = Object.keys(streams)[0];
-      const defaultSourceUri = streams[defaultStreamId];
-      if (defaultStreamId && defaultSourceUri) {
-        // Не автозапускаем демо; просто инициализируем источники
-        activeStreamId = defaultStreamId;
-        streamSources[defaultStreamId] = defaultSourceUri;
-        isVideoPlaying = false;
-        videoPlayPauseBtn.textContent = 'Старт';
-      }
+        // Save button logic
+        document.getElementById('saveManualBtn').addEventListener('click', () => {
+            const history = JSON.parse(localStorage.getItem('history') || '[]');
+            const newEntry = {
+                date: new Date().toLocaleString(),
+                camera: activeStreamId,
+                count: document.getElementById('manualCount').value,
+                total_weight: document.getElementById('manualTotalWeight').value,
+                avg_weight: document.getElementById('manualAvgWeight').value
+            };
+            history.unshift(newEntry);
+            localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+            updateHistory();
+        });
+
+        // Autostart the default stream
+        const streams = await getStreams();
+        const defaultStreamId = Object.keys(streams)[0];
+        const defaultSourceUri = streams[defaultStreamId];
+        if (defaultStreamId && defaultSourceUri) {
+            // Не автозапускаем демо; просто инициализируем источники
+            activeStreamId = defaultStreamId;
+            streamSources[defaultStreamId] = defaultSourceUri;
+            isVideoPlaying = false;
+            videoPlayPauseBtn.textContent = 'Старт';
+        }
     });
 
     function updateHistory() {
-      const historyTable = document.getElementById('historyTable');
-      if (!historyTable) return;
-      historyTable.innerHTML = '';
-      const history = JSON.parse(localStorage.getItem('history') || '[]');
-      history.forEach(item => {
-        const row = historyTable.insertRow();
-        row.insertCell().textContent = item.date;
-        row.insertCell().textContent = item.camera;
-        row.insertCell().textContent = item.count;
-        row.insertCell().textContent = item.total_weight;
-        row.insertCell().textContent = item.avg_weight;
-      });
+        const historyTable = document.getElementById('historyTable');
+        if (!historyTable) return;
+        historyTable.innerHTML = '';
+        const history = JSON.parse(localStorage.getItem('history') || '[]');
+        history.forEach(item => {
+            const row = historyTable.insertRow();
+            row.insertCell().textContent = item.date;
+            row.insertCell().textContent = item.camera;
+            row.insertCell().textContent = item.count;
+            row.insertCell().textContent = item.total_weight;
+            row.insertCell().textContent = item.avg_weight;
+        });
     }
 
     function recalcAvgWeight() {
-      const countEl = document.getElementById('manualCount');
-      const totalEl = document.getElementById('manualTotalWeight');
-      const avgEl = document.getElementById('manualAvgWeight');
-      if (!countEl || !totalEl || !avgEl) return;
-      const count = parseInt(countEl.value);
-      const totalWeight = parseFloat(totalEl.value);
-      if (count > 0 && totalWeight > 0) {
-        const avgWeight = totalWeight / count;
-        avgEl.value = avgWeight.toFixed(2);
-      } else {
-        avgEl.value = '';
-      }
+        const countEl = document.getElementById('manualCount');
+        const totalEl = document.getElementById('manualTotalWeight');
+        const avgEl = document.getElementById('manualAvgWeight');
+        if (!countEl || !totalEl || !avgEl) return;
+        const count = parseInt(countEl.value);
+        const totalWeight = parseFloat(totalEl.value);
+        if (count > 0 && totalWeight > 0) {
+            const avgWeight = totalWeight / count;
+            avgEl.value = avgWeight.toFixed(2);
+        } else {
+            avgEl.value = '';
+        }
     }
 
     const manualCountEl = document.getElementById('manualCount');
@@ -2082,11 +1949,16 @@
         targetBtn.classList.add('active');
       }
 
+      // Загружаем данные для журнала при переключении на него
+      if (panelName === 'logs') {
+        loadJournalActs();
+      }
+
       // Загружаем данные для панели
       if (panelName === 'weighing') {
         loadWeighingData();
       } else if (panelName === 'logs') {
-        loadJournalActs();
+        loadLogsData();
       } else if (panelName === 'verification') {
         loadVerificationData();
       }
@@ -2127,7 +1999,7 @@
                 padding: 8px 10px;
                 border-radius: 6px;
                 background: rgba(255,255,255,0.7);
-                border: 1px solid rgba(60,90,140,.12);
+                border: 1px solid rgba(60,90,140,0.1);
                 font-size: 12px;
                 cursor: pointer;
                 transition: all 0.2s ease;
@@ -2223,7 +2095,7 @@
           padding: 8px 12px;
           border-radius: 6px;
           background: rgba(255,255,255,0.7);
-          border: 1px solid rgba(60,90,140,.12);
+          border: 1px solid rgba(60,90,140,0.1);
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -2308,7 +2180,7 @@
         analyzeFilesBtn.disabled = false;
         analyzeFilesBtn.textContent = 'Анализировать';
       }
-    };
+    });
 
     // Обновление верификации
     document.getElementById('refreshVerificationBtn').addEventListener('click', loadVerificationData);
@@ -2376,12 +2248,387 @@
         console.error('Error generating report:', error);
         alert('Ошибка при генерации отчета: ' + error.message);
       }
-    };
+    });
 
+    // === ФУНКЦИИ ДЛЯ НОВЫХ ПАНЕЛЕЙ ===
+
+    // Загрузка данных взвешивания
+    function loadWeighingData() {
+      // Устанавливаем текущие дату и время
+      const now = new Date();
+      document.getElementById('weighingDate').value = now.toISOString().split('T')[0];
+      document.getElementById('weighingTime').value = now.toTimeString().slice(0, 5);
+      
+      // Обновляем счетчики из текущего потока
+      updateWeighingCounters();
+    }
+
+    // Обновление счетчиков взвешивания
+    function updateWeighingCounters() {
+      try {
+        const leftCount = parseInt(leftInEl.textContent) || 0;
+        const rightCount = parseInt(rightInEl.textContent) || 0;
+        const diff = Math.abs(leftCount - rightCount);
+        
+        document.getElementById('weighingLeftCount').textContent = leftCount;
+        document.getElementById('weighingRightCount').textContent = rightCount;
+        document.getElementById('weighingDiff').textContent = diff;
+        
+        // Автоматически заполняем общее количество
+        const totalField = document.getElementById('weighingTotal');
+        if (!totalField.value && leftCount > 0) {
+          totalField.value = leftCount;
+        }
+      } catch (e) {
+        console.error('Error updating weighing counters:', e);
+      }
+    }
+
+    // Расчет среднего веса
+    function calculateAvgWeight() {
+      const total = parseFloat(document.getElementById('weighingTotal').value) || 0;
+      const weight = parseFloat(document.getElementById('weighingWeight').value) || 0;
+      const avgField = document.getElementById('weighingAvgWeight');
+      
+      if (total > 0 && weight > 0) {
+        avgField.value = (weight / total).toFixed(2);
+      } else {
+        avgField.value = '';
+      }
+    }
+
+    // Сохранение акта взвешивания
+    async function saveWeighingAct() {
+      try {
+        const data = {
+          date: document.getElementById('weighingDate').value,
+          time: document.getElementById('weighingTime').value,
+          group: document.getElementById('weighingGroup').value,
+          total: parseInt(document.getElementById('weighingTotal').value) || 0,
+          weight: parseFloat(document.getElementById('weighingWeight').value) || 0,
+          avg_weight: parseFloat(document.getElementById('weighingAvgWeight').value) || 0,
+          left_count: parseInt(document.getElementById('weighingLeftCount').textContent) || 0,
+          right_count: parseInt(document.getElementById('weighingRightCount').textContent) || 0,
+          stream_id: activeStreamId
+        };
+
+        if (!data.date || !data.group || data.total <= 0 || data.weight <= 0) {
+          alert('Пожалуйста, заполните все обязательные поля');
+          return;
+        }
+
+        const response = await fetch('/api/weighing/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          alert('Акт взвешивания сохранен успешно!');
+          // Очищаем форму
+          document.getElementById('weighingGroup').value = '';
+          document.getElementById('weighingTotal').value = '';
+          document.getElementById('weighingWeight').value = '';
+          document.getElementById('weighingAvgWeight').value = '';
+        } else {
+          const error = await response.json();
+          alert('Ошибка сохранения: ' + (error.detail || 'Неизвестная ошибка'));
+        }
+      } catch (error) {
+        console.error('Error saving weighing act:', error);
+        alert('Ошибка сохранения: ' + error.message);
+      }
+    }
+
+    // Загрузка данных журналов
+    async function loadLogsData() {
+      try {
+        // Устанавливаем диапазон дат (последние 30 дней)
+        const now = new Date();
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        
+        document.getElementById('logsDateTo').value = now.toISOString().split('T')[0];
+        document.getElementById('logsDateFrom').value = monthAgo.toISOString().split('T')[0];
+        
+        await refreshLogs();
+      } catch (error) {
+        console.error('Error loading logs data:', error);
+      }
+    }
+
+    // Обновление журналов
+    async function refreshLogs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        
+        const response = await fetch(`/api/weighing/logs?date_from=${dateFrom}&date_to=${dateTo}`);
+        const data = await response.json();
+
+        const logsList = document.getElementById('logsList');
+        logsList.innerHTML = '';
+
+        if (data.length === 0) {
+          logsList.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет записей за выбранный период</div>';
+          return;
+        }
+
+        // Группируем по датам
+        const groupedByDate = {};
+        data.forEach(log => {
+          const date = log.date;
+          if (!groupedByDate[date]) {
+            groupedByDate[date] = [];
+          }
+          groupedByDate[date].push(log);
+        });
+
+        // Создаем группы с возможностью сворачивания
+        Object.keys(groupedByDate).sort().reverse().forEach(date => {
+          const logs = groupedByDate[date];
+          const dateGroup = document.createElement('div');
+          dateGroup.className = 'date-group';
+          
+          const dateHeader = document.createElement('div');
+          dateHeader.style.cssText = `
+            background: rgba(0,123,255,0.1); 
+            padding: 8px 12px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-weight: 600; 
+            font-size: 13px; 
+            color: #0066cc;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          `;
+          
+          const totalWeight = logs.reduce((sum, log) => sum + (log.weight || 0), 0);
+          const totalCount = logs.reduce((sum, log) => sum + (log.total || 0), 0);
+          
+          dateHeader.innerHTML = `
+            <span>📅 ${date} (${logs.length} актов)</span>
+            <span style="font-size:11px;">🐷 ${totalCount} шт, ⚖️ ${totalWeight.toFixed(1)} кг</span>
+          `;
+          
+          const logsContainer = document.createElement('div');
+          logsContainer.style.cssText = 'margin-left: 16px; margin-top: 4px;';
+          
+          logs.forEach(log => {
+            const logItem = document.createElement('div');
+            logItem.style.cssText = `
+              background: rgba(255,255,255,0.7);
+              border: 1px solid rgba(60,90,140,0.1);
+              border-radius: 4px;
+              padding: 6px 8px;
+              margin-bottom: 4px;
+              font-size: 11px;
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 8px;
+            `;
+            
+            logItem.innerHTML = `
+              <div><strong>${log.group}</strong><br/><span style="color:#666;">${log.time}</span></div>
+              <div>🐷 ${log.total} шт<br/>⚖️ ${log.weight} кг</div>
+              <div>📊 ${log.avg_weight} кг/шт<br/><span style="color:#666;">±${Math.abs(log.left_count - log.right_count)}</span></div>
+            `;
+            
+            logsContainer.appendChild(logItem);
+          });
+          
+          // Логика сворачивания/разворачивания
+          let isExpanded = true;
+          dateHeader.onclick = () => {
+            isExpanded = !isExpanded;
+            logsContainer.style.display = isExpanded ? 'block' : 'none';
+            dateHeader.style.opacity = isExpanded ? '1' : '0.7';
+          };
+          
+          dateGroup.appendChild(dateHeader);
+          dateGroup.appendChild(logsContainer);
+          logsList.appendChild(dateGroup);
+        });
+
+      } catch (error) {
+        console.error('Error refreshing logs:', error);
+        document.getElementById('logsList').innerHTML = '<div style="text-align:center; color:#dc3545; padding:20px;">Ошибка загрузки данных</div>';
+      }
+    }
+
+    // Экспорт журналов
+    async function exportLogs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        
+        const response = await fetch(`/api/weighing/export?date_from=${dateFrom}&date_to=${dateTo}`);
+        const blob = await response.blob();
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `weighing_logs_${dateFrom}_${dateTo}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error('Error exporting logs:', error);
+        alert('Ошибка экспорта: ' + error.message);
+      }
+    }
+
+    // Новая функция загрузки данных верификации
+    async function loadVerificationData() {
+      // Пока оставляем заглушку, будет доработана позже
+      console.log('Loading verification data...');
+    }
 
     // === ОБРАБОТЧИКИ СОБЫТИЙ ===
 
+    // Обработчики для панели взвешивания
     document.addEventListener('DOMContentLoaded', () => {
+      // Автоматический расчет среднего веса
+      document.getElementById('weighingTotal').addEventListener('input', calculateAvgWeight);
+      document.getElementById('weighingWeight').addEventListener('input', calculateAvgWeight);
+      
+      // Сохранение акта
+      document.getElementById('saveWeighingBtn').addEventListener('click', saveWeighingAct);
+      
+      // Обработчики для панели журналов
+      document.getElementById('refreshLogsBtn').addEventListener('click', refreshLogs);
+      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
+      document.getElementById('logsDateFrom').addEventListener('change', refreshLogs);
+      document.getElementById('logsDateTo').addEventListener('change', refreshLogs);
+      
+      // Обработчики для панели сверки
+      const verificationUploadArea = document.getElementById('verificationUploadArea');
+      const verificationFileInput = document.getElementById('verificationFileInput');
+      
+      verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
+      verificationUploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        verificationUploadArea.style.borderColor = '#007bff';
+        verificationUploadArea.style.background = 'rgba(0,123,255,0.1)';
+      });
+      verificationUploadArea.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        verificationUploadArea.style.borderColor = '#ccc';
+        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+      });
+      verificationUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        verificationUploadArea.style.borderColor = '#ccc';
+        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+        if (e.dataTransfer.files.length > 0) {
+          verificationFileInput.files = e.dataTransfer.files;
+          handleVerificationFile();
+        }
+      });
+      
+      verificationFileInput.addEventListener('change', handleVerificationFile);
+      document.getElementById('startVerificationBtn').addEventListener('click', () => {
+        const fileInput = document.getElementById('verificationFileInput');
+        if (!fileInput.files[0]) {
+          fileInput.click();
+          return;
+        }
+        startVerification();
+      });
+    });
+
+    // Обработка файла для сверки
+    function handleVerificationFile() {
+      const file = document.getElementById('verificationFileInput').files[0];
+      const startBtn = document.getElementById('startVerificationBtn');
+      
+      if (file) {
+        document.querySelector('#verificationUploadArea div div').textContent = `📎 ${file.name}`;
+        startBtn.disabled = false;
+      } else {
+        startBtn.disabled = true;
+      }
+    }
+
+    // Начало сверки
+    async function startVerification() {
+      try {
+        const fileInput = document.getElementById('verificationFileInput');
+        if (!fileInput.files[0]) {
+          alert('Пожалуйста, выберите файл для сверки');
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        const response = await fetch('/api/journal/compare', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          displayVerificationResults(result);
+        } else {
+          alert('Ошибка сверки: ' + (result.detail || 'Неизвестная ошибка'));
+        }
+      } catch (error) {
+        console.error('Error during verification:', error);
+        alert('Ошибка сверки: ' + error.message);
+      }
+    }
+
+    // Отображение результатов сверки
+    function displayVerificationResults(result) {
+      document.getElementById('verificationMatches').textContent = result.matches || 0;
+      document.getElementById('verificationDiffs').textContent = result.differences || 0;
+      document.getElementById('verificationMissing').textContent = result.missing || 0;
+
+      const resultsContainer = document.getElementById('verificationResults');
+      resultsContainer.innerHTML = '';
+
+      if (result.details && result.details.length > 0) {
+        result.details.forEach(item => {
+          const resultItem = document.createElement('div');
+          resultItem.style.cssText = `
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-bottom: 4px;
+            ${item.status === 'match' ? 'background: rgba(40,167,69,0.1); border: 1px solid rgba(40,167,69,0.2);' :
+              item.status === 'diff' ? 'background: rgba(255,193,7,0.1); border: 1px solid rgba(255,193,7,0.2);' :
+              'background: rgba(220,53,69,0.1); border: 1px solid rgba(220,53,69,0.2);'}
+          `;
+          
+          const statusIcon = item.status === 'match' ? '✅' : item.status === 'diff' ? '⚠️' : '❌';
+          resultItem.innerHTML = `
+            <div><strong>${statusIcon} ${item.group} (${item.date})</strong></div>
+            <div style="margin-top:2px;">
+              Система: ${item.system_weight}кг (${item.system_count}шт) | 
+              Файл: ${item.file_weight}кг (${item.file_count}шт)
+            </div>
+          `;
+          
+          resultsContainer.appendChild(resultItem);
+        });
+      } else {
+        resultsContainer.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет данных для отображения</div>';
+      }
+    }
+
+    // Автоматическая загрузка данных при запуске
+    document.addEventListener('DOMContentLoaded', () => {
+      // Обновляем счетчики взвешивания каждые 2 секунды, если панель активна
+      setInterval(() => {
+        const weighingPanel = document.getElementById('weighingPanel');
+        if (weighingPanel && weighingPanel.classList.contains('active')) {
+          updateWeighingCounters();
+        }
+      }, 2000);
+
       // === ИНИЦИАЛИЗАЦИЯ НОВОГО LIQUID GLASS ИНТЕРФЕЙСА ===
 
       // Обработчик кнопки сохранения акта
@@ -2402,32 +2649,45 @@
       uploadArea.addEventListener('click', () => fileInput.click());
       uploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        uploadArea.style.borderColor = '#007bff';
-        uploadArea.style.background = 'rgba(0,123,255,0.05)';
+        uploadArea.classList.add('dragover');
       });
       uploadArea.addEventListener('dragleave', () => {
-        uploadArea.style.borderColor = '#ccc';
-        uploadArea.style.background = 'rgba(255,255,255,0.5)';
+        uploadArea.classList.remove('dragover');
       });
       uploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadArea.style.borderColor = '#ccc';
-        uploadArea.style.background = 'rgba(255,255,255,0.5)';
-        handleExcelFile(e.dataTransfer.files);
+        uploadArea.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+          handleExcelFile(files[0]);
+        }
       });
 
-      fileInput.addEventListener('change', (e) => handleExcelFile(e.target.files));
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          handleExcelFile(e.target.files[0]);
+        }
+      });
 
-      // === ВЕРИФИКАЦИЯ И АНАЛИЗ ===
+      // Обработчик кнопки проверки (унифицирован)
+      const startBtn2 = document.getElementById('startVerificationBtn');
+      startBtn2.addEventListener('click', () => {
+        const file = fileInput.files[0];
+        if (file) {
+          compareWithExcel(file);
+        } else {
+          fileInput.click();
+        }
+      });
 
-      // Обработчик кнопки сверки
-      document.getElementById('startVerificationBtn').addEventListener('click', startVerification);
-
-      // Обработчик кнопки экспорта журнала
-      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
-
-      // Обработчик кнопки экспорта результатов сверки
-      document.getElementById('exportVerificationResultsBtn').addEventListener('click', exportVerificationResults);
+      function handleExcelFile(file) {
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+          document.getElementById('startVerificationBtn').disabled = false;
+          showNotification('📄 Файл загружен: ' + file.name, 'success');
+        } else {
+          showNotification('❌ Поддерживаются только Excel файлы', 'error');
+        }
+      }
     });
 
     // === ФУНКЦИИ ДЛЯ LIQUID GLASS ИНТЕРФЕЙСА ===
@@ -2596,16 +2856,16 @@
           <div>
             <h5 style="margin: 0 0 8px 0; color: var(--muted);">Excel файл:</h5>
             <p style="margin: 0; font-size: 13px;">
-              Количество: ${result.comparison.excel.total_count},
-              Вес: ${result.comparison.excel.total_weight} кг,
+              Количество: ${result.comparison.excel.total_count}<br>
+              Вес: ${result.comparison.excel.total_weight} кг<br>
               Записей: ${result.comparison.excel.rows}
             </p>
           </div>
           <div>
             <h5 style="margin: 0 0 8px 0; color: var(--muted);">Наши акты:</h5>
             <p style="margin: 0; font-size: 13px;">
-              Количество: ${result.comparison.acts.total_count},
-              Вес: ${result.comparison.acts.total_weight} кг,
+              Количество: ${result.comparison.acts.total_count}<br>
+              Вес: ${result.comparison.acts.total_weight} кг<br>
               Записей: ${result.comparison.acts.rows}
             </p>
           </div>
@@ -2666,38 +2926,5 @@
 
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script>
-    // --- ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ СТРАНИЦЫ ---
-    document.addEventListener('DOMContentLoaded', () => {
-      // Инициализация вкладок
-      switchPanel('live');
-
-      // Обработчики для панели взвешивания
-      document.getElementById('saveWeighingBtn').addEventListener('click', saveWeighingAct);
-      document.getElementById('weighingTotal').addEventListener('input', calculateAvgWeight);
-      document.getElementById('weighingWeight').addEventListener('input', calculateAvgWeight);
-
-      // Обработчики для панели журнала
-      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
-      document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
-
-      // Обработчики для панели сверки
-      const verificationUploadArea = document.getElementById('verificationUploadArea');
-      const verificationFileInput = document.getElementById('verificationFileInput');
-      verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
-      verificationUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); verificationUploadArea.style.borderColor = '#007bff'; });
-      verificationUploadArea.addEventListener('dragleave', () => { verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)'; });
-      verificationUploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)';
-        if (e.dataTransfer.files.length > 0) {
-          verificationFileInput.files = e.dataTransfer.files;
-          handleVerificationFileChange();
-        }
-      });
-      verificationFileInput.addEventListener('change', handleVerificationFileChange);
-      document.getElementById('startVerificationBtn').addEventListener('click', startVerification);
-    });
-  </script>
 </body>
 </html>
