@@ -13,7 +13,7 @@ from core.adaptive_quality_controller import QualityLevel, AdaptationConfig
 from core.dynamic_batcher import BatcherConfig
 from core.priority_frame_queue import QueueConfig
 from core.performance_monitor import MonitorConfig
-from core.async_rtsp_decoder import DecoderConfig
+# from core.async_rtsp_decoder import DecoderConfig # This component is being deprecated
 from core.h264_direct_track import H264Config
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class OptimizedConfig:
     auto_fallback_to_onnx: bool = True
     
     # Компонентные конфигурации
-    decoder_config: DecoderConfig = field(default_factory=DecoderConfig)
+    # decoder_config: DecoderConfig = field(default_factory=DecoderConfig) # Deprecated
     queue_config: QueueConfig = field(default_factory=QueueConfig)
     batcher_config: BatcherConfig = field(default_factory=BatcherConfig)
     quality_config: AdaptationConfig = field(default_factory=AdaptationConfig)
@@ -130,15 +130,7 @@ class OptimizedConfig:
         else:
             config.use_onnx_runtime = _get_env_bool('USE_ONNX_RUNTIME', False)
         
-        # AsyncRTSPDecoder
-        config.decoder_config.use_cuda = config.cuda_enabled
-        config.decoder_config.connection_timeout = _get_env_int('RTSP_CONNECTION_TIMEOUT', 5000)
-        config.decoder_config.read_timeout = _get_env_int('RTSP_READ_TIMEOUT', 1000)
-        config.decoder_config.max_retries = _get_env_int('RTSP_MAX_RETRIES', 3)
-        config.decoder_config.retry_delay = _get_env_float('RTSP_RETRY_DELAY', 2.0)
-        config.decoder_config.buffer_size = _get_env_int('RTSP_BUFFER_SIZE', 3)
-        config.decoder_config.h264_direct = config.enable_h264_direct
-        config.decoder_config.target_fps = config.target_fps
+        # AsyncRTSPDecoder config is deprecated and removed. Stream settings are now handled by api/app.py
         
         # PriorityFrameQueue
         config.queue_config.max_size = _get_env_int('FRAME_QUEUE_MAX_SIZE', 1000)
@@ -211,13 +203,7 @@ class OptimizedConfig:
             'auto_fallback_to_onnx': self.auto_fallback_to_onnx,
             'target_fps': self.target_fps,
             'max_concurrent_streams': self.max_concurrent_streams,
-            'decoder_config': {
-                'connection_timeout': self.decoder_config.connection_timeout,
-                'read_timeout': self.decoder_config.read_timeout,
-                'max_retries': self.decoder_config.max_retries,
-                'use_cuda': self.decoder_config.use_cuda,
-                'h264_direct': self.decoder_config.h264_direct
-            },
+            # 'decoder_config' is deprecated
             'queue_config': {
                 'max_size': self.queue_config.max_size,
                 'max_memory_mb': self.queue_config.max_memory_mb,

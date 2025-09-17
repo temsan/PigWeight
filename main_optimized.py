@@ -32,7 +32,7 @@ try:
     from core.optimized_config import get_config, set_config, apply_performance_profile, OptimizedConfig
     from core.performance_monitor import PerformanceMonitor, MonitorConfig
     from core.adaptive_quality_controller import AdaptiveQualityController
-    from core.async_rtsp_decoder import AsyncRTSPDecoder
+    # from core.async_rtsp_decoder import AsyncRTSPDecoder # DEPRECATED
     from core.priority_frame_queue import PriorityFrameQueue
     from core.dynamic_batcher import DynamicBatcher
     from core.h264_direct_track import H264DirectTrack, H264StreamAdapter

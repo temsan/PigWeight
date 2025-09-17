@@ -887,267 +887,93 @@ class WindowMaxEstimator:
 
 # NOTE: Глобальная реализация инференс-цикла; метод класса делегирует сюда
 async def _global_infer_loop(self):
-        try:
-            from ultralytics import YOLO
-            self.model = YOLO(MODEL_PATH)
-            try:
-                if DEVICE:
-                    self.model.to(DEVICE)
-                if USE_HALF and hasattr(self.model, 'model'):
-                    try:
-                        self.model.model.half()
-                    except Exception:
-                        pass
-            except Exception as _e:
-                logger.warning(f"Model device/half setup warning: {_e}")
-            self.model_loaded = True
-            logger.info(f"YOLO model loaded: {MODEL_PATH}")
-        except Exception as e:
-            self.model_loaded = False
-            logger.error(f"Failed to load YOLO model: {e}")
-            try:
-                await STREAM_MANAGER.broadcast(self.stream_id, {"type": "status", "inference": "disabled", "error": str(e)})
-            except Exception:
-                pass
-            while self.running:
-                await asyncio.sleep(1.0)
+        # Use the unified processor
+        processor = get_processor(self.stream_id)
+        if not processor.is_active:
+            logger.error(f"Unified processor for stream {self.stream_id} is not active. Inference loop will not run.")
             return
+
+        logger.info(f"Starting unified inference loop for stream {self.stream_id}")
 
         while self.running:
             try:
                 jpeg = await self.get_jpeg()
-                if jpeg:
-                    # Исправляем проблему с типами данных
-                    if isinstance(jpeg, dict):
-                        # Если пришел dict вместо bytes, извлекаем jpeg данные
-                        if 'jpeg' in jpeg:
-                            jpeg_data = jpeg['jpeg']
-                        else:
-                            logger.error(f"Invalid jpeg data format: {type(jpeg)}")
-                            continue
-                    else:
-                        jpeg_data = jpeg
-                        
-                    arr = np.frombuffer(jpeg_data, dtype=np.uint8)
-                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                    if frame is not None:
-                        H0, W0, _ = frame.shape
-                        y0, y1 = 0, H0
-                        proc = frame
-                        # imgsz из переменной окружения (по умолчанию 960)
-                        try:
-                            _IMG_SIZE = int(os.getenv("IMG_SIZE", "960"))
-                        except Exception:
-                            _IMG_SIZE = 960
-                        results = self.model.predict(proc, imgsz=_IMG_SIZE, conf=CONF_THRESHOLD, verbose=False, retina_masks=True)
-                        r = results[0] if results else None
-                        # Быстрая диагностика кадра
-                        try:
-                            frame_mean = float(np.mean(frame))
-                            frame_size = (int(W0), int(H0))
-                        except Exception:
-                            frame_mean = None
-                            frame_size = (int(W0), int(H0))
+                if not jpeg:
+                    await asyncio.sleep(0.1)
+                    continue
 
-                        if r and hasattr(r, "masks") and r.masks is not None:
-                            polys = r.masks.xy
-                            self.last_count = len(polys)
-                            # Build detections by bbox for simple tracking on cropped frame
-                            dets = []
-                            centroids_local: list[tuple[float, float]] = []
-                            for m in polys:
-                                if m is None or len(m) == 0:
-                                    continue
-                                xs = [float(p[0]) for p in m]
-                                ys = [float(p[1]) for p in m]
-                                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-                                dets.append({'bbox': [x1, y1, x2, y2]})
-                                # центроид по вершинам полигона (в координатах proc)
-                                try:
-                                    cx_m = sum(xs) / max(1, len(xs))
-                                    cy_m = sum(ys) / max(1, len(ys))
-                                except Exception:
-                                    cx_m = 0.5 * (x1 + x2)
-                                    cy_m = 0.5 * (y1 + y2)
-                                centroids_local.append((cx_m, cy_m))
-                            tracks = self.tracker.update(dets) if dets else []
-                            ids = [t['id'] for t in tracks] if tracks else []
-                            # Зафиксировать порядок первого появления (входа в кадр)
-                            for tid in ids:
-                                if tid not in self._first_seen_order:
-                                    self._first_seen_order[tid] = self._arrival_counter
-                                    self._arrival_counter += 1
-                            # centers for flow counting (normalized X) — по центроидам масок
-                            centers_x: List[float] = []
-                            centers_y: List[float] = []
-                            for (cxm, cym) in centroids_local:
-                                centers_x.append(float(cxm) / float(W0))
-                                centers_y.append((float(cym) + float(y0)) / float(H0))
-                            # Присваиваем новые метки слева-направо, чтобы цифры были по порядку
-                            if ids:
-                                new_pairs: List[Tuple[int, float]] = []
-                                for i, tid in enumerate(ids):
-                                    if tid not in self._session_id_map:
-                                        xnorm = centers_x[i] if i < len(centers_x) else 0.0
-                                        new_pairs.append((tid, float(xnorm)))
-                                new_pairs.sort(key=lambda t: t[1])
-                                for tid, _ in new_pairs:
-                                    if tid not in self._session_id_map:
-                                        self._session_id_map[tid] = self._next_session_label
-                                        self._next_session_label += 1
-                            # Собираем последовательность меток по трекам текущего кадра
-                            session_labels: List[int] = [self._session_id_map.get(tid, 0) for tid in ids]
-                            # Подготовим стабильные отображаемые метки:
-                            # 1) Для новых треков выдаём следующий номер (_next_display_label) и запоминаем в карте
-                            # 2) Для уже виденных всегда используем прежнюю метку (не прыгает)
-                            # 3) Для удобства человека дополнительно формируем ordered_labels,
-                            #    но не подменяем стабильную карту (используем ordered_labels только если нужно)
-                            try:
-                                n = len(centroids_local)
-                                ordered_labels = [0] * n
-                                display_labels = [0] * n
-                                # Назначаем стабильные метки
-                                for i, tid in enumerate(ids):
-                                    if tid not in self._display_label_map:
-                                        self._display_label_map[tid] = self._next_display_label
-                                        self._next_display_label += 1
-                                    display_labels[i] = self._display_label_map.get(tid, 0)
-                                # Дополнительно сформируем человеко-порядок по левому пересечению / первому появлению
-                                order_idx = list(range(n))
-                                def left_rank(i: int) -> int:
-                                    try:
-                                        tid = ids[i]
-                                        if int(tid) in self._left_cross_rank:
-                                            return int(self._left_cross_rank[int(tid)])
-                                        return int(self._first_seen_order.get(tid, 1_000_000))
-                                    except Exception:
-                                        return 1_000_000
-                                order_idx.sort(key=lambda i: (left_rank(i), -(centroids_local[i][0] if i < len(centroids_local) else 0.0)))
-                                for rank, idx_i in enumerate(order_idx, start=1):
-                                    ordered_labels[idx_i] = rank
-                            except Exception:
-                                ordered_labels = list(range(1, len(centroids_local) + 1))
-                                display_labels = ordered_labels[:]
-                            self._update_line_counters(ids, centers_x, centers_y)
-                            # Normalize masks back to original frame
-                            mapped: list[list[tuple[float, float]]] = []
-                            for m in polys:
-                                pts = []
-                                for p in m:
-                                    x = float(p[0])
-                                    y = float(p[1]) + float(y0)
-                                    pts.append((x / float(W0), y / float(H0)))
-                                mapped.append(pts)
-                            self.last_masks = mapped
-                            try:
-                                self._last_mask_ref_size = (int(W0), int(H0))
-                                self._last_mask_crop = (int(y0), int(y1))
-                            except Exception:
-                                self._last_mask_ref_size = (int(W0), int(H0))
-                                self._last_mask_crop = (0, int(H0))
-                            # Update act-of-weighing metrics
-                            cur_count = len(session_labels)
-                            if cur_count > self._act_peak:
-                                self._act_peak = cur_count
-                            for lab in session_labels:
-                                self._act_seen_labels.add(int(lab))
-                        else:
-                            self.last_count = 0
-                            self.last_masks = []
-                            try:
-                                self._last_mask_ref_size = None
-                                self._last_mask_crop = None
-                            except Exception:
-                                pass
-                        # Статистический максимум: окно + монотоничность
-                        wnd_max = self.window_max.update(time.time(), int(self.last_count))
-                        est = max(self.reported_count, wnd_max)
-                        self.reported_count = est
-                        # Логируем таймлайн для дашборда не чаще 2 раз в секунду
-                        try:
-                            now_ts = time.time()
-                            if (now_ts - getattr(self, '_last_timeline_ts', 0.0)) >= 0.5:
-                                rel_t = float(max(0.0, now_ts - float(self._act_start_ts)))
-                                self._act_timeline.append({"t": rel_t, "count_est": int(est)})
-                                self._last_timeline_ts = now_ts
-                        except Exception:
-                            pass
-                        payload = {
-                            "type": "count_update",
-                            "count": int(round(est)),
-                            "debug": {
-                                "masks": self.last_masks,
-                                "count_raw": int(self.last_count),
-                                "flow": {"left_in": self.left_in, "right_in": self.right_in, "total_crossings": self.total_crossings, "left_flow": self.left_flow, "right_flow": self.right_flow},
-                                "frame_mean": frame_mean,
-                                "size": {"w": frame_size[0], "h": frame_size[1]}
-                            }
-                        }
-                        # model meta for UI
-                        try:
-                            payload["debug"]["model"] = {
-                                "path": str(MODEL_PATH),
-                                "name": os.path.basename(str(MODEL_PATH)),
-                                "device": str(DEVICE) if 'DEVICE' in globals() else 'cpu',
-                                "half": bool(USE_HALF) if 'USE_HALF' in globals() else False,
-                            }
-                        except Exception:
-                            pass
-                        # include imgsz if known
-                        try:
-                            if '_IMG_SIZE' in locals():
-                                payload["debug"]["imgsz"] = int(_IMG_SIZE)
-                        except Exception:
-                            pass
-                        # include line positions for UI
-                        try:
-                            payload["debug"]["lines"] = {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)}
-                        except Exception:
-                            pass
-                        # include recent crossings for UI
-                        try:
-                            if getattr(self, "_recent_crossings", None):
-                                payload["debug"]["crossings"] = list(self._recent_crossings)
-                        except Exception:
-                            pass
-                        # include stable labels and act-of-weighing stats
-                        try:
-                            # По умолчанию отдаём стабильные метки (не прыгают)
-                            if 'display_labels' in locals() and display_labels:
-                                payload["debug"]["labels"] = display_labels
-                            payload["debug"]["act"] = {
+                arr = np.frombuffer(jpeg, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+                if frame is not None:
+                    # 1. Process frame using the unified processor
+                    result: Optional[FrameResult] = processor.process_frame(frame)
+
+                    if result is None:
+                        continue
+
+                    # 2. Use results for tracking and counting (existing logic)
+                    H0, W0 = result.original_shape
+                    
+                    # Build detections for SimpleTracker from FrameResult
+                    dets = [{'bbox': bbox} for bbox in result.bboxes]
+                    tracks = self.tracker.update(dets) if dets else []
+                    ids = [t['id'] for t in tracks] if tracks else []
+
+                    # Get centroids from FrameResult
+                    centroids_x_norm = [c[0] / W0 for c in result.centroids]
+                    centroids_y_norm = [c[1] / H0 for c in result.centroids]
+
+                    self._update_line_counters(ids, centroids_x_norm, centroids_y_norm)
+                    
+                    self.last_count = result.detections
+                    self.last_masks = result.masks # Assuming masks are already normalized in processor
+
+                    # 3. Update statistics and broadcast (existing logic)
+                    wnd_max = self.window_max.update(time.time(), int(self.last_count))
+                    est = max(self.reported_count, wnd_max)
+                    self.reported_count = est
+                    
+                    # Update act timeline
+                    now_ts = time.time()
+                    if (now_ts - self._last_timeline_ts) >= 0.5:
+                        rel_t = float(max(0.0, now_ts - float(self._act_start_ts)))
+                        self._act_timeline.append({"t": rel_t, "count_est": int(est)})
+                        self._last_timeline_ts = now_ts
+
+                    # Update act peak
+                    if self.last_count > self._act_peak:
+                        self._act_peak = self.last_count
+                    
+                    # Create payload
+                    payload = {
+                        "type": "count_update",
+                        "count": int(round(est)),
+                        "debug": {
+                            "masks": self.last_masks,
+                            "count_raw": int(self.last_count),
+                            "flow": {"left_in": self.left_in, "right_in": self.right_in, "total_crossings": self.total_crossings},
+                            "ids": ids,
+                            "act": {
                                 "seen_total": int(len(self._act_seen_labels)),
                                 "peak_concurrent": int(self._act_peak),
                                 "duration_sec": float(max(0.0, time.time() - self._act_start_ts))
-                            }
-                        except Exception:
-                            pass
-                        try:
-                            payload["debug"]["ids"] = list(ids) if ids is not None else []
-                        except Exception:
-                            payload["debug"]["ids"] = []
-                        # всегда отправляем счётчики входов, даже если детекций 0
-                        payload["debug"]["flow"] = {"left_in": self.left_in, "right_in": self.right_in, "total_crossings": self.total_crossings, "left_flow": self.left_flow, "right_flow": self.right_flow}
-                        await STREAM_MANAGER.broadcast(self.stream_id, payload)
+                            },
+                            "lines": {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)},
+                            "crossings": list(self._recent_crossings)
+                        }
+                    }
+                    await STREAM_MANAGER.broadcast(self.stream_id, payload)
+
             except Exception as e:
-                logger.error(f"Infer loop error on {self.stream_id}: {e}")
-            # Адаптивный интервал цикла инференса для отзывчивых счётчиков
-            try:
-                now2 = time.time()
-                recent = False
-                try:
-                    if getattr(self, "_recent_crossings", None):
-                        recent = any((now2 - float(c.get("ts", 0))) < 0.8 for c in self._recent_crossings)
-                except Exception:
-                    recent = False
-                if recent:
-                    delay = 0.05  # Минимальная задержка для плавного видео
-                elif getattr(self, "last_count", 0) > 0:
-                    delay = 0.08  # Минимальная задержка для плавного видео
-                else:
-                    delay = 0.15  # Минимальная задержка для плавного видео
-            except Exception:
-                delay = 0.15  # Минимальная задержка для плавного видео
+                logger.error(f"Infer loop error on {self.stream_id}: {e}", exc_info=True)
+            
+            # Adaptive sleep
+            delay = 0.15
+            if self.last_count > 0:
+                delay = 0.08
+            if self._recent_crossings and any((time.time() - float(c.get("ts", 0))) < 0.8 for c in self._recent_crossings):
+                delay = 0.05
             await asyncio.sleep(delay)
 
     
@@ -1476,44 +1302,46 @@ class StreamManager:
     def __init__(self):
         self.streams: Dict[str, VideoStream] = {}
         self.websockets: Dict[str, List[WebSocket]] = {}
+        self.lock = asyncio.Lock()
 
     async def get_or_create_stream(self, stream_id: str, source_uri: str) -> VideoStream:
-        # Защита от «застрявших» старых инстансов после hot-reload
-        cur = self.streams.get(stream_id)
-        if cur is not None:
-            needs_replace = False
-            try:
-                # если у объекта нет необходимого метода/базы — пересоздаём
-                if not hasattr(cur, 'start') or not isinstance(cur, VideoStream):
-                    needs_replace = True
-            except Exception:
-                needs_replace = True
-            if needs_replace:
+        async with self.lock:
+            # Защита от «застрявших» старых инстансов после hot-reload
+            cur = self.streams.get(stream_id)
+            if cur is not None:
+                needs_replace = False
                 try:
-                    await cur.stop()
+                    # если у объекта нет необходимого метода/базы — пересоздаём
+                    if not hasattr(cur, 'start') or not isinstance(cur, VideoStream):
+                        needs_replace = True
                 except Exception:
-                    pass
-                self.streams.pop(stream_id, None)
+                    needs_replace = True
+                if needs_replace:
+                    try:
+                        await cur.stop()
+                    except Exception:
+                        pass
+                    self.streams.pop(stream_id, None)
 
-        if stream_id not in self.streams:
-            # Отключаем демо-поток, вместо него используем последний активный файл
-            if source_uri.startswith("rtsp://"):
-                self.streams[stream_id] = RtspStream(stream_id, source_uri)
-            else:
-                self.streams[stream_id] = FileStream(stream_id, source_uri)
+            if stream_id not in self.streams:
+                # Отключаем демо-поток, вместо него используем последний активный файл
+                if source_uri.startswith("rtsp://"):
+                    self.streams[stream_id] = RtspStream(stream_id, source_uri)
+                else:
+                    self.streams[stream_id] = FileStream(stream_id, source_uri)
 
-            # Загружаем сохраненные позиции линий
-            stream = self.streams[stream_id]
-            all_positions = load_line_positions()
-            
-            file_key = stream.file_path if isinstance(stream, FileStream) else stream_id
-            if "/" in file_key:
-                file_key = file_key.split("/")[-1]
+                # Загружаем сохраненные позиции линий
+                stream = self.streams[stream_id]
+                all_positions = load_line_positions()
+                
+                file_key = stream.file_path if isinstance(stream, FileStream) else stream_id
+                if "/" in file_key:
+                    file_key = file_key.split("/")[-1]
 
-            if 'files' in all_positions and file_key in all_positions['files']:
-                stream.line_positions = all_positions['files'][file_key]
-                logger.info(f"Loaded line positions for {file_key}")
-        return self.streams[stream_id]
+                if 'files' in all_positions and file_key in all_positions['files']:
+                    stream.line_positions = all_positions['files'][file_key]
+                    logger.info(f"Loaded line positions for {file_key}")
+            return self.streams[stream_id]
 
     async def stop_stream(self, stream_id: str):
         if stream_id in self.streams:
@@ -2003,271 +1831,155 @@ async def api_records_list():
                 with open(p, "r", encoding="utf-8") as f:
                     js = json.load(f)
                 items.append({
-                    "name": p.name,
-                    "stream_id": js.get("stream_id"),
-                    "duration_sec": js.get("duration_sec"),
-                    "seen_total": js.get("seen_total"),
-                    "peak_concurrent": js.get("peak_concurrent"),
-                    "started_at": js.get("started_at"),
-                    "finished_at": js.get("finished_at")
+                    "act_file": p.name,
+                    **js
                 })
             except Exception:
                 continue
-        items.sort(key=lambda x: x.get("finished_at") or 0, reverse=True)
-        return {"items": items}
+        return sorted(items, key=lambda x: x.get("finished_at", 0), reverse=True)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/records/{act_name}")
+async def api_record_details(act_name: str):
+    try:
+        # Sanitize filename
+        if ".." in act_name or "/" in act_name or "\" in act_name:
+            raise HTTPException(status_code=400, detail="Invalid act name")
+        p = RECORDS_DIR / act_name
+        if not p.exists() or not p.is_file():
+            raise HTTPException(status_code=404, detail="Record not found")
+        
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # Check for SVG and encode if exists
+        svg_path = p.with_suffix(".svg")
+        if svg_path.exists():
+            import base64
+            svg_content = svg_path.read_text(encoding="utf-8")
+            data["svg"] = "data:image/svg+xml;base64," + base64.b64encode(svg_content.encode('utf-8')).decode('utf-8')
+            
+        return data
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # --- Verification API ---
-try:
-    from core.verification import verification_system
-    _HAVE_VERIFICATION = True
-except Exception:
-    _HAVE_VERIFICATION = False
-    verification_system = None
-
-# Глобальный экземпляр процессора
-_unified_processor = None
-
-def get_unified_processor():
-    """Получение глобального экземпляра процессора"""
-    global _unified_processor
-    if _unified_processor is None and HAVE_UNIFIED_PROCESSOR:
-        # Получаем путь к модели из конфигурации
-        model_path = os.getenv("MODEL_PATH", "models/pig_yolo11-seg.v4.pt")
-        options = ProcessingOptions(
-            confidence_threshold=float(os.getenv("CONF_THRESHOLD", "0.3")),
-            img_size=int(os.getenv("IMG_SIZE", "640")),
-            device=os.getenv("DEVICE", "auto"),
-            batch_size=int(os.getenv("BATCH_SIZE", "1"))
-        )
-        _unified_processor = get_processor(model_path, options)
-        logging.info("🚀 Unified processor initialized")
-    return _unified_processor
-
-@app.get("/api/verification/stats")
-async def api_verification_stats():
-    """Получить статистику верификации всех актов"""
-    if not _HAVE_VERIFICATION or verification_system is None:
-        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
-
-    try:
-        stats = verification_system.get_verification_stats()
-        return stats
-    except Exception as e:
-        logger.error(f"Error getting verification stats: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
 @app.get("/api/verification/grouped")
 async def api_verification_grouped():
-    """Получить группированные по датам данные верификации"""
-    if not _HAVE_VERIFICATION or verification_system is None:
-        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
-
+    """Группирует все акты по датам и отдает сводную статистику."""
     try:
-        stats = verification_system.get_verification_stats()
-        return {
-            "grouped_by_date": stats.get("grouped_by_date", {}),
-            "summary": {
-                "total_dates": len(stats.get("grouped_by_date", {})),
-                "total_acts": stats.get("total_acts", 0),
-                "verified_acts": stats.get("verified_count", 0),
-                "discrepancy_acts": stats.get("discrepancy_count", 0)
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error getting grouped verification data: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        all_acts = await api_records_list()
+        if isinstance(all_acts, JSONResponse):
+            return all_acts # Propagate errors
 
-@app.get("/api/verification/verify/{act_name}")
-async def api_verify_act(act_name: str):
-    """Проверить конкретный акт взвешивания"""
-    if not _HAVE_VERIFICATION or verification_system is None:
-        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
+        grouped = {}
+        summary = {"total_acts": 0, "verified_acts": 0, "discrepancy_acts": 0}
 
-    try:
-        result = verification_system.verify_weighing_act(act_name)
-        return result
-    except Exception as e:
-        logger.error(f"Error verifying act {act_name}: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        for act in all_acts:
+            if act.get("status") != "success": continue
+            
+            # Определяем дату
+            ts = act.get("finished_at")
+            if not ts:
+                date_key = "unknown"
+            else:
+                date_key = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
 
-@app.post("/api/verification/analyze_excel")
-async def api_analyze_excel(file: UploadFile = File(...)):
-    """Анализировать загруженный Excel файл с замерами"""
-    if not _HAVE_VERIFICATION or verification_system is None:
-        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
+            if date_key not in grouped:
+                grouped[date_key] = {
+                    "acts": [], "total_acts": 0, "verified_acts": 0, 
+                    "discrepancy_acts": 0, "total_pigs": 0, "total_duration": 0
+                }
+            
+            # Проверяем верификацию
+            verified = act.get("verification", {}).get("verified", False)
+            act["verification"] = {"verified": verified} # Упрощаем для фронтенда
+            
+            # Обновляем счетчики
+            summary["total_acts"] += 1
+            grouped[date_key]["total_acts"] += 1
+            grouped[date_key]["total_pigs"] += act.get("seen_total", 0)
+            grouped[date_key]["total_duration"] += act.get("duration_sec", 0)
+            
+            if verified:
+                summary["verified_acts"] += 1
+                grouped[date_key]["verified_acts"] += 1
+            else:
+                summary["discrepancy_acts"] += 1
+                grouped[date_key]["discrepancy_acts"] += 1
+                
+            grouped[date_key]["acts"].append(act)
 
-    try:
-        # Сохраняем файл во временную директорию
-        temp_dir = BASE_DIR / "temp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        # Сортируем даты
+        sorted_dates = sorted(grouped.keys(), reverse=True)
+        sorted_grouped = {d: grouped[d] for d in sorted_dates}
 
-        file_path = temp_dir / file.filename
-        content = await file.read()
+        # Считаем среднюю длительность
+        for date_key, group_data in sorted_grouped.items():
+            if group_data["total_acts"] > 0:
+                group_data["avg_duration"] = group_data["total_duration"] / group_data["total_acts"]
+            else:
+                group_data["avg_duration"] = 0
 
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-        # Анализируем файл
-        result = verification_system.analyze_excel_measurements(str(file_path))
-
-        # Удаляем временный файл
-        try:
-            file_path.unlink()
-        except Exception:
-            pass
-
-        return result
+        return {"summary": summary, "grouped_by_date": sorted_grouped}
 
     except Exception as e:
-        logger.error(f"Error analyzing Excel file: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/verification/report")
-async def api_verification_report():
-    """Получить отчет о несоответствиях в счетчиках"""
-    if not _HAVE_VERIFICATION or verification_system is None:
-        return JSONResponse({"error": "Система верификации недоступна"}, status_code=500)
-
+async def api_generate_verification_report():
+    """Генерирует текстовый отчет по верификации."""
     try:
-        stats = verification_system.get_verification_stats()
+        data = await api_verification_grouped()
+        if isinstance(data, JSONResponse):
+            return data
 
-        # Генерируем отчет
         report = {
             "generated_at": datetime.now().isoformat(),
             "summary": {
-                "total_acts": stats["total_acts"],
-                "verified_acts": stats["verified_count"],
-                "discrepancy_acts": stats["discrepancy_count"],
-                "error_acts": stats["error_count"],
-                "total_pigs_counted": stats["total_pigs"],
-                "verification_rate": (stats["verified_count"] / max(stats["total_acts"], 1)) * 100,
-                "avg_duration_sec": stats["avg_duration"]
+                "total_acts": data["summary"]["total_acts"],
+                "verified_acts": data["summary"]["verified_acts"],
+                "discrepancy_acts": data["summary"]["discrepancy_acts"],
+                "total_pigs_counted": sum(g["total_pigs"] for g in data["grouped_by_date"].values()),
+                "verification_rate": (data["summary"]["verified_acts"] / data["summary"]["total_acts"] * 100) if data["summary"]["total_acts"] > 0 else 0
             },
-            "issues": [],
-            "recommendations": []
+            "issues": []
         }
 
-        # Анализируем проблемы
-        for act in stats["results"]:
-            if act["status"] == "success":
-                verification = act.get("verification", {})
-                if not verification.get("verified"):
-                    issue = {
+        for date_key, group in data["grouped_by_date"].items():
+            for act in group["acts"]:
+                if not act.get("verification", {}).get("verified"):
+                    report["issues"].append({
                         "act_file": act["act_file"],
-                        "stream_id": act.get("stream_id"),
-                        "timestamp": act.get("finished_at"),
+                        "date": date_key,
                         "left_count": act.get("flow", {}).get("left_in", 0),
                         "right_count": act.get("flow", {}).get("right_in", 0),
-                        "difference": verification.get("difference", 0),
-                        "relative_difference": verification.get("relative_difference", 0),
-                        "status": verification.get("status"),
-                        "message": verification.get("message", "")
-                    }
-                    report["issues"].append(issue)
-
-        # Генерируем рекомендации
-        if report["summary"]["discrepancy_acts"] > 0:
-            discrepancy_rate = (report["summary"]["discrepancy_acts"] / report["summary"]["total_acts"]) * 100
-            if discrepancy_rate > 20:
-                report["recommendations"].append({
-                    "priority": "high",
-                    "message": f"{discrepancy_rate:.1f}% актов имеют расхождения",
-                    "action": "Проверьте настройки камер и линий отсечки"
-                })
-            elif discrepancy_rate > 10:
-                report["recommendations"].append({
-                    "priority": "medium",
-                    "message": f"{discrepancy_rate:.1f}% актов имеют расхождения",
-                    "action": "Рекомендуется калибровка системы распознавания"
-                })
-
-        # Анализ паттернов ошибок
-        if len(report["issues"]) > 0:
-            # Группировка по времени
-            time_pattern = {}
-            for issue in report["issues"]:
-                hour = datetime.fromtimestamp(issue["timestamp"]).hour
-                time_pattern[hour] = time_pattern.get(hour, 0) + 1
-
-            peak_hour = max(time_pattern.items(), key=lambda x: x[1])[0] if time_pattern else None
-            if peak_hour is not None:
-                report["recommendations"].append({
-                    "priority": "info",
-                    "message": f"Большинство расхождений происходит в {peak_hour}:00",
-                    "action": "Проверьте условия освещения в это время"
-                })
-
+                        "difference": abs(act.get("flow", {}).get("left_in", 0) - act.get("flow", {}).get("right_in", 0)),
+                        "status": "Расхождение"
+                    })
+        
         return report
 
     except Exception as e:
-        logger.error(f"Error generating verification report: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-@app.get("/api/records/{name}")
-async def api_records_get(name: str):
-    try:
-        safe = "".join(c for c in name if c.isalnum() or c in "._-" )
-        if not safe:
-            return JSONResponse({"error": "invalid name"}, status_code=400)
-        path = RECORDS_DIR / safe
-        if not path.exists():
-            return JSONResponse({"error": "not found"}, status_code=404)
-        with open(path, "r", encoding="utf-8") as f:
-            js = json.load(f)
-        # прикладываем ссылку на svg, если есть
-        svg_name = safe.replace(".json", ".svg")
-        if (RECORDS_DIR / svg_name).exists():
-            js["svg"] = f"/records/{svg_name}"
-        return js
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-# --- Runtime adjustable cut lines ---
-@app.get("/api/lines")
-async def api_get_lines():
-    try:
-        return {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/api/lines")
-async def api_set_lines(left_x: float = Query(None), right_x: float = Query(None), body: dict = Body(None)):
-    try:
-        # Поддерживаем как query, так и JSON body: {left_x, right_x}
-        lx = left_x
-        rx = right_x
-        if body and isinstance(body, dict):
-            if lx is None and body.get("left_x") is not None:
-                lx = float(body.get("left_x"))
-            if rx is None and body.get("right_x") is not None:
-                rx = float(body.get("right_x"))
-        if lx is None or rx is None:
-            return JSONResponse({"error": "left_x and right_x are required"}, status_code=400)
-        # Нормализуем и гарантируем разнос и порядок
-        try:
-            lx = _clamp01(float(lx))
-            rx = _clamp01(float(rx))
-        except Exception:
-            return JSONResponse({"error": "invalid values"}, status_code=400)
-        if lx > rx:
-            lx, rx = rx, lx
-        # Минимальный зазор 0.05
-        min_gap = 0.05
-        if (rx - lx) < min_gap:
-            mid = 0.5 * (lx + rx)
-            lx = max(0.0, mid - min_gap / 2)
-            rx = min(1.0, mid + min_gap / 2)
-        # Применяем глобально (для всех потоков)
-        global LINE_LEFT_X, LINE_RIGHT_X
-        LINE_LEFT_X, LINE_RIGHT_X = float(lx), float(rx)
-        return {"left_x": LINE_LEFT_X, "right_x": LINE_RIGHT_X}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+async def api_set_lines(data: Dict[str, float]):
+    global LINE_LEFT_X, LINE_RIGHT_X
+    left_x = data.get('left_x')
+    right_x = data.get('right_x')
+    if left_x is not None:
+        LINE_LEFT_X = _clamp01(left_x)
+    if right_x is not None:
+        LINE_RIGHT_X = _clamp01(right_x)
+    return {"status": "ok", "left_x": LINE_LEFT_X, "right_x": LINE_RIGHT_X}
 
 @app.get("/api/stream/{stream_id}/seek")
-async def api_stream_seek(stream_id: str, t: float = Query(...)):
+async def api_stream_seek(stream_id: str, t: float):
     stream = STREAM_MANAGER.streams.get(stream_id)
     if not stream:
         return JSONResponse({"error": "stream not found"}, status_code=404)
@@ -2416,6 +2128,519 @@ async def save_weighing_act(data: Dict[str, Any]):
         logger.error(f"Error saving weighing act: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+@app.get("/api/weighing/export")
+async def export_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
+    """Экспорт журнала актов взвешивания в Excel"""
+    try:
+        acts = load_weighing_acts()
+        
+        # Фильтруем по датам
+        filtered_acts = []
+        for act in acts:
+            if date_from <= act['date'] <= date_to:
+                filtered_acts.append(act)
+        
+        if not filtered_acts:
+            return JSONResponse({"error": "No data to export"}, status_code=404)
+        
+        # Создаем CSV данные (проще, чем Excel)
+        csv_data = []
+        csv_data.append(['Дата', 'Время', 'Группа/Секция', 'Количество свиней', 'Общий вес (кг)', 'Средний вес (кг)', 'Счетчик слева', 'Счетчик справа', 'Разница счетчиков', 'Поток'])
+        
+        for act in sorted(filtered_acts, key=lambda x: (x['date'], x['time'])):
+            diff = abs(act['left_count'] - act['right_count'])
+            csv_data.append([
+                act['date'],
+                act['time'],
+                act['group'],
+                act['total'],
+                act['weight'],
+                act['avg_weight'],
+                act['left_count'],
+                act['right_count'],
+                diff,
+                act['stream_id']
+            ])
+        
+        # Создаем CSV файл в памяти
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';')  # Используем точку с запятой для лучшей совместимости с Excel
+        for row in csv_data:
+            writer.writerow(row)
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        # Возвращаем как файл
+        from fastapi.responses import Response
+        return Response(
+            content=csv_content.encode('utf-8-sig'),  # BOM для правильного отображения в Excel
+            media_type='text/csv; charset=utf-8',
+            headers={
+                "Content-Disposition": f"attachment; filename=weighing_logs_{date_from}_{date_to}.csv"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting weighing logs: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# === API для журнала взвешиваний ===
+
+@app.get("/api/journal/acts")
+async def get_weighing_acts(
+    date_from: str = None,
+    date_to: str = None,
+    camera: str = None,
+    limit: int = 100
+):
+    """Получить акты взвешивания с фильтрацией"""
+    try:
+        acts = load_weighing_acts()
+        
+        # Применяем фильтры
+        filtered_acts = []
+        for act in acts:
+            # Фильтр по дате
+            if date_from and act['date'] < date_from:
+                continue
+            if date_to and act['date'] > date_to:
+                continue
+            # Фильтр по камере
+            if camera and act.get('camera') != camera:
+                continue
+            
+            filtered_acts.append(act)
+        
+        # Сортируем по дате (новые сверху)
+        filtered_acts.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+        
+        # Ограничиваем количество
+        filtered_acts = filtered_acts[:limit]
+        
+        # Добавляем статистику
+        total_count = sum(act['count'] for act in filtered_acts)
+        total_weight = sum(act['weight'] for act in filtered_acts)
+        avg_weight = total_weight / total_count if total_count > 0 else 0
+        
+        return {
+            "acts": filtered_acts,
+            "summary": {
+                "total_acts": len(filtered_acts),
+                "total_count": total_count,
+                "total_weight": round(total_weight, 1),
+                "avg_weight": round(avg_weight, 2)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting weighing acts: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/journal/save")
+async def save_weighing_act(request: Request):
+    """Сохранить новый акт взвешивания"""
+    try:
+        data = await request.json()
+        
+        # Валидация данных
+        count = data.get('count', 0)
+        weight = data.get('weight', 0)
+        camera = data.get('camera', 'cam1')
+        
+        if count <= 0:
+            return JSONResponse({"error": "Количество должно быть больше 0"}, status_code=400)
+        if weight <= 0:
+            return JSONResponse({"error": "Вес должен быть больше 0"}, status_code=400)
+        
+        # Создаем новый акт
+        from datetime import datetime
+        now = datetime.now()
+        
+        new_act = {
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M"),
+            "count": int(count),
+            "weight": float(weight),
+            "camera": camera
+        }
+        
+        # Загружаем существующие акты
+        acts = load_weighing_acts()
+        
+        # Добавляем новый акт в начало
+        acts.insert(0, new_act)
+        
+        # Сохраняем обратно в файл
+        save_weighing_acts(acts)
+        
+        logger.info(f"Сохранен новый акт взвешивания: {count} шт., {weight} кг")
+        
+        return {"success": True, "act": new_act}
+        
+    except Exception as e:
+        logger.error(f"Error saving weighing act: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# === API для сверки с файлами замеров ===
+
+@app.post("/api/journal/compare")
+async def compare_with_excel(file: UploadFile = File(...)):
+    """Простая сверка актов взвешивания с Excel файлом"""
+    try:
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            return JSONResponse({"error": "Поддерживаются только Excel файлы (.xlsx, .xls)"}, status_code=400)
+        
+        # Сохраняем временный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        try:
+            import pandas as pd
+            # Читаем Excel файл
+            excel_df = pd.read_excel(tmp_path)
+            
+            # Загружаем наши акты
+            acts = load_weighing_acts()
+            
+            # Ищем столбцы с количеством и весом в Excel
+            count_cols = [col for col in excel_df.columns if any(word in col.lower() for word in ['количество', 'count', 'шт', 'голов'])]
+            weight_cols = [col for col in excel_df.columns if any(word in col.lower() for word in ['вес', 'weight', 'кг'])]
+            
+            if not count_cols or not weight_cols:
+                return JSONResponse({"error": "Не найдены столбцы с количеством или весом в Excel файле"}, status_code=400)
+            
+            # Суммируем данные из Excel
+            excel_total_count = int(excel_df[count_cols[0]].sum()) if count_cols else 0
+            excel_total_weight = float(excel_df[weight_cols[0]].sum()) if weight_cols else 0
+            
+            # Суммируем данные из наших актов
+            acts_total_count = sum(act['count'] for act in acts)
+            acts_total_weight = sum(act['weight'] for act in acts)
+            
+            # Вычисляем расхождения
+            count_diff = abs(acts_total_count - excel_total_count)
+            weight_diff = abs(acts_total_weight - excel_total_weight)
+            
+            count_diff_percent = (count_diff / max(acts_total_count, excel_total_count)) * 100 if max(acts_total_count, excel_total_count) > 0 else 0
+            weight_diff_percent = (weight_diff / max(acts_total_weight, excel_total_weight)) * 100 if max(acts_total_weight, excel_total_weight) > 0 else 0
+            
+            # Определяем статус сверки
+            matches = 0
+            differences = 0
+            
+            if count_diff_percent <= 5 and weight_diff_percent <= 5:  # Допуск 5%
+                matches = 1
+                status = "success"
+                message = "Данные соответствуют"
+            else:
+                differences = 1
+                status = "warning"
+                message = f"Расхождения: количество {count_diff_percent:.1f}%, вес {weight_diff_percent:.1f}%"
+            
+            return {
+                "status": status,
+                "message": message,
+                "matches": matches,
+                "differences": differences,
+                "comparison": {
+                    "excel": {
+                        "total_count": excel_total_count,
+                        "total_weight": round(excel_total_weight, 1),
+                        "rows": len(excel_df)
+                    },
+                    "acts": {
+                        "total_count": acts_total_count,
+                        "total_weight": round(acts_total_weight, 1),
+                        "rows": len(acts)
+                    },
+                    "differences": {
+                        "count_diff": count_diff,
+                        "weight_diff": round(weight_diff, 1),
+                        "count_diff_percent": round(count_diff_percent, 1),
+                        "weight_diff_percent": round(weight_diff_percent, 1)
+                    }
+                }
+            }
+            
+        finally:
+            # Удаляем временный файл
+            os.unlink(tmp_path)
+        
+    except Exception as e:
+        logger.error(f"Error comparing with Excel: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/verification/compare")
+async def compare_with_measurements(file: UploadFile = File(...)):
+    """Сверка актов взвешивания с загруженным файлом замеров"""
+    try:
+        if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+            return JSONResponse({"error": "Unsupported file format. Use .xlsx, .xls or .csv"}, status_code=400)
+        
+        # Сохраняем временный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        try:
+            # Читаем файл замеров
+            if file.filename.endswith('.csv'):
+                import pandas as pd
+                measurements_df = pd.read_csv(tmp_path)
+            else:
+                import pandas as pd
+                measurements_df = pd.read_excel(tmp_path, engine='openpyxl')
+            
+            # Загружаем наши акты
+            acts = load_weighing_acts()
+            
+            # Анализируем структуру файла замеров (используя наш анализ)
+            # Предполагаем, что в файле есть столбцы с датами, группами, весами и количеством
+            
+            matches = 0
+            differences = 0
+            missing = 0
+            details = []
+            
+            # Простая логика сверки (может быть улучшена)
+            for act in acts:
+                # Ищем соответствующую запись в файле замеров
+                found_match = False
+                for _, row in measurements_df.iterrows():
+                    # Пытаемся найти совпадение по дате и группе
+                    # Это упрощенная логика, может потребовать доработки
+                    if str(act['group']).lower() in str(row.values).lower():
+                        found_match = True
+                        # Сравниваем веса (с допуском 5%)
+                        file_weight = 0
+                        file_count = 0
+                        
+                        # Пытаемся извлечь числовые значения из строки
+                        for val in row.values:
+                            if isinstance(val, (int, float)) and 10 <= val <= 2000:  # Диапазон весов
+                                if abs(val - act['weight']) < abs(file_weight - act['weight']):
+                                    file_weight = val
+                            elif isinstance(val, (int, float)) and 1 <= val <= 500:  # Диапазон количества
+                                if abs(val - act['total']) < abs(file_count - act['total']):
+                                    file_count = val
+                        
+                        weight_diff = abs(act['weight'] - file_weight) / act['weight'] if act['weight'] > 0 else 1
+                        count_diff = abs(act['total'] - file_count) / act['total'] if act['total'] > 0 else 1
+                        
+                        if weight_diff <= 0.05 and count_diff <= 0.1:  # Допуск 5% по весу, 10% по количеству
+                            matches += 1
+                            status = 'match'
+                        else:
+                            differences += 1
+                            status = 'diff'
+                        
+                        details.append({
+                            'group': act['group'],
+                            'date': act['date'],
+                            'status': status,
+                            'system_weight': act['weight'],
+                            'system_count': act['total'],
+                            'file_weight': file_weight,
+                            'file_count': file_count
+                        })
+                        break
+                
+                if not found_match:
+                    missing += 1
+                    details.append({
+                        'group': act['group'],
+                        'date': act['date'],
+                        'status': 'missing',
+                        'system_weight': act['weight'],
+                        'system_count': act['total'],
+                        'file_weight': 0,
+                        'file_count': 0
+                    })
+            
+            return {
+                'matches': matches,
+                'differences': differences,
+                'missing': missing,
+                'total_acts': len(acts),
+                'details': details[:20]  # Ограничиваем количество деталей
+            }
+            
+        finally:
+            # Удаляем временный файл
+            os.unlink(tmp_path)
+            
+    except Exception as e:
+        logger.error(f"Error comparing with measurements: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/stream/{stream_id}/line_positions")
+async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Body(...)):
+    """Сохранить позиции линий для конкретного видеофайла."""
+    try:
+        stream = STREAM_MANAGER.streams.get(stream_id)
+        if not stream:
+            return JSONResponse({"error": f"Stream {stream_id} not found"}, status_code=404)
+        
+        # Определяем ключ для файла (без пути)
+        file_key = stream.file_path if isinstance(stream, FileStream) else stream_id
+        if "/" in file_key:
+            file_key = file_key.split("/")[-1]
+
+        # Загружаем, обновляем и сохраняем
+        all_positions = load_line_positions()
+        if 'files' not in all_positions:
+            all_positions['files'] = {}
+        all_positions['files'][file_key] = positions
+        save_line_positions(all_positions)
+
+        # Также обновляем в текущем стриме
+        stream.line_positions = positions
+        
+        return {"status": "success", "message": f"Line positions saved for {file_key}"}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.post("/api/stream/{stream_id}/optimize")
+async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
+    """Optimize stream settings based on transport type"""
+    try:
+        stream = STREAM_MANAGER.streams.get(stream_id)
+        if not stream:
+            return JSONResponse({"error": "stream not found"}, status_code=404)
+
+        # For WebRTC, we can optimize by reducing some polling
+        if transport == "webrtc":
+            # This is a hint to potentially adjust internal settings
+            # Could be extended to modify batch sizes, polling rates, etc.
+            logger.info(f"Optimizing stream {stream_id} for WebRTC transport")
+            return {"status": "optimized", "transport": "webrtc"}
+
+        return {"status": "no_change", "transport": transport}
+    except Exception as e:
+        logger.error(f"Error optimizing stream {stream_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+
+# === API для работы с линиями ===
+
+LINE_POSITIONS_FILE = "line_positions.json"
+
+def load_line_positions():
+    """Загрузка позиций линий из JSON файла"""
+    try:
+        if os.path.exists(LINE_POSITIONS_FILE):
+            with open(LINE_POSITIONS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading line positions: {e}")
+        return {}
+
+def save_line_positions(positions):
+    """Сохранение позиций линий в JSON файл"""
+    try:
+        with open(LINE_POSITIONS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(positions, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving line positions: {e}")
+        return False
+
+# === API для работы с актами взвешивания ===
+
+# Путь к файлу базы данных актов взвешивания
+WEIGHING_DB_FILE = "weighing_acts.json"
+
+def load_weighing_acts():
+    """Загрузка актов взвешивания из JSON файла"""
+    try:
+        if os.path.exists(WEIGHING_DB_FILE):
+            with open(WEIGHING_DB_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        logger.error(f"Error loading weighing acts: {e}")
+        return []
+
+def save_weighing_acts(acts):
+    """Сохранение актов взвешивания в JSON файл"""
+    try:
+        with open(WEIGHING_DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(acts, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving weighing acts: {e}")
+        return False
+
+@app.post("/api/weighing/save")
+async def save_weighing_act(data: Dict[str, Any]):
+    """Сохранение акта взвешивания"""
+    try:
+        # Валидация данных
+        required_fields = ['date', 'group', 'total', 'weight']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
+        
+        # Создаем запись акта
+        act = {
+            'id': f"{data['date']}_{data['group']}_{int(time.time())}",
+            'date': data['date'],
+            'time': data.get('time', datetime.now().strftime('%H:%M')),
+            'group': data['group'],
+            'total': int(data['total']),
+            'weight': float(data['weight']),
+            'avg_weight': float(data.get('avg_weight', data['weight'] / data['total'])),
+            'left_count': int(data.get('left_count', 0)),
+            'right_count': int(data.get('right_count', 0)),
+            'stream_id': data.get('stream_id', ''),
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # Загружаем существующие акты
+        acts = load_weighing_acts()
+        acts.append(act)
+        
+        # Сохраняем
+        if save_weighing_acts(acts):
+            logger.info(f"Saved weighing act: {act['group']} on {act['date']}")
+            return {"status": "success", "id": act['id']}
+        else:
+            return JSONResponse({"error": "Failed to save act"}, status_code=500)
+            
+    except Exception as e:
+        logger.error(f"Error saving weighing act: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/weighing/logs")
+async def get_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
+    """Получение журнала актов взвешивания за период"""
+    try:
+        acts = load_weighing_acts()
+        
+        # Фильтруем по датам
+        filtered_acts = []
+        for act in acts:
+            if date_from <= act['date'] <= date_to:
+                filtered_acts.append(act)
+        
+        # Сортируем по дате и времени (новые сначала)
+        filtered_acts.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+        
+        return filtered_acts
+        
+    except Exception as e:
+        logger.error(f"Error getting weighing logs: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/weighing/export")
 async def export_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):

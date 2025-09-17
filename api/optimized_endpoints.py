@@ -10,11 +10,14 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, De
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+# Импортируем унифицированный StreamManager
+from api.app import STREAM_MANAGER
+
 try:
     from core.optimized_config import get_config, apply_performance_profile, PERFORMANCE_PROFILES
     from core.adaptive_quality_controller import QualityLevel, QualitySettings
     from core.performance_monitor import PerformanceMonitor, PerformanceMetrics
-    from core.async_rtsp_decoder import AsyncRTSPDecoder, DecoderConfig
+    # from core.async_rtsp_decoder import AsyncRTSPDecoder, DecoderConfig # DEPRECATED
     from core.h264_direct_track import H264Config, H264StreamAdapter
     OPTIMIZED_AVAILABLE = True
 except ImportError as e:
@@ -93,7 +96,7 @@ async def get_system_status():
             gpu_usage=None,
             current_fps=0.0,
             target_fps=config.target_fps,
-            active_streams=0,
+            active_streams=len(STREAM_MANAGER.streams),
             quality_level="MEDIUM"
         )
         
@@ -105,7 +108,6 @@ async def get_system_status():
                 status.memory_usage = current_metrics.memory_usage
                 status.gpu_usage = current_metrics.gpu_usage if current_metrics.gpu_usage > 0 else None
                 status.current_fps = current_metrics.current_fps
-                status.active_streams = current_metrics.active_streams
                 
         # Данные от quality controller
         if quality_controller:
@@ -367,24 +369,17 @@ async def websocket_metrics(websocket: WebSocket):
 
 @router.post("/streams/create")
 async def create_optimized_stream(config: StreamConfigRequest):
-    """Создание оптимизированного потока"""
+    """Создание оптимизированного потока с использованием унифицированного StreamManager"""
     try:
-        # Создание конфигурации декодера
-        decoder_config = DecoderConfig(
-            rtsp_url=config.rtsp_url,
-            target_fps=config.target_fps,
-            use_cuda=config.enable_cuda,
-            h264_direct=config.use_h264_direct
-        )
-        
-        # Здесь можно добавить логику создания нового потока
-        # с использованием AsyncRTSPDecoder
+        stream_id = f"stream_{int(time.time())}"
+        stream = await STREAM_MANAGER.get_or_create_stream(stream_id, config.rtsp_url)
+        await stream.start()
         
         return {
             "success": True,
-            "stream_id": f"stream_{int(time.time())}",
+            "stream_id": stream_id,
             "config": config.dict(),
-            "message": "Оптимизированный поток создан"
+            "message": "Оптимизированный поток создан через StreamManager"
         }
         
     except Exception as e:

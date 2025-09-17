@@ -106,8 +106,8 @@
       margin:4px 0 !important; 
       background: var(--liquid-glass-bg); 
       backdrop-filter: blur(var(--liquid-glass-blur)); 
-      border: 1px solid var(--liquid-glass-border); 
-      border-radius: var(--radius-sm); 
+      border: 1px solid var(--liquid-glass-border);
+      border-radius: var(--radius-sm);
       box-shadow: 0 2px 8px var(--liquid-glass-shadow);
     }
     .journal-stat-value { font-size: 28px !important; font-weight: 700; color: var(--text-primary); line-height: 1; }
@@ -116,8 +116,8 @@
     .right-col .card{ padding:6px !important; }
     .right-col .journal-comparison-result{ padding:6px 8px !important; }
     .right-col .journal-btn{ height:30px; line-height:28px; padding:0 10px; }
-    .right-col input, .right-col select{ 
-      height:32px; 
+    .right-col input, .right-col select{
+      height:32px;
       background: var(--liquid-glass-bg);
       border: 1px solid var(--liquid-glass-border);
       border-radius: var(--radius-sm);
@@ -861,7 +861,7 @@
             overlayCanvas.style.opacity = '0';
         } catch (e) {}
         // Сбрасываем счётчики потоков при остановке
-        try { 
+        try {
             leftInEl.textContent = '0'; 
             rightInEl.textContent = '0'; 
             totalCrossingsEl.textContent = '0';
@@ -1483,12 +1483,77 @@
         drawOverlay(lastMasks, lastIds);
     });
 
+    // --- Seek Handlers (Refactored to prevent race conditions) ---
+    let isSeeking = false;
+    let lastSeekRequestTime = 0;
+
+    // Единая функция для отправки запроса на перемотку.
+    // Устраняет дублирование и гонки.
+    function triggerSeek(targetTime) {
+        const now = performance.now();
+        // Простое ограничение для предотвращения "спама" запросами
+        if (now - lastSeekRequestTime < 200) { // Increased debounce time
+            return;
+        }
+        lastSeekRequestTime = now;
+
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        if (!id || /^rtsp:\/\/i.test(src)) {
+            return; // Не перематываем для RTSP или если нет активного потока
+        }
+
+        const t = Number(targetTime || 0);
+        
+        // Блокируем UI для плавной перемотки
+        seekTargetTime = t;
+        seekLockUntil = now + 1500; // Блокируем прием серверного времени на 1.5с
+        overlayBlockUntil = now + 250; // Блокируем оверлей на короткое время
+
+        // Отправляем единственный запрос
+        fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`)
+            .catch(err => console.error('Seek failed:', err));
+        
+        // Немедленно обновляем UI для лучшего отклика
+        setSeekUIVal(t);
+    }
+
+    // 1. Только обновляем UI во время перетаскивания (событие 'input')
+    seekRange.addEventListener('input', (e) => {
+        e.stopPropagation();
+        const t = Number(e.target.value || 0);
+        curTime.textContent = t.toFixed(1);
+        
+        const max = Number(seekRange.max || 1);
+        const percent = max > 0 ? Math.round((t / max) * 100) : 0;
+        streamStatus.textContent = `${percent}%`;
+    });
+
+    // 2. Отслеживаем начало перетаскивания
+    seekRange.addEventListener('mousedown', () => { isSeeking = true; });
+    seekRange.addEventListener('touchstart', () => { isSeeking = true; });
+
+    // 3. Отправляем запрос на перемотку в момент отпускания ползунка
+    seekRange.addEventListener('mouseup', () => {
+        if (isSeeking) {
+            isSeeking = false;
+            triggerSeek(seekRange.value);
+        }
+    });
+    seekRange.addEventListener('touchend', () => {
+        if (isSeeking) {
+            isSeeking = false;
+            triggerSeek(seekRange.value);
+        }
+    });
+    // Лишний обработчик 'change' удален, чтобы избежать двойного срабатывания.
+
     // Keyboard seek (Left/Right arrows). Shift=±1s, Ctrl=±5s, иначе ±step
     function setSeekUIVal(t) {
         let max = Number(seekRange.max || 0);
         let clamped = Math.max(0, Math.min(max, Number(t) || 0));
         seekRange.value = clamped;
-        try { 
+        try {
             curTime.textContent = clamped.toFixed(1);
             // Обновляем индикатор позиции в процентах от длительности
             const percent = max > 0 ? Math.round((clamped / max) * 100) : 0;
@@ -1496,17 +1561,7 @@
         } catch (_) {}
         return clamped;
     }
-    async function requestSeekTo(t) {
-        const id = activeStreamId;
-        const src = streamSources[id] || '';
-        // блокируем приём времени до прихода к цели
-        seekTargetTime = Number(t) || 0;
-        seekLockUntil = performance.now() + 1200;
-        overlayBlockUntil = performance.now() + 180;
-        if (!/^rtsp:\/\//i.test(src)) {
-            try { await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(seekTargetTime)}`); } catch (_) {}
-        }
-    }
+    // requestSeekTo function is removed and replaced by triggerSeek.
     document.addEventListener('keydown', (e) => {
         const ae = document.activeElement;
         const tag = (ae && ae.tagName || '').toLowerCase();
@@ -1515,7 +1570,7 @@
             const id = activeStreamId;
             const src = streamSources[id] || '';
             // Только для файловых источников
-            if (!id || !src || /^rtsp:\/\//i.test(src) || !isVideoPlaying) return;
+            if (!id || !src || /^rtsp:\/\/i.test(src) || !isVideoPlaying) return;
             e.preventDefault();
             
             // Определяем шаг перемотки: Ctrl+стрелка = 5 секунд, Shift+стрелка = 1 секунда, иначе - шаг из настроек
@@ -1524,9 +1579,9 @@
             const cur = Number(seekRange.value || 0);
             const dir = (e.key === 'ArrowRight') ? 1 : -1;
             
-            // Устанавливаем новое значение и запускаем перемотку
-            const target = setSeekUIVal(cur + dir * step);
-            requestSeekTo(target);
+            // Устанавливаем новое значение и запускаем перемотку через единую функцию
+            const target = cur + dir * step;
+            triggerSeek(target);
             
             // Визуальная обратная связь - мигаем индикатором времени
             const timeElement = document.getElementById('curTime');
@@ -1775,59 +1830,6 @@
         }
     });
 
-    // Seek handlers (single-request logic)
-    let isSeeking = false;
-    seekRange.addEventListener('input', (e) => {
-        e.stopPropagation();
-        const t = Number(e.target.value || 0);
-        curTime.textContent = t.toFixed(1);
-        const id = activeStreamId;
-        const src = streamSources[id] || '';
-        if (/^rtsp:\/\//i.test(src)) return;
-        // Во время drag отправляем только на pointerup — не дёргаем бекенд из input
-        if (isSeeking) {
-            if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
-            return;
-        }
-        // Клавиатурная/программная смена — мягкий дебаунс
-        if (seekDebounce) clearTimeout(seekDebounce);
-        seekDebounce = setTimeout(async () => {
-            try {
-                overlayBlockUntil = performance.now() + 120;
-                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
-            } catch (_) {}
-        }, 150);
-    });
-    // Manage pointer drag to avoid duplicate change/pointerup seeks
-    if (seekRange) seekRange.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        isSeeking = true;
-        if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
-    });
-    if (seekRange) seekRange.addEventListener('pointerup', async (e) => {
-        e.stopPropagation();
-        const id = activeStreamId;
-        const src = streamSources[id] || '';
-        const t = Number(seekRange.value || 0);
-        const finishDrag = () => { isSeeking = false; };
-        // блокируем приём серверного t, пока не дойдём до цели
-        seekTargetTime = t;
-        seekLockUntil = performance.now() + 1200;
-        if (!/^rtsp:\/\//i.test(src)) {
-            try {
-                if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
-                overlayBlockUntil = performance.now() + 180;
-                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
-            } catch (_) {
-            } finally {
-                finishDrag();
-            }
-        } else {
-            // Для RTSP ничего не дергаем на бек — просто выходим из режима
-            finishDrag();
-        }
-    });
-
     document.addEventListener('DOMContentLoaded', async () => {
         // Принудительно устанавливаем WebRTC как приоритетный транспорт
         const transportSelect = document.getElementById('transportSelect');
@@ -2010,7 +2012,6 @@
 
               const statusColor = verification.verified ? '#28a745' : '#ffc107';
               const statusText = verification.verified ? '✓' : '⚠';
-
               item.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <strong style="color:#1f3d6b;">${act.act_file}</strong>
@@ -2585,38 +2586,46 @@
     function displayVerificationResults(result) {
       document.getElementById('verificationMatches').textContent = result.matches || 0;
       document.getElementById('verificationDiffs').textContent = result.differences || 0;
-      document.getElementById('verificationMissing').textContent = result.missing || 0;
-
+      
       const resultsContainer = document.getElementById('verificationResults');
-      resultsContainer.innerHTML = '';
-
-      if (result.details && result.details.length > 0) {
-        result.details.forEach(item => {
-          const resultItem = document.createElement('div');
-          resultItem.style.cssText = `
-            padding: 6px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            margin-bottom: 4px;
-            ${item.status === 'match' ? 'background: rgba(40,167,69,0.1); border: 1px solid rgba(40,167,69,0.2);' :
-              item.status === 'diff' ? 'background: rgba(255,193,7,0.1); border: 1px solid rgba(255,193,7,0.2);' :
-              'background: rgba(220,53,69,0.1); border: 1px solid rgba(220,53,69,0.2);'}
-          `;
-          
-          const statusIcon = item.status === 'match' ? '✅' : item.status === 'diff' ? '⚠️' : '❌';
-          resultItem.innerHTML = `
-            <div><strong>${statusIcon} ${item.group} (${item.date})</strong></div>
-            <div style="margin-top:2px;">
-              Система: ${item.system_weight}кг (${item.system_count}шт) | 
-              Файл: ${item.file_weight}кг (${item.file_count}шт)
-            </div>
-          `;
-          
-          resultsContainer.appendChild(resultItem);
-        });
-      } else {
-        resultsContainer.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет данных для отображения</div>';
-      }
+      resultsContainer.style.display = 'block';
+      
+      const statusClass = result.status === 'success' ? 'journal-comparison-success' : 
+                         result.status === 'warning' ? 'journal-comparison-warning' : 
+                         'journal-comparison-error';
+      
+      resultsContainer.className = `journal-comparison-result ${statusClass}`;
+      
+      resultsContainer.innerHTML = `
+        <h4 style="margin: 0 0 12px 0; color: var(--text);">${result.message}</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Excel файл:</h5>
+            <p style="margin: 0; font-size: 13px;">
+              Количество: ${result.comparison.excel.total_count}<br>
+              Вес: ${result.comparison.excel.total_weight} кг<br>
+              Записей: ${result.comparison.excel.rows}
+            </p>
+          </div>
+          <div>
+            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Наши акты:</h5>
+            <p style="margin: 0; font-size: 13px;">
+              Количество: ${result.comparison.acts.total_count}<br>
+              Вес: ${result.comparison.acts.total_weight} кг<br>
+              Записей: ${result.comparison.acts.rows}
+            </p>
+          </div>
+        </div>
+        ${result.comparison.differences ? `
+          <div style="margin-top: 12px; padding: 8px; background: rgba(255,193,7,0.1); border-radius: 6px; font-size: 12px;">
+            <strong>Расхождения:</strong><br>
+            Количество: ±${result.comparison.differences.count_diff} (${result.comparison.differences.count_diff_percent}%)<br>
+            Вес: ±${result.comparison.differences.weight_diff} кг (${result.comparison.differences.weight_diff_percent}%)
+          </div>
+        ` : ''}
+      `;
+      
+      showNotification('📊 Сверка выполнена', 'info');
     }
 
     // Автоматическая загрузка данных при запуске
