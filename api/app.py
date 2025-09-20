@@ -94,45 +94,12 @@ except ImportError:
     MAX_WAIT_MS = int(os.getenv("MAX_WAIT_MS", "50"))
 
 # --- Config from environment ---
-CAM_DEFAULT = os.getenv("CAM_DEFAULT", "rtsp://admin:Qwerty.123@10.15.6.24/1/1")
-CAM_URL = os.getenv("CAM_URL", CAM_DEFAULT)
-JPEG_QUALITY = int(os.getenv("JPEG_QUALITY", "80"))
-TARGET_FPS = float(os.getenv("FPS", "12"))
-BOUNDARY = "frame"
+# Model config
+DETECTION_MODE = config['DETECTION_MODE']
+PIG_CLASS_ID = config['PIG_CLASS_ID']
 
-# Lines positions (normalized) can be tuned via env; defaults near edges
-def _clamp01(x: float) -> float:
-    try:
-        return max(0.0, min(1.0, float(x)))
-    except Exception:
-        return 0.0
-
-try:
-    LINE_LEFT_X = _clamp01(os.getenv("LINE_LEFT_X", "0.25"))
-except Exception:
-    LINE_LEFT_X = 0.25
-try:
-    LINE_RIGHT_X = _clamp01(os.getenv("LINE_RIGHT_X", "0.75"))
-except Exception:
-    LINE_RIGHT_X = 0.75
-if LINE_LEFT_X > LINE_RIGHT_X:
-    LINE_LEFT_X, LINE_RIGHT_X = LINE_RIGHT_X, LINE_LEFT_X
-if (LINE_RIGHT_X - LINE_LEFT_X) < 0.05:
-    mid = 0.5 * (LINE_LEFT_X + LINE_RIGHT_X)
-    LINE_LEFT_X = max(0.0, mid - 0.025)
-    LINE_RIGHT_X = min(1.0, mid + 0.025)
-
-# Model config (строго .pt из каталога ./models)
-DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only").lower()
-# Разрешаем указывать путь единой переменной MODEL_PATH, либо старым PIG_MODEL_PATH
-_ENV_MODEL_PATH = os.getenv("MODEL_PATH")
-PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH")
-PIG_CLASS_ID = int(os.getenv("PIG_CLASS_ID", "0"))
-
-# Выбор эффективной модели и классов
 if DETECTION_MODE == "pig-only":
-    # Для режима pig-only принимаем MODEL_PATH (приоритет) или PIG_MODEL_PATH
-    _chosen_path = _ENV_MODEL_PATH or PIG_MODEL_PATH
+    _chosen_path = config.get('MODEL_PATH') or config.get('PIG_MODEL_PATH')
     if not _chosen_path:
         raise RuntimeError("MODEL_PATH или PIG_MODEL_PATH не задан в .env")
     _p = Path(_chosen_path)
@@ -141,67 +108,13 @@ if DETECTION_MODE == "pig-only":
     MODEL_PATH = _chosen_path
     TARGET_CLASS_IDS = {PIG_CLASS_ID}
 else:
-    TARGET_CLASS_IDS = set(map(int, os.getenv("TARGET_CLASS_IDS", "20,17,19").split(",")))
-    # В остальных режимах ожидаем путь в MODEL_PATH
+    TARGET_CLASS_IDS = set(map(int, config['TARGET_CLASS_IDS'].split(",")))
+    _ENV_MODEL_PATH = config.get('MODEL_PATH')
     if not _ENV_MODEL_PATH:
         raise RuntimeError("MODEL_PATH не задан в .env для текущего DETECTION_MODE")
     if not Path(_ENV_MODEL_PATH).exists():
         raise RuntimeError(f"Файл модели не найден: {_ENV_MODEL_PATH}")
-    MODEL_PATH = _ENV_MODEL_PATH
-CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))
-
-AVG_WINDOW = int(os.getenv("AVG_WINDOW", "20"))
-FRAME_SKIP = int(os.getenv("FRAME_SKIP", "3"))
-
-# Оптимизированная предобработка для соответствия датасету
-USE_OPTIMIZED_PREPROCESSING = os.getenv("USE_OPTIMIZED_PREPROCESSING", "true").lower() == "true"
-PREPROCESSING_METHOD = os.getenv("PREPROCESSING_METHOD", "adaptive")  # adaptive, center_crop, letterbox
-
-
-
-# Inference device (GPU/CPU)
-try:
-    import torch as _torch
-    _cuda_ok = bool(getattr(_torch, 'cuda', None) and _torch.cuda.is_available())
-except Exception:
-    _cuda_ok = False
-DEVICE = os.getenv("DEVICE") or ("cuda:0" if _cuda_ok else "cpu")
-USE_HALF = (os.getenv("USE_HALF", "true").lower() == "true") and DEVICE.startswith("cuda")
-
-# Auto-fallback: if torch exists but CUDA not available, force CPU and disable half
-try:
-    import torch as _torch_check
-    if DEVICE and DEVICE.startswith('cuda') and not (_torch_check.cuda.is_available() if hasattr(_torch_check, 'cuda') else False):
-        logger.warning("Requested DEVICE=%s but CUDA not available. Falling back to CPU (disabling half).", DEVICE)
-        DEVICE = 'cpu'
-        USE_HALF = False
-except Exception:
-    # if torch isn't importable here, leave env values as-is; ModelAdapter will warn later
-    pass
-
-# Inference device (GPU/CPU) and torch settings
-try:
-    import torch as _torch
-    if hasattr(_torch.backends, 'cudnn'):
-        try:
-            _torch.backends.cudnn.benchmark = True
-        except Exception:
-            pass
-    try:
-        _torch.set_grad_enabled(False)
-    except Exception:
-        pass
-    _cuda_ok = bool(getattr(_torch, 'cuda', None) and _torch.cuda.is_available())
-except Exception:
-    _cuda_ok = False
-DEVICE = os.getenv("DEVICE") or ("cuda:0" if _cuda_ok else "cpu")
-USE_HALF = (os.getenv("USE_HALF", "true").lower() == "true") and DEVICE.startswith("cuda")
-
-# --- Counting/estimation parameters ---
-COUNT_WINDOW_SEC = float(os.getenv("COUNT_WINDOW_SEC", "10.0"))
-COUNT_DECAY_HALFLIFE_SEC = float(os.getenv("COUNT_DECAY_HALFLIFE_SEC", "4.0"))
-COUNT_SOFTMAX_BETA = float(os.getenv("COUNT_SOFTMAX_BETA", "0.8"))
-CROSS_COOLDOWN_SEC = float(os.getenv("CROSS_COOLDOWN_SEC", "1.0"))  # Уменьшен кулдаун для более точного подсчета
+    MODEL_PATH = _ENV_MODEL_PATH  # Уменьшен кулдаун для более точного подсчета
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -239,13 +152,13 @@ def cameras_from_env() -> Dict[str, str]:
             cams[f"cam{num}"] = url
         return cams
     # Fallback
-    url = os.getenv("CAM_URL") or os.getenv("CAM_DEFAULT")
+    url = config.get('CAM_URL') or config['CAM_DEFAULT']
     if url:
         cams["cam101"] = url
     return cams
 
 def encode_jpeg(frame, quality: int = None) -> bytes:
-    q = quality or JPEG_QUALITY
+    q = quality or config['JPEG_QUALITY']
     encode_params = [
         cv2.IMWRITE_JPEG_QUALITY, q,
         cv2.IMWRITE_JPEG_OPTIMIZE, 1,
@@ -526,7 +439,7 @@ class VideoStream(abc.ABC):
         self.model_loaded = False
         self.last_count = 0
         # Оценка количества: максимум по окну и монотоничный отчёт (не прыгает)
-        self.window_max = WindowMaxEstimator(COUNT_WINDOW_SEC)
+        self.window_max = WindowMaxEstimator(config['AVG_WINDOW'])
         self.reported_count = 0
         # flow counters and per-track state
         self.left_in = 0
@@ -688,134 +601,129 @@ class VideoStream(abc.ABC):
 
     
 
-    def _update_line_counters(self, ids: List[int], centers_x: List[float], centers_y: Optional[List[float]] = None):
+    async def _update_line_counters(self, ids: List[int], centers_x: List[float], centers_y: Optional[List[float]] = None):
         """Count entries from left/right by crossing vertical lines at 0.25 and 0.75 of width.
         A crossing is counted when center crosses:
         - from <0.25 to >=0.25 (left_in) - вход слева направо через левую линию
         - from <=0.75 to >0.75 (right_in) - вход справа налево через правую линию
         Directional and with cooldown to avoid bouncing.
         """
-        now = time.time()
-        # Линии сдвинуты к краям (настраиваются через env)
-        L = float(LINE_LEFT_X)
-        R = float(LINE_RIGHT_X)
-        cy_iter: List[float] = centers_y if centers_y is not None else [0.5] * len(centers_x)
-        for tid, cx, cy in zip(ids, centers_x, cy_iter):
-            if tid is None:
-                continue
-            prev = self._track_prev_x.get(tid)
-            prev_y = getattr(self, '_track_prev_y', {}).get(tid)
-            if not hasattr(self, '_track_prev_y'):
-                self._track_prev_y = {}
-            if not hasattr(self, '_track_is_inside'):
-                self._track_is_inside = {}
-            prev_inside = bool(self._track_is_inside.get(tid, (prev is not None and L <= prev <= R)))
-            cur_inside = bool(L <= cx <= R)
+        async with self.lock:
+            now = time.time()
+            # Линии сдвинуты к краям (настраиваются через env)
+            config['LINE_LEFT_X']
+            R = float(config['LINE_RIGHT_X'])
+            cy_iter: List[float] = centers_y if centers_y is not None else [0.5] * len(centers_x)
+            for tid, cx, cy in zip(ids, centers_x, cy_iter):
+                if tid is None:
+                    continue
+                prev = self._track_prev_x.get(tid)
+                prev_y = getattr(self, '_track_prev_y', {}).get(tid)
+                if not hasattr(self, '_track_prev_y'):
+                    self._track_prev_y = {}
+                if not hasattr(self, '_track_is_inside'):
+                    self._track_is_inside = {}
+                prev_inside = bool(self._track_is_inside.get(tid, (prev is not None and L <= prev <= R)))
+                cur_inside = bool(L <= cx <= R)
 
-            def _interp_y(px, py, qx, qy, lx):
-                try:
-                    t = (float(lx) - float(px)) / (float(qx) - float(px))
-                    return max(0.0, min(1.0, float(py) + t * (float(qy) - float(py))))
-                except Exception:
-                    return float(cy)
+                def _interp_y(px, py, qx, qy, lx):
+                    try:
+                        t = (float(lx) - float(px)) / (float(qx) - float(px))
+                        return max(0.0, min(1.0, float(py) + t * (float(qy) - float(py))))
+                    except Exception:
+                        return float(cy)
 
-            if prev is not None and prev_y is not None:
-                # enter events
-                if (not prev_inside) and cur_inside:
-                    if prev < L <= cx:
-                        key = (tid, 'enter_left')
-                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                            self.left_in += 1
-                            self.total_crossings += 1  # Увеличиваем общий счетчик
-                            self.left_flow += 1
-                            self._track_last_side_time[key] = now
-                            logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}, cooldown={CROSS_COOLDOWN_SEC * 0.3:.1f}s")
-                            y_at = _interp_y(prev, prev_y, cx, cy, L)
-                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
-                            # долгосрочный лог для дашборда
-                            try:
-                                self._act_crossings.append({
-                                    "id": int(tid), "side": "left", "mode": "enter",
-                                    "t": float(max(0.0, now - self._act_start_ts)),
-                                    "x": float(L), "y": float(y_at),
-                                    "count_est": int(self.reported_count)
-                                })
-                                # порядковый номер пересечения слева
-                                if int(tid) not in self._left_cross_rank:
-                                    self._left_cross_rank[int(tid)] = self._left_cross_counter
-                                    self._left_cross_counter += 1
-                            except Exception:
-                                pass
-                    elif cx > R >= prev:
-                        key = (tid, 'enter_right')
-                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                            self.right_in += 1
-                            self.total_crossings += 1  # Увеличиваем общий счетчик
-                            self.right_flow += 1  # Исправлено: должно быть +1 для входа справа
-                            self._track_last_side_time[key] = now
-                            logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}, cooldown={CROSS_COOLDOWN_SEC * 0.3:.1f}s")
-                            y_at = _interp_y(prev, prev_y, cx, cy, R)
-                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
-                            try:
-                                self._act_crossings.append({
-                                    "id": int(tid), "side": "right", "mode": "enter",
-                                    "t": float(max(0.0, now - self._act_start_ts)),
-                                    "x": float(R), "y": float(y_at),
-                                    "count_est": int(self.reported_count)
-                                })
-                            except Exception:
-                                pass
-                # exit events
-                if prev_inside and (not cur_inside):
-                    if cx < L <= prev:
-                        key = (tid, 'exit_left')
-                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                            # treat as -1 on left side
-                            self.left_in = max(0, self.left_in - 1)
-                            self.left_flow -= 1
-                            self._track_last_side_time[key] = now
-                            y_at = _interp_y(prev, prev_y, cx, cy, L)
-                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
-                            try:
-                                self._act_crossings.append({
-                                    "id": int(tid), "side": "left", "mode": "exit",
-                                    "t": float(max(0.0, now - self._act_start_ts)),
-                                    "x": float(L), "y": float(y_at),
-                                    "count_est": int(self.reported_count)
-                                })
-                            except Exception:
-                                pass
-                    elif prev > R >= cx:
-                        key = (tid, 'exit_right')
-                        if now - self._track_last_side_time.get(key, 0.0) >= (CROSS_COOLDOWN_SEC * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                            self.right_in = max(0, self.right_in - 1)
-                            self.right_flow -= 1  # Исправлено: должно быть -1 для выхода справа
-                            self._track_last_side_time[key] = now
-                            y_at = _interp_y(prev, prev_y, cx, cy, R)
-                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
-                            try:
-                                self._act_crossings.append({
-                                    "id": int(tid), "side": "right", "mode": "exit",
-                                    "t": float(max(0.0, now - self._act_start_ts)),
-                                    "x": float(R), "y": float(y_at),
-                                    "count_est": int(self.reported_count)
-                                })
-                            except Exception:
-                                pass
+                if prev is not None and prev_y is not None:
+                    # enter events
+                    if (not prev_inside) and cur_inside:
+                                            if prev < L <= cx:
+                                                key = (tid, 'enter_left')
+                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
+                                                    self.left_in += 1
+                                                    self.total_crossings += 1  # Увеличиваем общий счетчик                                self.left_flow += 1
+                                self._track_last_side_time[key] = now
+                                logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}, cooldown={config['CROSS_COOLDOWN_SEC'] * 0.3:.1f}s")
+                                y_at = _interp_y(prev, prev_y, cx, cy, L)
+                                self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
+                                # долгосрочный лог для дашборда
+                                try:
+                                    self._act_crossings.append({
+                                        "id": int(tid), "side": "left", "mode": "enter",
+                                        "t": float(max(0.0, now - self._act_start_ts)),
+                                        "x": float(L), "y": float(y_at),
+                                        "count_est": int(self.reported_count)
+                                    })
+                                    # порядковый номер пересечения слева
+                                    if int(tid) not in self._left_cross_rank:
+                                        self._left_cross_rank[int(tid)] = self._left_cross_counter
+                                        self._left_cross_counter += 1
+                                except Exception:
+                                    pass
+                                            elif cx > R >= prev:
+                                                key = (tid, 'enter_right')
+                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
+                                                    self.right_in += 1
+                                                    self.total_crossings += 1  # Увеличиваем общий счетчик                                self.right_flow += 1  # Исправлено: должно быть +1 для входа справа
+                                self._track_last_side_time[key] = now
+                                logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}, cooldown={config['CROSS_COOLDOWN_SEC'] * 0.3:.1f}s")
+                                y_at = _interp_y(prev, prev_y, cx, cy, R)
+                                self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
+                                try:
+                                    self._act_crossings.append({
+                                        "id": int(tid), "side": "right", "mode": "enter",
+                                        "t": float(max(0.0, now - self._act_start_ts)),
+                                        "x": float(R), "y": float(y_at),
+                                        "count_est": int(self.reported_count)
+                                    })
+                                except Exception:
+                                    pass
+                    # exit events
+                    if prev_inside and (not cur_inside):
+                                            if cx < L <= prev:
+                                                key = (tid, 'exit_left')
+                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
+                                                    # treat as -1 on left side
+                                                    self.left_in = max(0, self.left_in - 1)                                self.left_flow -= 1
+                                self._track_last_side_time[key] = now
+                                y_at = _interp_y(prev, prev_y, cx, cy, L)
+                                self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
+                                try:
+                                    self._act_crossings.append({
+                                        "id": int(tid), "side": "left", "mode": "exit",
+                                        "t": float(max(0.0, now - self._act_start_ts)),
+                                        "x": float(L), "y": float(y_at),
+                                        "count_est": int(self.reported_count)
+                                    })
+                                except Exception:
+                                    pass
+                                            elif prev > R >= cx:
+                                                key = (tid, 'exit_right')
+                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
+                                                    self.right_in = max(0, self.right_in - 1)
+                                                    self.right_flow -= 1  # Исправлено: должно быть -1 для выхода справа                                self._track_last_side_time[key] = now
+                                y_at = _interp_y(prev, prev_y, cx, cy, R)
+                                self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
+                                try:
+                                    self._act_crossings.append({
+                                        "id": int(tid), "side": "right", "mode": "exit",
+                                        "t": float(max(0.0, now - self._act_start_ts)),
+                                        "x": float(R), "y": float(y_at),
+                                        "count_est": int(self.reported_count)
+                                    })
+                                except Exception:
+                                    pass
 
-            self._track_prev_x[tid] = cx
-            self._track_prev_y[tid] = cy
-            self._track_is_inside[tid] = cur_inside
-        try:
-            cutoff = now - 2.0
-            if self._recent_crossings:
-                self._recent_crossings = [c for c in self._recent_crossings if c.get("ts", 0) >= cutoff]
-        except Exception:
-            pass
+                self._track_prev_x[tid] = cx
+                self._track_prev_y[tid] = cy
+                self._track_is_inside[tid] = cur_inside
+            try:
+                cutoff = now - 2.0
+                if self._recent_crossings:
+                    self._recent_crossings = [c for c in self._recent_crossings if c.get("ts", 0) >= cutoff]
+            except Exception:
+                pass
 
-    async def _infer_loop(self):
-        # Делегируем в глобальную реализацию, чтобы избежать конфликтов hot-reload
-        return await _global_infer_loop(self)
+
 
     async def get_jpeg(self) -> Optional[bytes]:
         async with self.lock:
@@ -930,7 +838,7 @@ async def _global_infer_loop(self):
                     centroids_x_norm = [c[0] / W0 for c in result.centroids]
                     centroids_y_norm = [c[1] / H0 for c in result.centroids]
 
-                    self._update_line_counters(ids, centroids_x_norm, centroids_y_norm)
+                    await self._update_line_counters(ids, centroids_x_norm, centroids_y_norm)
                     
                     self.last_count = result.detections
                     self.last_masks = result.masks
@@ -989,144 +897,7 @@ class RtspStream(VideoStream):
         super().__init__(stream_id)
         self.rtsp_url = rtsp_url
 
-    async def start(self):
-        # Явная реализация (на случай старых базовых классов в памяти)
-        if not getattr(self, 'running', False):
-            self.running = True
-            self._stream_task = asyncio.create_task(self._stream_loop())
-            # базовый метод доступен через делегат
-            self._infer_task = asyncio.create_task(self._infer_loop())
 
-    async def _stream_loop(self):
-        try:
-            use_ffmpeg = os.getenv("USE_FFMPEG", "false").lower() == "true"
-            ffproc = None
-            if use_ffmpeg:
-                try:
-                    q = os.getenv("FFMPEG_MJPEG_Q", "7")
-                    cmd = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
-                        "-rtsp_transport", "tcp",
-                        "-fflags", "nobuffer",
-                        "-flags", "low_delay",
-                        "-i", self.rtsp_url,
-                        "-an", "-c:v", "mjpeg", "-q:v", str(q),
-                        "-f", "mjpeg", "-"
-                    ]
-                    ffproc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
-                    buf = bytearray()
-                except Exception as e:
-                    logger.warning(f"FFmpeg start failed, fallback to PyAV: {e}")
-                    use_ffmpeg = False
-
-            if not use_ffmpeg:
-                av_open_rtsp(self.stream_id, self.rtsp_url)
-
-            while self.running:
-                if use_ffmpeg and ffproc and ffproc.stdout:
-                    try:
-                        chunk = ffproc.stdout.read(4096)
-                        if not chunk:
-                            await asyncio.sleep(0.01)
-                            continue
-                        buf.extend(chunk)
-                        # extract JPEG frames by SOI(FFD8) / EOI(FFD9)
-                        while True:
-                            soi = buf.find(b"\xff\xd8")
-                            if soi < 0:
-                                # drop old data if buffer too large
-                                if len(buf) > 2_000_000:
-                                    del buf[:len(buf)-1024]
-                                break
-                            eoi = buf.find(b"\xff\xd9", soi + 2)
-                            if eoi < 0:
-                                # wait for more data
-                                # trim left if useless bytes before SOI
-                                if soi > 0:
-                                    del buf[:soi]
-                                break
-                            frame = bytes(buf[soi:eoi+2])
-                            del buf[:eoi+2]
-                            async with self.lock:
-                                self.last_jpeg = frame
-                            # publish to in-process broker (fire-and-forget)
-                            try:
-                                if FRAME_BROKER is not None:
-                                    asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), frame))
-                                    if start_global_worker_for is not None:
-                                        start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
-                            except Exception:
-                                pass
-                            break
-                    except Exception:
-                        await asyncio.sleep(0.01)
-                else:
-                    frame_data = av_read_jpeg(self.stream_id, timeout=1.0)
-                    if frame_data and isinstance(frame_data, dict) and frame_data.get('jpeg'):
-                        async with self.lock:
-                            self.last_frame_data = frame_data
-                        
-                        jpeg = frame_data['jpeg']
-                        pts = frame_data.get('pts')
-                        time_base = frame_data.get('time_base')
-                        
-                        # Calculate timestamp in seconds if possible
-                        ts = time.time() # fallback
-                        if pts is not None and time_base is not None and time_base > 0:
-                            ts = pts * time_base
-                        
-                        # Use pts as frame_id for uniqueness
-                        frame_id = pts if pts is not None else int(ts * 1000)
-
-                        try:
-                            if FRAME_BROKER is not None:
-                                asyncio.create_task(FRAME_BROKER.publish(self.stream_id, frame_id, ts, jpeg))
-                                if start_global_worker_for is not None:
-                                    start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
-                        except Exception:
-                            pass
-                    await asyncio.sleep(1.0 / TARGET_FPS)
-        except Exception as e:
-            logger.error(f"RTSP stream {self.stream_id} error: {e}")
-        finally:
-            try:
-                av_close(self.stream_id)
-            except Exception:
-                pass
-            try:
-                if ffproc:
-                    ffproc.kill()
-            except Exception:
-                pass
-            self.running = False
-
-    async def stop(self):
-        # Без обращения к VideoStream.stop для устойчивости к hot-reload
-        if getattr(self, 'running', False):
-            self.running = False
-        t1 = getattr(self, '_stream_task', None)
-        t2 = getattr(self, '_infer_task', None)
-        if t1:
-            try:
-                t1.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await t1
-            except Exception:
-                pass
-            self._stream_task = None
-        if t2:
-            try:
-                t2.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await t2
-            except Exception:
-                pass
-            self._infer_task = None
-        # Сохранить акт для дашборда
-        try:
-            self._finalize_act_to_files()
-        except Exception:
-            pass
 
 class FileStream(VideoStream):
     def __init__(self, stream_id: str, file_path: str):
@@ -1175,8 +946,6 @@ class FileStream(VideoStream):
                     try:
                         if FRAME_BROKER is not None:
                             asyncio.create_task(FRAME_BROKER.publish(self.stream_id, frame_id, ts, jpeg))
-                            if start_global_worker_for is not None:
-                                start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
                     except Exception:
                         pass
                 else:
@@ -1244,101 +1013,7 @@ class DemoStream(VideoStream):
         self.source_uri = source_uri
         self.demo_generator = None
         
-    async def start(self):
-        if self.running:
-            return
-        
-        logger.info(f"🎬 Starting demo stream {self.stream_id}")
-        self.running = True
-        self._reset_act()
-        
-        # Создаем демо генератор
-        self.demo_generator = DemoVideoGenerator()
-        
-        # Запускаем задачу генерации кадров
-        self._stream_task = asyncio.create_task(self._demo_loop())
-        
-        # Запускаем инференс
-        if start_global_worker_for and FRAME_BROKER:
-            self._infer_task = asyncio.create_task(start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS))
-    
-    async def _demo_loop(self):
-        """Основной цикл генерации демо кадров"""
-        try:
-            while self.running:
-                if self.demo_generator:
-                    # Генерируем кадр
-                    frame = self.demo_generator.generate_frame()
-                    
-                    # Конвертируем в JPEG
-                    jpeg_data = encode_jpeg(frame, JPEG_QUALITY)
-                    if jpeg_data:
-                        ts = self.demo_generator.frame_count / self.demo_generator.fps
-                        frame_id = self.demo_generator.frame_count
-                        frame_data = {
-                            "jpeg": jpeg_data,
-                            "pts": frame_id,
-                            "time_base": 1.0 / self.demo_generator.fps,
-                            "ts": ts
-                        }
-                        self.last_frame_data = frame_data
-                        
-                        # Отправляем в frame broker
-                        if FRAME_BROKER:
-                            try:
-                                # Используем правильный метод API
-                                await FRAME_BROKER.publish(
-                                    self.stream_id, 
-                                    frame_id, 
-                                    ts, 
-                                    jpeg_data
-                                )
-                            except Exception as e:
-                                logger.debug(f"Demo stream {self.stream_id} frame broker error: {e}")
-                
-                # Ждем до следующего кадра
-                await asyncio.sleep(1.0 / self.demo_generator.fps)
-                
-        except Exception as e:
-            logger.error(f"Demo stream {self.stream_id} loop error: {e}")
-        finally:
-            logger.info(f"Demo stream {self.stream_id} loop ended")
-    
 
-    
-    async def stop(self):
-        if not self.running:
-            return
-        
-        logger.info(f"🛑 Stopping demo stream {self.stream_id}")
-        self.running = False
-        
-        # Останавливаем задачи
-        if self._stream_task:
-            try:
-                self._stream_task.cancel()
-                await self._stream_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
-            self._stream_task = None
-        
-        if self._infer_task:
-            try:
-                self._infer_task.cancel()
-                await self._infer_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
-            self._infer_task = None
-        
-        # Сохраняем акт для дашборда
-        try:
-            self._finalize_act_to_files()
-        except Exception:
-            pass
 
 class StreamManager:
     def __init__(self):
@@ -1402,14 +1077,16 @@ class StreamManager:
                 except Exception:
                     pass
 
-    def register_websocket(self, stream_id: str, ws: WebSocket):
-        if stream_id not in self.websockets:
-            self.websockets[stream_id] = []
-        self.websockets[stream_id].append(ws)
+    async def register_websocket(self, stream_id: str, ws: WebSocket):
+        async with self.lock:
+            if stream_id not in self.websockets:
+                self.websockets[stream_id] = []
+            self.websockets[stream_id].append(ws)
 
-    def unregister_websocket(self, stream_id: str, ws: WebSocket):
-        if stream_id in self.websockets:
-            self.websockets[stream_id].remove(ws)
+    async def unregister_websocket(self, stream_id: str, ws: WebSocket):
+        async with self.lock:
+            if stream_id in self.websockets:
+                self.websockets[stream_id].remove(ws)
 
     async def broadcast(self, stream_id: str, data: dict):
         if stream_id in self.websockets:
@@ -1420,7 +1097,7 @@ STREAM_MANAGER = StreamManager()
 # attach frame broker and start inference workers on-demand
 try:
     from core.frame_broker import FRAME_BROKER
-    from services.inference_worker import start_global_worker_for
+
     from core.results_store import RESULTS_STORE
 except Exception:
     FRAME_BROKER = None
@@ -1597,7 +1274,7 @@ async def api_webrtc_offer(payload: Dict[str, Any]):
         sdp = payload.get('sdp')
         typ = payload.get('type')
         stream_id = payload.get('stream_id')
-        fps = float(payload.get('fps') or TARGET_FPS)
+        fps = float(payload.get('fps') or config['TARGET_FPS'])
         # Validate inputs with clear messages to avoid vague exceptions
         if not isinstance(sdp, str) or len(sdp) < 10:
             return JSONResponse({'error': 'invalid or missing sdp'}, status_code=400)
@@ -3013,23 +2690,12 @@ async def compare_with_measurements(file: UploadFile = File(...)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.websocket("/ws/count")
-async def ws_count(ws: WebSocket, id: str):
-    start_time = time.time()
-    perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] WebSocket connection established for stream {id}")
-
+async def websocket_endpoint(ws: WebSocket, id: str = Query(...)):
     await ws.accept()
-    STREAM_MANAGER.register_websocket(id, ws)
-    messages_sent = 0
-
+    await STREAM_MANAGER.register_websocket(id, ws)
     try:
         while True:
-            await ws.receive_text()
+            # Keep connection open to receive broadcasts
+            await ws.receive_text() 
     except WebSocketDisconnect:
-        end_time = time.time()
-        perf_logger.info(".3f")
-        STREAM_MANAGER.unregister_websocket(id, ws)
-    except Exception as e:
-        end_time = time.time()
-        perf_logger.error(".3f")
-        logger.error(f"WebSocket error for stream {id}: {e}")
-        STREAM_MANAGER.unregister_websocket(id, ws)
+        await STREAM_MANAGER.unregister_websocket(id, ws)

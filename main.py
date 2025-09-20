@@ -3,62 +3,42 @@ import sys
 import urllib.request
 import subprocess
 import logging
+import argparse
 from pathlib import Path
 
-# Load .env early so DEBUG and other vars are available here
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    pass
+# --- Argument Parsing ---
+# This needs to be done before config is imported and instantiated
+parser = argparse.ArgumentParser(description='PigWeight - Video Processing Server')
+parser.add_argument('--profile', choices=['ULTRA_PERFORMANCE', 'BALANCED', 'POWER_SAVING', 'CPU_ONLY'], help='Performance profile')
+parser.add_argument('--install', action='store_true', help='Установить все зависимости')
+args, unknown = parser.parse_known_args()
 
-# Import unified logging setup
-from core.config import setup_logging
+if args.profile:
+    from core.config import apply_performance_profile
+    apply_performance_profile(args.profile)
 
-# --- Config from environment ---
-DETECTION_MODE = os.getenv("DETECTION_MODE", "pig-only")
-# Единый путь до модели берём из MODEL_PATH; PIG_MODEL_PATH поддерживается как Legacy
-MODEL_PATH_ENV = os.getenv("MODEL_PATH")
-PIG_MODEL_PATH = os.getenv("PIG_MODEL_PATH")
-BALANCED_MODEL_PATH = os.getenv("MODEL_PATH", "models/yolo11n.pt")
-ONNX_PATH = os.getenv("ONNX_PATH", "models/yolo11n.onnx")
-MODEL_URL = os.getenv("MODEL_URL", "")
+# --- Config and Logging --- 
+# Now that the profile is potentially set via env vars, we can import the config
+from core.config import setup_logging, CONFIG
 
-# Debug and hot-reload settings
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-RELOAD = os.getenv("RELOAD", "true" if DEBUG else "false").lower() == "true"
-
-# Set model path based on detection mode
-if DETECTION_MODE == "pig-only":
-    MODEL_PATH = MODEL_PATH_ENV or PIG_MODEL_PATH
-    if not MODEL_PATH:
-        raise RuntimeError("MODEL_PATH не задан в .env (или укажите Legacy PIG_MODEL_PATH)")
-else:
-    MODEL_PATH = BALANCED_MODEL_PATH
-
-# Server config
-HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8000"))
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-
+# --- Helper Functions ---
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
 def download_model():
-    if not os.path.exists(MODEL_PATH):
-        print(f"Downloading model to {MODEL_PATH}...")
-        ensure_dir(os.path.dirname(MODEL_PATH))
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+    if not os.path.exists(CONFIG.MODEL_PATH):
+        print(f"Downloading model to {CONFIG.MODEL_PATH}...")
+        ensure_dir(os.path.dirname(CONFIG.MODEL_PATH))
+        urllib.request.urlretrieve(CONFIG.MODEL_URL, CONFIG.MODEL_PATH)
         print("Model downloaded successfully")
     else:
-        print(f"Model already exists at {MODEL_PATH}")
+        print(f"Model already exists at {CONFIG.MODEL_PATH}")
 
 def install_requirements():
     """Установка минимальных зависимостей"""
     print("📦 Installing minimal dependencies...")
     try:
-        # Используем основной requirements файл (теперь минимальный)
         requirements_path = os.path.join(os.path.dirname(__file__), 'requirements.txt')
         if not os.path.exists(requirements_path):
             print("❌ requirements.txt not found!")
@@ -70,7 +50,6 @@ def install_requirements():
         ])
         print("✅ Dependencies installed successfully")
 
-        # Быстрая проверка системы
         try:
             import torch
             if torch.cuda.is_available():
@@ -87,59 +66,43 @@ def install_requirements():
         print("   pip install fastapi uvicorn torch ultralytics opencv-python")
 
 def convert_to_onnx():
-    if not os.path.exists(ONNX_PATH) or os.path.getmtime(MODEL_PATH) > os.path.getmtime(ONNX_PATH):
+    onnx_path = CONFIG.get('ONNX_PATH')
+    if not onnx_path: return
+    if not os.path.exists(onnx_path) or os.path.getmtime(CONFIG.MODEL_PATH) > os.path.getmtime(onnx_path):
         print(f"Converting model to ONNX format...")
-        ensure_dir(os.path.dirname(ONNX_PATH))
+        ensure_dir(os.path.dirname(onnx_path))
         
-        # Import ultralytics and load model
         try:
             from ultralytics import YOLO
-            model = YOLO(MODEL_PATH)
-            
-            # Export to ONNX
+            model = YOLO(CONFIG.MODEL_PATH)
             model.export(format='onnx', opset=12)
-            
-            # Rename the exported file to our target name
-            default_onnx = MODEL_PATH.replace('.pt', '.onnx')
-            if os.path.exists(default_onnx) and default_onnx != ONNX_PATH:
-                os.replace(default_onnx, ONNX_PATH)
-                
+            default_onnx = CONFIG.MODEL_PATH.replace('.pt', '.onnx')
+            if os.path.exists(default_onnx) and default_onnx != onnx_path:
+                os.replace(default_onnx, onnx_path)
             print("Model converted to ONNX successfully")
-        except ImportError as e:
-            print(f"Error importing ultralytics: {str(e)}")
-            print("Please install ultralytics package")
-            raise
         except Exception as e:
             print(f"Error converting model to ONNX: {str(e)}")
             raise
     else:
-        print(f"ONNX model already exists at {ONNX_PATH} and is up to date")
+        print(f"ONNX model already exists at {onnx_path} and is up to date")
 
 def main():
     try:
-        # Настройка логирования
-        logger = setup_logging(debug=DEBUG)
+        logger = setup_logging(debug=CONFIG.DEBUG)
         
-        # Ensure required directories exist
         ensure_dir('models')
         ensure_dir('stream')
         ensure_dir('uploads')
 
-        # install_requirements()       
-
-        # Import ASGI app and start server
-        logger.info(f'Запуск сервера на http://{HOST}:{PORT}')
-        logger.info(f'Проверка здоровья API: http://{HOST}:{PORT}/api/health')
-        logger.info(f'Режим отладки: {DEBUG}, Горячая перезагрузка: {RELOAD}')
+        logger.info(f'Запуск сервера на http://{CONFIG.HOST}:{CONFIG.PORT}')
+        logger.info(f'Проверка здоровья API: http://{CONFIG.HOST}:{CONFIG.PORT}/api/health')
+        logger.info(f'Режим отладки: {CONFIG.DEBUG}, Горячая перезагрузка: {CONFIG.RELOAD}')
 
         try:
             import uvicorn
-            # Для reload uvicorn требует import string, а не объект приложения
-            # Используем RELOAD из .env или автоматически включаем при DEBUG, если не указано
-            app_str = "api.app:app" if RELOAD or DEBUG else None
+            app_str = "api.app:app" if CONFIG.RELOAD or CONFIG.DEBUG else None
             
             if app_str is None:
-                # Если RELOAD=False и DEBUG=False, загружаем приложение напрямую для производительности
                 from api.app import app as fastapi_app
                 app = fastapi_app
             else:
@@ -147,28 +110,21 @@ def main():
                 
             uvicorn.run(
                 app,
-                host=HOST,
-                port=PORT,
-                reload=RELOAD or DEBUG,  # Релоад включается, если включён RELOAD или DEBUG
-                log_level="debug" if DEBUG else "info",
-                # Явно указываем, ЧТО отслеживать, чтобы не реагировать на записи в logs/*
+                host=CONFIG.HOST,
+                port=CONFIG.PORT,
+                reload=CONFIG.RELOAD or CONFIG.DEBUG,
+                log_level="debug" if CONFIG.DEBUG else "info",
                 reload_dirs=[
                     str(Path(__file__).parent / "api"),
                     str(Path(__file__).parent / "core"),
                     str(Path(__file__).parent / "services"),
                     str(Path(__file__).parent / "static"),
                 ],
-                # Дополнительно исключаем шумные директории/файлы
                 reload_excludes=[
-                    "logs",
-                    "logs/**",
-                    "*.log",
-                    "uploads",
-                    "uploads/**",
-                    "records",
-                    "records/**",
-                    "models",
-                    "models/**",
+                    "logs", "logs/**", "*.log",
+                    "uploads", "uploads/**",
+                    "records", "records/**",
+                    "models", "models/**",
                 ]
             )
         except Exception as e:
@@ -178,22 +134,8 @@ def main():
         logger.error(f'Ошибка запуска сервера: {str(e)}')
         sys.exit(1)
 
-def main_with_args():
-    """Главная функция с обработкой аргументов командной строки"""
-    import argparse
-
-    parser = argparse.ArgumentParser(description='PigWeight - Video Processing Server')
-    parser.add_argument('--install', action='store_true',
-                       help='Установить все зависимости')
-
-    args = parser.parse_args()
-
+if __name__ == '__main__':
     if args.install:
         install_requirements()
-        return
-
-    # Запуск сервера
-    main()
-
-if __name__ == '__main__':
-    main_with_args()
+    else:
+        main()
