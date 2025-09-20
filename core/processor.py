@@ -1,22 +1,19 @@
 """
 Единый, унифицированный видео-процессор для проекта PigWeight.
-
-Этот модуль представляет собой результат рефакторинга, объединяющий логику
-из различных частей проекта в один управляемый класс.
+Интегрирован с DynamicBatcher для адаптивной обработки.
 """
 
 import asyncio
-import time
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
-
 import numpy as np
 
 from core.config import CONFIG
 from services.model_adapter import ModelAdapter
 from core.optimized_preprocess import center_crop_resize
-from core.preprocess import map_polys_to_original
+from core.preprocess import map_polys_from_center_crop
+from core.dynamic_batcher import DynamicBatcher, BatcherConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,121 +29,152 @@ class FrameResult:
     detections: int = 0
     confidence: float = 0.0
     masks: List[np.ndarray] = field(default_factory=list)
-    bboxes: List[List[float]] = field(default_factory=list) # [x1, y1, x2, y2]
-    centroids: List[Tuple[float, float]] = field(default_factory=list) # (cx, cy)
+    bboxes: List[List[float]] = field(default_factory=list)
+    centroids: List[Tuple[float, float]] = field(default_factory=list)
     preprocessed_shape: Optional[Tuple[int, int]] = None
     original_shape: Optional[Tuple[int, int]] = None
+    timestamp: float = 0.0
+
+# Тип элемента в очереди батчера: (кадр, временная метка, future для результата)
+BatchItem = Tuple[np.ndarray, float, asyncio.Future]
 
 class UnifiedVideoProcessor:
     """
-    Универсальный процессор, который инкапсулирует всю логику обработки видео.
+    Универсальный процессор с асинхронной обработкой и адаптивным батчингом.
     """
 
-    def __init__(self, stream_id: str, options: Optional[ProcessingOptions] = None):
+    def __init__(self, stream_id: str, loop: asyncio.AbstractEventLoop, options: Optional[ProcessingOptions] = None):
         self.stream_id = stream_id
+        self.loop = loop
         self.options = options or ProcessingOptions(
             conf_threshold=CONFIG.get("CONF_THRESHOLD", 0.3),
             img_size=CONFIG.get("IMG_SIZE", 960)
         )
 
         self.model_adapter = ModelAdapter(
-            model_path=CONFIG.get("MODEL_PATH", ""),
-            device=CONFIG.get("DEVICE", "cpu")
+            model_path=CONFIG.get("MODEL_PATH", "")
         )
 
         if not self.model_adapter.backend:
             logger.error(f"[{self.stream_id}] Не удалось загрузить модель. Процессор неактивен.")
             self.is_active = False
+            self.batcher = None
         else:
             self.is_active = True
+            batcher_config = BatcherConfig(
+                max_batch_size=CONFIG.get("MAX_BATCH_SIZE", 16),
+                target_latency_ms=CONFIG.get("TARGET_LATENCY_MS", 50.0)
+            )
+            self.batcher = DynamicBatcher[BatchItem](batcher_config, self._execute_batch)
             logger.info(f"[{self.stream_id}] Унифицированный процессор активен. Backend: {self.model_adapter.backend}")
 
-    def process_frame(self, frame: np.ndarray) -> Optional[FrameResult]:
-        """
-        Выполняет полную цепочку обработки для одного кадра.
-        
-        Args:
-            frame: Кадр в формате NumPy array (BGR).
+    async def start(self):
+        """Запускает фоновые задачи процессора (батчер)."""
+        if self.is_active and self.batcher and not self.batcher.is_running:
+            await self.batcher.start()
 
-        Returns:
-            Структурированный результат или None в случае ошибки.
+    async def stop(self):
+        """Останавливает фоновые задачи процессора."""
+        if self.is_active and self.batcher and self.batcher.is_running:
+            await self.batcher.stop()
+
+    async def process_frame_async(self, frame: np.ndarray, timestamp: float = 0.0) -> FrameResult:
         """
-        if not self.is_active or frame is None:
-            return None
+        Асинхронно отправляет кадр на обработку и возвращает результат.
+        """
+        if not self.is_active or self.batcher is None:
+            return FrameResult(timestamp=timestamp) # Возвращаем пустой результат, если процессор неактивен
+
+        future = self.loop.create_future()
+        await self.batcher.add_item((frame, timestamp, future))
+        return await future
+
+    def _execute_batch(self, batch: List[BatchItem]):
+        """
+        Метод, выполняющий обработку батча. Вызывается из DynamicBatcher.
+        ВНИМАНИЕ: Этот метод выполняется в отдельном потоке (через run_in_executor).
+        """
+        frames = [item[0] for item in batch]
+        timestamps = [item[1] for item in batch]
+        futures = [item[2] for item in batch]
 
         try:
-            # 1. Предобработка
-            original_shape = frame.shape[:2]
-            preprocessed_data = center_crop_resize(frame, self.options.img_size)
-            processed_frame = preprocessed_data.get("img")
-            if processed_frame is None:
-                return None
+            # 1. Предобработка всех кадров в батче
+            preprocessed_batch = [center_crop_resize(f, self.options.img_size) for f in frames]
+            processed_frames = [p_data['img'] for p_data in preprocessed_batch]
 
-            # 2. Инференс (обрабатываем как батч из одного элемента)
-            inference_results = self.model_adapter.infer([processed_frame])
-            if not inference_results:
-                return None
+            # 2. Инференс всего батча
+            inference_results = self.model_adapter.infer(processed_frames)
 
-            result = inference_results[0]
+            # 3. Постобработка и отправка результатов
+            for i, future in enumerate(futures):
+                timestamp = timestamps[i]
+                if i < len(inference_results):
+                    result_data = inference_results[i]
+                    p_data = preprocessed_batch[i]
 
-            # 3. Постобработка (маппинг масок)
-            mapped_masks = []
-            if result.get('masks'):
-                # Для постобработки нужны scale и pad, которые center_crop_resize не возвращает.
-                # В данном случае маппинг будет неточным, но для демонстрации оставим так.
-                # TODO: Улучшить маппинг для center_crop
-                pass # map_polys_to_original не совместим с center_crop
-
-            return FrameResult(
-                detections=result.get("detections", 0),
-                confidence=result.get("confidence", 0.0),
-                masks=result.get("masks", []),
-                bboxes=result.get("bboxes", []),
-                centroids=result.get("centroids", []),
-                original_shape=original_shape,
-                preprocessed_shape=processed_frame.shape[:2]
-            )
+                    # Маппинг масок
+                    mapped_masks = []
+                    if result_data.get('masks') and p_data.get('transform_meta'):
+                        mapped_masks = map_polys_from_center_crop(
+                            result_data['masks'],
+                            p_data['transform_meta']
+                        )
+                    
+                    frame_result = FrameResult(
+                        detections=result_data.get("detections", 0),
+                        confidence=result_data.get("confidence", 0.0),
+                        masks=mapped_masks,
+                        bboxes=result_data.get("bboxes", []),
+                        centroids=result_data.get("centroids", []),
+                        original_shape=p_data['transform_meta']['original_size'],
+                        preprocessed_shape=p_data['img'].shape[:2],
+                        timestamp=timestamp
+                    )
+                    self.loop.call_soon_threadsafe(future.set_result, frame_result)
+                else:
+                    # Если для кадра нет результата инференса
+                    self.loop.call_soon_threadsafe(future.set_result, FrameResult(timestamp=timestamp))
 
         except Exception as e:
-            logger.error(f"[{self.stream_id}] Ошибка в цикле обработки кадра: {e}", exc_info=True)
-            return None
+            logger.error(f"[{self.stream_id}] Ошибка в цикле обработки батча: {e}", exc_info=True)
+            # Уведомляем все фьючерсы в батче об ошибке
+            for future in futures:
+                if not future.done():
+                    self.loop.call_soon_threadsafe(future.set_exception, e)
 
-# Глобальный менеджер процессоров, чтобы избежать проблем с hot-reload
+
+# Глобальный менеджер процессоров
 _PROCESSORS: Dict[str, UnifiedVideoProcessor] = {}
+_PROCESSOR_LOCK = asyncio.Lock()
 
-def get_processor(stream_id: str, options: Optional[ProcessingOptions] = None) -> UnifiedVideoProcessor:
+async def get_processor(stream_id: str, options: Optional[ProcessingOptions] = None) -> UnifiedVideoProcessor:
     """
-    Фабричная функция для получения или создания инстанса процессора.
+    Асинхронная фабричная функция для получения или создания инстанса процессора.
     """
-    if stream_id not in _PROCESSORS:
-        logger.info(f"Создание нового UnifiedVideoProcessor для stream_id: {stream_id}")
-        _PROCESSORS[stream_id] = UnifiedVideoProcessor(stream_id, options)
-    return _PROCESSORS[stream_id]
+    async with _PROCESSOR_LOCK:
+        if stream_id not in _PROCESSORS:
+            logger.info(f"Создание нового UnifiedVideoProcessor для stream_id: {stream_id}")
+            loop = asyncio.get_running_loop()
+            processor = UnifiedVideoProcessor(stream_id, loop, options)
+            await processor.start()
+            _PROCESSORS[stream_id] = processor
+        return _PROCESSORS[stream_id]
 
-def remove_processor(stream_id: str):
+async def remove_processor(stream_id: str):
     """
-    Удаляет процессор из менеджера.
+    Удаляет процессор из менеджера и останавливает его.
     """
-    if stream_id in _PROCESSORS:
-        logger.info(f"Удаление UnifiedVideoProcessor для stream_id: {stream_id}")
-        del _PROCESSORS[stream_id]
-
-def reset_processor(stream_id: Optional[str] = None) -> None:
-    """
-    Сбрасывает процессоры.
-
-    - Если указан `stream_id`, удаляет только соответствующий процессор.
-    - Если не указан, очищает все процессоры.
-    """
-    if stream_id is not None:
+    async with _PROCESSOR_LOCK:
         if stream_id in _PROCESSORS:
-            logger.info(f"Сброс процессора для stream_id: {stream_id}")
-            del _PROCESSORS[stream_id]
-        else:
-            logger.info(f"reset_processor: процессор для stream_id={stream_id} не найден")
-    else:
-        if _PROCESSORS:
-            logger.info("Сброс всех процессоров UnifiedVideoProcessor")
-            _PROCESSORS.clear()
-        else:
-            logger.info("reset_processor: нет активных процессоров для сброса")
+            logger.info(f"Удаление UnifiedVideoProcessor для stream_id: {stream_id}")
+            processor = _PROCESSORS.pop(stream_id)
+            await processor.stop()
+
+async def reset_processors():
+    """Сбрасывает все процессоры."""
+    async with _PROCESSOR_LOCK:
+        logger.info("Сброс всех процессоров UnifiedVideoProcessor")
+        for stream_id in list(_PROCESSORS.keys()):
+            processor = _PROCESSORS.pop(stream_id)
+            await processor.stop()

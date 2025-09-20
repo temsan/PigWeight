@@ -76,3 +76,52 @@ def map_polys_to_original(polys, scale: float, pad: Tuple[int,int,int,int], orig
     return mapped
 
 
+def map_polys_from_center_crop(polys, transform_meta: Dict[str, Any]) -> list:
+    """
+    Maps polygons from the center_crop_resize processed image back to original coordinates.
+
+    Args:
+        polys: List of polygons from model output.
+        transform_meta: Metadata dictionary from center_crop_resize.
+
+    Returns:
+        List of polygons mapped to original image coordinates.
+    """
+    orig_w, orig_h = transform_meta['original_size']
+    crop_x, crop_y, crop_w, crop_h = transform_meta['crop_box']
+    resize_target = transform_meta['resize_target']
+    content_x, content_y, content_w, content_h = transform_meta['final_content_box']
+
+    mapped_polys = []
+
+    for poly in polys:
+        new_poly = []
+        for x_proc, y_proc in poly:
+            # 1. Reverse padding and internal resize
+            # Coordinates relative to the content box inside the padded image
+            y_in_content = y_proc - content_y
+            x_in_content = x_proc - content_x
+
+            # Reverse the resize from (resize_target, resize_target) to (content_w, content_h)
+            y_in_resized_square = y_in_content * (resize_target / content_h)
+            x_in_resized_square = x_in_content * (resize_target / content_w)
+
+            # 2. Reverse resize from cropped to resized_square
+            # The crop was resized to (resize_target, resize_target)
+            y_in_cropped = y_in_resized_square * (crop_h / resize_target)
+            x_in_cropped = x_in_resized_square * (crop_w / resize_target)
+
+            # 3. Reverse crop
+            y_orig = y_in_cropped + crop_y
+            x_orig = x_in_cropped + crop_x
+
+            # Clamp to original image dimensions
+            x_orig = max(0.0, min(float(orig_w - 1), x_orig))
+            y_orig = max(0.0, min(float(orig_h - 1), y_orig))
+
+            new_poly.append((x_orig, y_orig))
+        
+        if new_poly:
+            mapped_polys.append(new_poly)
+
+    return mapped_polys

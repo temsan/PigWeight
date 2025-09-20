@@ -8,10 +8,10 @@ from datetime import datetime
 try:
     import onnxruntime as ort
     _HAVE_ONNX = True
-    print("✅ ONNX Runtime доступен для CPU inference")
+    print("ONNX Runtime доступен для CPU inference")
 except Exception as e:
     _HAVE_ONNX = False
-    print(f"⚠️  ONNX Runtime не доступен: {e}")
+    print(f"ONNX Runtime не доступен: {e}")
     print("   Для CPU оптимизации установите: pip install onnxruntime")
 
 try:
@@ -37,8 +37,8 @@ class ModelAdapter:
     """
 
     def __init__(self, model_path: str, device: str = None):
-        # Temporary device for detection
-        temp_device = device or os.getenv('DEVICE', 'cpu')
+        # Use 'auto' as the default device selection strategy
+        temp_device = device or os.getenv('DEVICE', 'auto')
         self.backend = None
         self._sess = None  # ONNX Runtime session
         self._torch_model = None
@@ -144,7 +144,7 @@ class ModelAdapter:
 
         logger.info(f"ModelAdapter initialized: path={self.model_path}, backend={self.backend}, device={self.device}")
 
-    def _detect_optimal_device(self, requested_device: str):
+    def _detect_optimal_device(self, requested_device: str = "auto"):
         """Автоматически определяет оптимальное устройство и настройки"""
         use_half = os.getenv('USE_HALF', 'true').lower() == 'true'
         
@@ -155,7 +155,17 @@ class ModelAdapter:
             cuda_available = torch.cuda.is_available()
         except ImportError:
             pass
+
+        # Логика автовыбора
+        if requested_device == "auto":
+            if cuda_available:
+                logger.info("✅ CUDA доступна, выбран автоматический режим: cuda:0")
+                return 'cuda:0', use_half
+            else:
+                logger.info("📱 CUDA недоступна, выбран автоматический режим: cpu")
+                return 'cpu', False
         
+        # Логика для явного запроса устройства
         if requested_device.startswith('cuda') and cuda_available:
             logger.info(f"✅ CUDA доступна, используем: {requested_device}")
             return requested_device, use_half

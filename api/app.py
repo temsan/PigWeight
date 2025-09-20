@@ -520,7 +520,7 @@ class VideoStream(abc.ABC):
     def __init__(self, stream_id: str):
         self.stream_id = stream_id
         self.running = False
-        self.last_jpeg: Optional[bytes] = None
+        self.last_frame_data: Optional[Dict[str, Any]] = None
         self.lock = asyncio.Lock()
         self.model = None
         self.model_loaded = False
@@ -819,21 +819,19 @@ class VideoStream(abc.ABC):
 
     async def get_jpeg(self) -> Optional[bytes]:
         async with self.lock:
-            lj = self.last_jpeg
-            # Нормализуем формат: всегда bytes
-            if isinstance(lj, dict):
-                try:
-                    data = lj.get('jpeg')
-                    if isinstance(data, (bytes, bytearray)):
-                        return bytes(data)
-                    else:
-                        return None
-                except Exception:
-                    return None
-            elif isinstance(lj, (bytes, bytearray)):
-                return bytes(lj)
-            else:
-                return None
+            frame_data = self.last_frame_data
+            if isinstance(frame_data, dict):
+                jpeg_bytes = frame_data.get('jpeg')
+                if isinstance(jpeg_bytes, (bytes, bytearray)):
+                    return bytes(jpeg_bytes)
+            # Fallback for older structure just in case
+            elif isinstance(frame_data, (bytes, bytearray)):
+                return bytes(frame_data)
+            return None
+
+    async def get_frame_data(self) -> Optional[Dict[str, Any]]:
+        async with self.lock:
+            return self.last_frame_data
 
 
 class WeightedMaxEstimator:
@@ -888,8 +886,13 @@ class WindowMaxEstimator:
 # NOTE: Глобальная реализация инференс-цикла; метод класса делегирует сюда
 async def _global_infer_loop(self):
         # Use the unified processor
-        processor = get_processor(self.stream_id)
-        if not processor.is_active:
+        try:
+            processor = await get_processor(self.stream_id)
+        except Exception as e:
+            logger.error(f"Failed to get processor for stream {self.stream_id}: {e}", exc_info=True)
+            return
+
+        if not processor or not processor.is_active:
             logger.error(f"Unified processor for stream {self.stream_id} is not active. Inference loop will not run.")
             return
 
@@ -897,17 +900,20 @@ async def _global_infer_loop(self):
 
         while self.running:
             try:
-                jpeg = await self.get_jpeg()
-                if not jpeg:
+                frame_data = await self.get_frame_data()
+                if not frame_data or not frame_data.get('jpeg'):
                     await asyncio.sleep(0.1)
                     continue
+
+                jpeg = frame_data['jpeg']
+                timestamp = frame_data.get('ts', time.time()) # Get real timestamp
 
                 arr = np.frombuffer(jpeg, dtype=np.uint8)
                 frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
                 if frame is not None:
-                    # 1. Process frame using the unified processor
-                    result: Optional[FrameResult] = processor.process_frame(frame)
+                    # 1. Process frame using the new async processor method
+                    result: Optional[FrameResult] = await processor.process_frame_async(frame, timestamp=timestamp)
 
                     if result is None:
                         continue
@@ -927,15 +933,15 @@ async def _global_infer_loop(self):
                     self._update_line_counters(ids, centroids_x_norm, centroids_y_norm)
                     
                     self.last_count = result.detections
-                    self.last_masks = result.masks # Assuming masks are already normalized in processor
+                    self.last_masks = result.masks
 
                     # 3. Update statistics and broadcast (existing logic)
-                    wnd_max = self.window_max.update(time.time(), int(self.last_count))
+                    wnd_max = self.window_max.update(result.timestamp, int(self.last_count))
                     est = max(self.reported_count, wnd_max)
                     self.reported_count = est
                     
                     # Update act timeline
-                    now_ts = time.time()
+                    now_ts = result.timestamp
                     if (now_ts - self._last_timeline_ts) >= 0.5:
                         rel_t = float(max(0.0, now_ts - float(self._act_start_ts)))
                         self._act_timeline.append({"t": rel_t, "count_est": int(est)})
@@ -1055,13 +1061,26 @@ class RtspStream(VideoStream):
                     except Exception:
                         await asyncio.sleep(0.01)
                 else:
-                    jpeg = av_read_jpeg(self.stream_id, timeout=1.0)
-                    if jpeg:
+                    frame_data = av_read_jpeg(self.stream_id, timeout=1.0)
+                    if frame_data and isinstance(frame_data, dict) and frame_data.get('jpeg'):
                         async with self.lock:
-                            self.last_jpeg = jpeg
+                            self.last_frame_data = frame_data
+                        
+                        jpeg = frame_data['jpeg']
+                        pts = frame_data.get('pts')
+                        time_base = frame_data.get('time_base')
+                        
+                        # Calculate timestamp in seconds if possible
+                        ts = time.time() # fallback
+                        if pts is not None and time_base is not None and time_base > 0:
+                            ts = pts * time_base
+                        
+                        # Use pts as frame_id for uniqueness
+                        frame_id = pts if pts is not None else int(ts * 1000)
+
                         try:
                             if FRAME_BROKER is not None:
-                                asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
+                                asyncio.create_task(FRAME_BROKER.publish(self.stream_id, frame_id, ts, jpeg))
                                 if start_global_worker_for is not None:
                                     start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
                         except Exception:
@@ -1134,18 +1153,34 @@ class FileStream(VideoStream):
                 if self._seek_event.is_set():
                     await self._perform_seek()
                 
-                jpeg = av_read_jpeg(self.stream_id, timeout=1.0)
-                if jpeg:
+                frame_data = av_read_jpeg(self.stream_id, timeout=1.0)
+                if frame_data and isinstance(frame_data, dict) and frame_data.get('jpeg'):
                     async with self.lock:
-                        self.last_jpeg = jpeg
-                    self.current_time += (1.0 / self.fps)
+                        self.last_frame_data = frame_data
+                    
+                    jpeg = frame_data['jpeg']
+                    pts = frame_data.get('pts')
+                    time_base = frame_data.get('time_base')
+                    
+                    # Calculate timestamp in seconds if possible
+                    ts = self.current_time # fallback to incremental time
+                    if pts is not None and time_base is not None and time_base > 0:
+                        ts = pts * time_base
+                    
+                    self.current_time = ts
+
+                    # Use pts as frame_id for uniqueness
+                    frame_id = pts if pts is not None else int(ts * 1000)
+
                     try:
                         if FRAME_BROKER is not None:
-                            asyncio.create_task(FRAME_BROKER.publish(self.stream_id, int(time.time()*1000), time.time(), jpeg))
+                            asyncio.create_task(FRAME_BROKER.publish(self.stream_id, frame_id, ts, jpeg))
                             if start_global_worker_for is not None:
                                 start_global_worker_for(self.stream_id, BATCH_SIZE, MAX_WAIT_MS)
                     except Exception:
                         pass
+                else:
+                    break # Assume EOF
                 await asyncio.sleep(1.0 / self.fps)
         except Exception as e:
             logger.error(f"File stream {self.stream_id} error: {e}")
@@ -1160,9 +1195,9 @@ class FileStream(VideoStream):
     async def _perform_seek(self):
         self._seek_event.clear()
         if self._seek_time is not None:
-            jpeg = av_seek_read_jpeg(self.stream_id, self._seek_time)
+            frame_data = av_seek_read_jpeg(self.stream_id, self._seek_time)
             async with self.lock:
-                self.last_jpeg = jpeg
+                self.last_frame_data = frame_data
             self.current_time = self._seek_time
             self._seek_time = None
 
@@ -1238,7 +1273,15 @@ class DemoStream(VideoStream):
                     # Конвертируем в JPEG
                     jpeg_data = encode_jpeg(frame, JPEG_QUALITY)
                     if jpeg_data:
-                        self.last_jpeg = jpeg_data
+                        ts = self.demo_generator.frame_count / self.demo_generator.fps
+                        frame_id = self.demo_generator.frame_count
+                        frame_data = {
+                            "jpeg": jpeg_data,
+                            "pts": frame_id,
+                            "time_base": 1.0 / self.demo_generator.fps,
+                            "ts": ts
+                        }
+                        self.last_frame_data = frame_data
                         
                         # Отправляем в frame broker
                         if FRAME_BROKER:
@@ -1246,8 +1289,8 @@ class DemoStream(VideoStream):
                                 # Используем правильный метод API
                                 await FRAME_BROKER.publish(
                                     self.stream_id, 
-                                    self.demo_generator.frame_count, 
-                                    time.time(), 
+                                    frame_id, 
+                                    ts, 
                                     jpeg_data
                                 )
                             except Exception as e:
@@ -1261,8 +1304,7 @@ class DemoStream(VideoStream):
         finally:
             logger.info(f"Demo stream {self.stream_id} loop ended")
     
-    async def get_jpeg(self) -> Optional[bytes]:
-        return self.last_jpeg
+
     
     async def stop(self):
         if not self.running:
@@ -1395,6 +1437,10 @@ async def lifespan(app: FastAPI):
 
 _DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
 app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
+
+# Подключаем эндпоинты из модулей
+from api.endpoints import video
+app.include_router(video.router, prefix="/api", tags=["video"])
 
 # Подключаем упрощенные endpoints
 try:
@@ -1679,34 +1725,6 @@ async def read_root():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def read_dashboard():
     return FileResponse(STATIC_DIR / "dashboard.html")
-
-@app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
-    try:
-        # Always save under the original safe filename (overwrite if exists)
-        safe_name = "".join(c for c in (file.filename or "") if c.isalnum() or c in "._-") or "upload.bin"
-        dst = UPLOAD_DIR / safe_name
-        content = await file.read()
-        try:
-            # Skip rewrite if file exists with same size to avoid SSD churn
-            if not (dst.exists() and dst.stat().st_size == len(content)):
-                with open(dst, "wb") as buffer:
-                    buffer.write(content)
-        except Exception:
-            # Fallback to simple write
-            with open(dst, "wb") as buffer:
-                buffer.write(content)
-        meta = ocv_probe_file(str(dst))
-        resp = {"file_path": str(dst)}
-        if meta and not meta.get("error"):
-            resp.update({
-                "duration": float(meta.get("duration", 0.0) or 0.0),
-                "fps": float(meta.get("fps", 0.0) or 0.0),
-                "frame_count": int(meta.get("frame_count", 0) or 0)
-            })
-        return resp
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.post("/api/stream/start")
 async def api_stream_start(stream_id: str, source_uri: str):

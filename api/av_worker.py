@@ -95,7 +95,7 @@ class _Worker(mp.Process):
             pass
         return True
 
-    def _read_one(self, sid: str) -> Tuple[bool, Optional[bytes]]:
+    def _read_one(self, sid: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
         sess = self.sessions.get(sid)
         if not sess:
             return False, None
@@ -104,15 +104,21 @@ class _Worker(mp.Process):
         try:
             for packet in container.demux(vstream):
                 for frame in packet.decode():
+                    if not hasattr(frame, 'pts') or frame.pts is None:
+                        continue
                     rgb = frame.to_ndarray(format='rgb24')
                     img = _encode_jpeg_rgb(rgb, self.jpeg_quality)
                     if img:
-                        return True, img
+                        return True, {
+                            "jpeg": img,
+                            "pts": frame.pts,
+                            "time_base": float(frame.time_base) if frame.time_base else 0.0
+                        }
             return False, None
         except Exception:
             return False, None
 
-    def _seek_and_read(self, sid: str, t: float) -> Tuple[bool, Optional[bytes]]:
+    def _seek_and_read(self, sid: str, t: float) -> Tuple[bool, Optional[Dict[str, Any]]]:
         sess = self.sessions.get(sid)
         if not sess:
             return False, None
@@ -211,13 +217,13 @@ class AVIsolate:
         except Exception:
             pass
 
-    def read_jpeg(self, sid: str, timeout: float = 1.0) -> Optional[bytes]:
+    def read_jpeg(self, sid: str, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
         try:
             return self._req('read_jpeg', {'id': sid}, timeout=timeout)
         except Exception:
             return None
 
-    def seek_read_jpeg(self, sid: str, t: float, timeout: float = 1.5) -> Optional[bytes]:
+    def seek_read_jpeg(self, sid: str, t: float, timeout: float = 1.5) -> Optional[Dict[str, Any]]:
         try:
             return self._req('seek_read_jpeg', {'id': sid, 't': float(t)}, timeout=timeout)
         except Exception:

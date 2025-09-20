@@ -16,6 +16,7 @@ def center_crop_resize(frame: np.ndarray, target_size: int = 960) -> Dict[str, A
     Это обеспечивает максимальное соответствие с датасетом.
     """
     h, w = frame.shape[:2]
+    start_x, start_y = 0, 0
     
     # 1. Center crop до квадрата (как в датасете)
     if h > w:
@@ -57,12 +58,18 @@ def center_crop_resize(frame: np.ndarray, target_size: int = 960) -> Dict[str, A
     else:
         final_img = resized
     
+    # Для обратного преобразования координат
+    transform_meta = {
+        'original_size': (w, h),
+        'crop_box': (start_x, start_y, crop_size, crop_size), # (x, y, width, height)
+        'resize_target': target_size,
+        'final_content_box': (0, padding_height, target_size, target_size - 2 * padding_height) # (x, y, width, height)
+    }
+
     return {
         'img': final_img,
         'method': 'center_crop_with_padding',
-        'original_size': (w, h),
-        'crop_applied': True,
-        'padding_applied': padding_height > 0
+        'transform_meta': transform_meta
     }
 
 
