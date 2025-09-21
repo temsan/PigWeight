@@ -1,37 +1,82 @@
-from fastapi import APIRouter, UploadFile, File
-from fastapi.responses import JSONResponse
+"""
+Video processing endpoints
+"""
+
+import os
+import time
 from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any
 
-# This is a temporary solution and might cause circular imports.
-# We are importing from the main app module during this refactoring phase.
-from api.app import UPLOAD_DIR, ocv_probe_file, perf_logger
+from fastapi import APIRouter, UploadFile, File, Body
+from fastapi.responses import JSONResponse
 
-router = APIRouter()
+router = APIRouter(prefix="/api", tags=["video"])
+
+# Получаем конфигурацию из основного приложения
+try:
+    from core.config import get_config
+    config = get_config()
+    UPLOAD_DIR = Path("uploads")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except ImportError:
+    UPLOAD_DIR = Path("uploads")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_video_file(file: UploadFile = File(...)):
+    """Загрузка видеофайла для обработки"""
     try:
-        # Always save under the original safe filename (overwrite if exists)
-        safe_name = "".join(c for c in (file.filename or "") if c.isalnum() or c in "._-") or "upload.bin"
-        dst = UPLOAD_DIR / safe_name
-        content = await file.read()
-        try:
-            # Skip rewrite if file exists with same size to avoid SSD churn
-            if not (dst.exists() and dst.stat().st_size == len(content)):
-                with open(dst, "wb") as buffer:
-                    buffer.write(content)
-        except Exception:
-            # Fallback to simple write
-            with open(dst, "wb") as buffer:
-                buffer.write(content)
-        meta = ocv_probe_file(str(dst))
-        resp = {"file_path": str(dst)}
-        if meta and not meta.get("error"):
-            resp.update({
-                "duration": float(meta.get("duration", 0.0) or 0.0),
-                "fps": float(meta.get("fps", 0.0) or 0.0),
-                "frame_count": int(meta.get("frame_count", 0) or 0)
-            })
-        return resp
+        # Валидация типа файла
+        allowed_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'}
+        file_extension = Path(file.filename).suffix.lower()
+        
+        if file_extension not in allowed_extensions:
+            return JSONResponse(
+                {"error": f"Неподдерживаемый формат файла. Разрешены: {', '.join(allowed_extensions)}"},
+                status_code=400
+            )
+        
+        # Проверка размера файла (максимум 500MB)
+        max_size = 500 * 1024 * 1024  # 500MB
+        file_content = await file.read()
+        
+        if len(file_content) > max_size:
+            return JSONResponse(
+                {"error": "Файл слишком большой. Максимальный размер: 500MB"},
+                status_code=400
+            )
+        
+        # Создание уникального имени файла
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"{timestamp}_{file.filename}"
+        file_path = UPLOAD_DIR / safe_filename
+        
+        # Сохранение файла
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+        
+        return {
+            "status": "success",
+            "filename": safe_filename,
+            "path": str(file_path),
+            "size": len(file_content),
+            "message": "Файл успешно загружен"
+        }
+        
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/lines")
+async def api_set_lines(data: Dict[str, float] = Body(...)):
+    """Установка позиций линий подсчета"""
+    try:
+        # Здесь будет логика установки линий
+        # Пока возвращаем заглушку
+        return {
+            "status": "ok", 
+            "left_x": data.get("left_x", 0.25), 
+            "right_x": data.get("right_x", 0.75)
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)

@@ -1,14 +1,27 @@
+"""
+Общие зависимости для API endpoints
+"""
 
-import os
-from pathlib import Path
+from typing import Optional
+from fastapi import Depends, HTTPException, status
 
-# --- Directories ---
-BASE_DIR = Path(__file__).parent.parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-RECORDS_DIR = BASE_DIR / "records"
-MODELS_DIR = BASE_DIR / "models"
-STATIC_DIR = BASE_DIR / "static"
+async def get_current_user():
+    """Получение текущего пользователя (заглушка)"""
+    # Здесь будет логика аутентификации
+    return {"user_id": "anonymous", "role": "user"}
 
-# Ensure directories exist
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+async def require_admin():
+    """Требование прав администратора"""
+    user = await get_current_user()
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin rights required"
+        )
+    return user
+
+def get_pagination(skip: int = 0, limit: int = 100):
+    """Параметры пагинации"""
+    if limit > 1000:
+        limit = 1000
+    return {"skip": skip, "limit": limit}

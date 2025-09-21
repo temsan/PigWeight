@@ -7,6 +7,9 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
+  
+  <!-- Модульная архитектура JavaScript -->
+  <script type="module" src="/static/js/app.js"></script>
   <style>
     .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.56); backdrop-filter: blur(12px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
     .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; gap: 8px; }
@@ -103,15 +106,18 @@
       margin:4px 0 !important; 
       background: var(--liquid-glass-bg); 
       backdrop-filter: blur(var(--liquid-glass-blur)); 
-      border: 1px solid var(--liquid-glass-border); 
-      border-radius: var(--radius-sm); 
+      border: 1px solid var(--liquid-glass-border);
+      border-radius: var(--radius-sm);
       box-shadow: 0 2px 8px var(--liquid-glass-shadow);
     }
+    .journal-stat-value { font-size: 28px !important; font-weight: 700; color: var(--text-primary); line-height: 1; }
+    .journal-stat-card.stat-minor .journal-stat-value { font-size: 22px !important; font-weight: 600; }
+    .journal-stat-card.stat-minor .journal-stat-label { font-size: 11px; opacity: 0.8; }
     .right-col .card{ padding:6px !important; }
     .right-col .journal-comparison-result{ padding:6px 8px !important; }
     .right-col .journal-btn{ height:30px; line-height:28px; padding:0 10px; }
-    .right-col input, .right-col select{ 
-      height:32px; 
+    .right-col input, .right-col select{
+      height:32px;
       background: var(--liquid-glass-bg);
       border: 1px solid var(--liquid-glass-border);
       border-radius: var(--radius-sm);
@@ -227,18 +233,18 @@
           <div id="livePanel" class="panel-content active" style="padding:0;">
             <div class="journal-container">
               <!-- Счетчики потока -->
-              <div class="journal-stats">
+              <div class="journal-stats" style="grid-template-columns: 1fr 1fr 1fr;">
                 <div class="journal-stat-card">
                   <div class="journal-stat-value" id="leftIn" style="transition: color 0.3s ease;">0</div>
                   <div class="journal-stat-label">Слева (вход)</div>
                 </div>
                 <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="rightIn" style="transition: color 0.3s ease;">0</div>
+                  <div class="journal-stat-label">Справа (выход)</div>
+                </div>
+                <div class="journal-stat-card stat-minor">
                   <div class="journal-stat-value" id="totalCrossings" style="transition: color 0.3s ease;">0</div>
                   <div class="journal-stat-label">Всего пересечений</div>
-                </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="rightIn" style="transition: color 0.3s ease;">0</div>
-                  <div class="journal-stat-label">Справа (вход)</div>
                 </div>
               </div>
 
@@ -855,7 +861,7 @@
             overlayCanvas.style.opacity = '0';
         } catch (e) {}
         // Сбрасываем счётчики потоков при остановке
-        try { 
+        try {
             leftInEl.textContent = '0'; 
             rightInEl.textContent = '0'; 
             totalCrossingsEl.textContent = '0';
@@ -880,6 +886,10 @@
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === 'count_update') {
+                // Throttling для UI обновлений - уменьшаем частоту обновлений
+                const now = performance.now();
+                if (!window.__lastUIUpdate || now - window.__lastUIUpdate > 100) {
+                    window.__lastUIUpdate = now;
                 document.getElementById('manualCount').value = data.count;
                 // Recalculate average weight if total is set
                 if (typeof recalcAvgWeight === 'function') {
@@ -963,7 +973,11 @@
                             modelInfo = ` | GPU: ${dev || 'cpu'} | Модель: ${m.name}${imgsz}`;
                         }
                     } catch (_) {}
-                    streamStatus.textContent = `Live | Всего пересечений: ${totalCrossingsCount} | Слева: ${leftInCount} | Справа: ${rightInCount}${modelInfo}`;
+                    // Обновляем статус только если значения изменились
+                    const newStatus = `Live | Всего пересечений: ${totalCrossingsCount} | Слева: ${leftInCount} | Справа: ${rightInCount}${modelInfo}`;
+                    if (streamStatus.textContent !== newStatus) {
+                        streamStatus.textContent = newStatus;
+                    }
                 }
                 if (data.debug && data.debug.act) {
                     const a = data.debug.act;
@@ -1004,6 +1018,7 @@
                         chart.update('none');
                     }
                 }
+                } // Закрытие throttling блока
             }
         };
     }
@@ -1468,12 +1483,77 @@
         drawOverlay(lastMasks, lastIds);
     });
 
+    // --- Seek Handlers (Refactored to prevent race conditions) ---
+    let isSeeking = false;
+    let lastSeekRequestTime = 0;
+
+    // Единая функция для отправки запроса на перемотку.
+    // Устраняет дублирование и гонки.
+    function triggerSeek(targetTime) {
+        const now = performance.now();
+        // Простое ограничение для предотвращения "спама" запросами
+        if (now - lastSeekRequestTime < 200) { // Increased debounce time
+            return;
+        }
+        lastSeekRequestTime = now;
+
+        const id = activeStreamId;
+        const src = streamSources[id] || '';
+        if (!id || /^rtsp:\/\/i.test(src)) {
+            return; // Не перематываем для RTSP или если нет активного потока
+        }
+
+        const t = Number(targetTime || 0);
+        
+        // Блокируем UI для плавной перемотки
+        seekTargetTime = t;
+        seekLockUntil = now + 1500; // Блокируем прием серверного времени на 1.5с
+        overlayBlockUntil = now + 250; // Блокируем оверлей на короткое время
+
+        // Отправляем единственный запрос
+        fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`)
+            .catch(err => console.error('Seek failed:', err));
+        
+        // Немедленно обновляем UI для лучшего отклика
+        setSeekUIVal(t);
+    }
+
+    // 1. Только обновляем UI во время перетаскивания (событие 'input')
+    seekRange.addEventListener('input', (e) => {
+        e.stopPropagation();
+        const t = Number(e.target.value || 0);
+        curTime.textContent = t.toFixed(1);
+        
+        const max = Number(seekRange.max || 1);
+        const percent = max > 0 ? Math.round((t / max) * 100) : 0;
+        streamStatus.textContent = `${percent}%`;
+    });
+
+    // 2. Отслеживаем начало перетаскивания
+    seekRange.addEventListener('mousedown', () => { isSeeking = true; });
+    seekRange.addEventListener('touchstart', () => { isSeeking = true; });
+
+    // 3. Отправляем запрос на перемотку в момент отпускания ползунка
+    seekRange.addEventListener('mouseup', () => {
+        if (isSeeking) {
+            isSeeking = false;
+            triggerSeek(seekRange.value);
+        }
+    });
+    seekRange.addEventListener('touchend', () => {
+        if (isSeeking) {
+            isSeeking = false;
+            triggerSeek(seekRange.value);
+        }
+    });
+    // Лишний обработчик 'change' удален, чтобы избежать двойного срабатывания.
+
     // Keyboard seek (Left/Right arrows). Shift=±1s, Ctrl=±5s, иначе ±step
     function setSeekUIVal(t) {
         let max = Number(seekRange.max || 0);
         let clamped = Math.max(0, Math.min(max, Number(t) || 0));
         seekRange.value = clamped;
-        try { 
+        try {
             curTime.textContent = clamped.toFixed(1);
             // Обновляем индикатор позиции в процентах от длительности
             const percent = max > 0 ? Math.round((clamped / max) * 100) : 0;
@@ -1481,17 +1561,7 @@
         } catch (_) {}
         return clamped;
     }
-    async function requestSeekTo(t) {
-        const id = activeStreamId;
-        const src = streamSources[id] || '';
-        // блокируем приём времени до прихода к цели
-        seekTargetTime = Number(t) || 0;
-        seekLockUntil = performance.now() + 1200;
-        overlayBlockUntil = performance.now() + 180;
-        if (!/^rtsp:\/\//i.test(src)) {
-            try { await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(seekTargetTime)}`); } catch (_) {}
-        }
-    }
+    // requestSeekTo function is removed and replaced by triggerSeek.
     document.addEventListener('keydown', (e) => {
         const ae = document.activeElement;
         const tag = (ae && ae.tagName || '').toLowerCase();
@@ -1500,7 +1570,7 @@
             const id = activeStreamId;
             const src = streamSources[id] || '';
             // Только для файловых источников
-            if (!id || !src || /^rtsp:\/\//i.test(src) || !isVideoPlaying) return;
+            if (!id || !src || /^rtsp:\/\/i.test(src) || !isVideoPlaying) return;
             e.preventDefault();
             
             // Определяем шаг перемотки: Ctrl+стрелка = 5 секунд, Shift+стрелка = 1 секунда, иначе - шаг из настроек
@@ -1509,9 +1579,9 @@
             const cur = Number(seekRange.value || 0);
             const dir = (e.key === 'ArrowRight') ? 1 : -1;
             
-            // Устанавливаем новое значение и запускаем перемотку
-            const target = setSeekUIVal(cur + dir * step);
-            requestSeekTo(target);
+            // Устанавливаем новое значение и запускаем перемотку через единую функцию
+            const target = cur + dir * step;
+            triggerSeek(target);
             
             // Визуальная обратная связь - мигаем индикатором времени
             const timeElement = document.getElementById('curTime');
@@ -1760,59 +1830,6 @@
         }
     });
 
-    // Seek handlers (single-request logic)
-    let isSeeking = false;
-    seekRange.addEventListener('input', (e) => {
-        e.stopPropagation();
-        const t = Number(e.target.value || 0);
-        curTime.textContent = t.toFixed(1);
-        const id = activeStreamId;
-        const src = streamSources[id] || '';
-        if (/^rtsp:\/\//i.test(src)) return;
-        // Во время drag отправляем только на pointerup — не дёргаем бекенд из input
-        if (isSeeking) {
-            if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
-            return;
-        }
-        // Клавиатурная/программная смена — мягкий дебаунс
-        if (seekDebounce) clearTimeout(seekDebounce);
-        seekDebounce = setTimeout(async () => {
-            try {
-                overlayBlockUntil = performance.now() + 120;
-                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
-            } catch (_) {}
-        }, 150);
-    });
-    // Manage pointer drag to avoid duplicate change/pointerup seeks
-    if (seekRange) seekRange.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        isSeeking = true;
-        if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
-    });
-    if (seekRange) seekRange.addEventListener('pointerup', async (e) => {
-        e.stopPropagation();
-        const id = activeStreamId;
-        const src = streamSources[id] || '';
-        const t = Number(seekRange.value || 0);
-        const finishDrag = () => { isSeeking = false; };
-        // блокируем приём серверного t, пока не дойдём до цели
-        seekTargetTime = t;
-        seekLockUntil = performance.now() + 1200;
-        if (!/^rtsp:\/\//i.test(src)) {
-            try {
-                if (seekDebounce) { clearTimeout(seekDebounce); seekDebounce = null; }
-                overlayBlockUntil = performance.now() + 180;
-                await fetch(`/api/stream/${id}/seek?t=${encodeURIComponent(t)}`);
-            } catch (_) {
-            } finally {
-                finishDrag();
-            }
-        } else {
-            // Для RTSP ничего не дергаем на бек — просто выходим из режима
-            finishDrag();
-        }
-    });
-
     document.addEventListener('DOMContentLoaded', async () => {
         // Принудительно устанавливаем WebRTC как приоритетный транспорт
         const transportSelect = document.getElementById('transportSelect');
@@ -1995,7 +2012,6 @@
 
               const statusColor = verification.verified ? '#28a745' : '#ffc107';
               const statusText = verification.verified ? '✓' : '⚠';
-
               item.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <strong style="color:#1f3d6b;">${act.act_file}</strong>
@@ -2494,20 +2510,20 @@
       verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
       verificationUploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        verificationUploadArea.style.borderColor = '#007bff';
-        verificationUploadArea.style.background = 'rgba(0,123,255,0.1)';
+        verificationUploadArea.style.borderColor = 'var(--accent-color)';
+        verificationUploadArea.style.background = 'var(--liquid-glass-hover)';
       });
       verificationUploadArea.addEventListener('dragleave', (e) => {
         e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+        verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)';
+        verificationUploadArea.style.background = 'var(--liquid-glass-bg)';
       });
       verificationUploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+        verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)';
+        verificationUploadArea.style.background = 'var(--liquid-glass-bg)';
         if (e.dataTransfer.files.length > 0) {
-          // Создаем новый DataTransfer для установки файлов
+          // Создаем новый FileList для input
           const dt = new DataTransfer();
           dt.items.add(e.dataTransfer.files[0]);
           verificationFileInput.files = dt.files;
@@ -2540,8 +2556,9 @@
             uploadText.textContent = `📎 ${file.name}`;
           }
           startBtn.disabled = false;
+          showNotification('📄 Файл загружен: ' + file.name, 'success');
         } else {
-          alert('Поддерживаются только Excel файлы (.xlsx, .xls)');
+          showNotification('❌ Поддерживаются только Excel файлы (.xlsx, .xls)', 'error');
           startBtn.disabled = true;
         }
       } else {
@@ -2559,9 +2576,15 @@
       try {
         const fileInput = document.getElementById('verificationFileInput');
         if (!fileInput.files[0]) {
-          alert('Пожалуйста, выберите файл для сверки');
+          showNotification('❌ Пожалуйста, выберите файл для сверки', 'error');
           return;
         }
+
+        // Показываем индикатор загрузки
+        const startBtn = document.getElementById('startVerificationBtn');
+        const originalText = startBtn.textContent;
+        startBtn.textContent = '⏳ Обработка...';
+        startBtn.disabled = true;
 
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
@@ -2575,12 +2598,18 @@
 
         if (response.ok) {
           displayVerificationResults(result);
+          showNotification('✅ Сверка выполнена успешно', 'success');
         } else {
-          alert('Ошибка сверки: ' + (result.detail || 'Неизвестная ошибка'));
+          showNotification('❌ Ошибка сверки: ' + (result.error || result.detail || 'Неизвестная ошибка'), 'error');
         }
       } catch (error) {
         console.error('Error during verification:', error);
-        alert('Ошибка сверки: ' + error.message);
+        showNotification('❌ Ошибка сверки: ' + error.message, 'error');
+      } finally {
+        // Восстанавливаем кнопку
+        const startBtn = document.getElementById('startVerificationBtn');
+        startBtn.textContent = '▶ Проверить';
+        startBtn.disabled = false;
       }
     }
 
@@ -2588,38 +2617,63 @@
     function displayVerificationResults(result) {
       document.getElementById('verificationMatches').textContent = result.matches || 0;
       document.getElementById('verificationDiffs').textContent = result.differences || 0;
-      document.getElementById('verificationMissing').textContent = result.missing || 0;
-
+      
       const resultsContainer = document.getElementById('verificationResults');
-      resultsContainer.innerHTML = '';
-
-      if (result.details && result.details.length > 0) {
-        result.details.forEach(item => {
-          const resultItem = document.createElement('div');
-          resultItem.style.cssText = `
-            padding: 6px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            margin-bottom: 4px;
-            ${item.status === 'match' ? 'background: rgba(40,167,69,0.1); border: 1px solid rgba(40,167,69,0.2);' :
-              item.status === 'diff' ? 'background: rgba(255,193,7,0.1); border: 1px solid rgba(255,193,7,0.2);' :
-              'background: rgba(220,53,69,0.1); border: 1px solid rgba(220,53,69,0.2);'}
-          `;
+      resultsContainer.style.display = 'block';
+      
+      const statusClass = result.status === 'success' ? 'journal-comparison-success' : 
+                         result.status === 'warning' ? 'journal-comparison-warning' : 
+                         'journal-comparison-error';
+      
+      resultsContainer.className = `journal-comparison-result ${statusClass}`;
+      
+      // Проверяем наличие данных сравнения
+      const comparison = result.comparison || {};
+      const excel = comparison.excel || {};
+      const acts = comparison.acts || {};
+      const differences = comparison.differences || {};
+      
+      resultsContainer.innerHTML = `
+        <div style="background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 16px; margin-top: 12px;">
+          <h4 style="margin: 0 0 12px 0; color: var(--text-primary); font-size: 16px;">${result.message || 'Результаты сверки'}</h4>
           
-          const statusIcon = item.status === 'match' ? '✅' : item.status === 'diff' ? '⚠️' : '❌';
-          resultItem.innerHTML = `
-            <div><strong>${statusIcon} ${item.group} (${item.date})</strong></div>
-            <div style="margin-top:2px;">
-              Система: ${item.system_weight}кг (${item.system_count}шт) | 
-              Файл: ${item.file_weight}кг (${item.file_count}шт)
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <div style="background: rgba(40, 167, 69, 0.1); border-radius: var(--radius-sm); padding: 12px;">
+              <h5 style="margin: 0 0 8px 0; color: var(--text-secondary); font-size: 14px;">📄 Excel файл:</h5>
+              <div style="font-size: 13px; color: var(--text-primary);">
+                <div>Количество: <strong>${excel.total_count || 0}</strong></div>
+                <div>Вес: <strong>${excel.total_weight || 0} кг</strong></div>
+                <div>Записей: <strong>${excel.rows || 0}</strong></div>
+              </div>
             </div>
-          `;
+            
+            <div style="background: rgba(44, 123, 229, 0.1); border-radius: var(--radius-sm); padding: 12px;">
+              <h5 style="margin: 0 0 8px 0; color: var(--text-secondary); font-size: 14px;">📊 Наши акты:</h5>
+              <div style="font-size: 13px; color: var(--text-primary);">
+                <div>Количество: <strong>${acts.total_count || 0}</strong></div>
+                <div>Вес: <strong>${acts.total_weight || 0} кг</strong></div>
+                <div>Записей: <strong>${acts.rows || 0}</strong></div>
+              </div>
+            </div>
+          </div>
           
-          resultsContainer.appendChild(resultItem);
-        });
-      } else {
-        resultsContainer.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет данных для отображения</div>';
-      }
+          ${Object.keys(differences).length > 0 ? `
+            <div style="background: rgba(255, 193, 7, 0.1); border-radius: var(--radius-sm); padding: 12px; border-left: 4px solid #ffc107;">
+              <h5 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px;">⚠️ Расхождения:</h5>
+              <div style="font-size: 13px; color: var(--text-primary);">
+                <div>Количество: <strong>±${differences.count_diff || 0}</strong> (${differences.count_diff_percent || 0}%)</div>
+                <div>Вес: <strong>±${differences.weight_diff || 0} кг</strong> (${differences.weight_diff_percent || 0}%)</div>
+              </div>
+            </div>
+          ` : `
+            <div style="background: rgba(40, 167, 69, 0.1); border-radius: var(--radius-sm); padding: 12px; border-left: 4px solid #28a745;">
+              <div style="font-size: 14px; color: var(--text-primary); text-align: center;">
+                ✅ <strong>Данные полностью соответствуют</strong>
+              </div>
+            </div>
+          `}
+        </div>
+      `;
     }
 
     // Автоматическая загрузка данных при запуске
@@ -2640,58 +2694,76 @@
       // Обработчик кнопки обновления журнала
       document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
 
+      // Обработчик кнопки экспорта
+      document.getElementById('exportLogsBtn').addEventListener('click', exportJournalActs);
+
       // Обработчик изменения фильтров
       document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
       document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
       document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
 
-      // Обработчики для загрузки Excel файла
-      const uploadArea = document.getElementById('verificationUploadArea');
-      const fileInput = document.getElementById('verificationFileInput');
-
-      uploadArea.addEventListener('click', () => fileInput.click());
-      uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('dragover');
-      });
-      uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
-      });
-      uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.classList.remove('dragover');
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-          handleExcelFile(files[0]);
-        }
-      });
-
-      fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-          handleExcelFile(e.target.files[0]);
-        }
-      });
-
-      // Обработчик кнопки проверки (унифицирован)
-      const startBtn2 = document.getElementById('startVerificationBtn');
-      startBtn2.addEventListener('click', () => {
-        const file = fileInput.files[0];
-        if (file) {
-          compareWithExcel(file);
-        } else {
-          fileInput.click();
-        }
-      });
+      // Обработчики для панели сверки уже инициализированы выше
 
       function handleExcelFile(file) {
         if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
           document.getElementById('startVerificationBtn').disabled = false;
           showNotification('📄 Файл загружен: ' + file.name, 'success');
+          // Обновляем текст в области загрузки
+          const uploadText = document.querySelector('#verificationUploadArea div div:nth-child(2)');
+          if (uploadText) {
+            uploadText.textContent = `📎 ${file.name}`;
+          }
         } else {
           showNotification('❌ Поддерживаются только Excel файлы', 'error');
         }
       }
     });
+
+    // Экспорт журнала актов
+    async function exportJournalActs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        
+        const params = new URLSearchParams();
+        params.append('format', 'csv');
+        if (dateFrom) params.append('date_from', dateFrom);
+        if (dateTo) params.append('date_to', dateTo);
+        
+        const exportBtn = document.getElementById('exportLogsBtn');
+        const originalText = exportBtn.textContent;
+        exportBtn.textContent = '⏳ Экспорт...';
+        exportBtn.disabled = true;
+        
+        const response = await fetch(`/api/journal/export?${params}`);
+        
+        if (response.ok) {
+          // Создаем ссылку для скачивания файла
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `journal_export_${new Date().toISOString().slice(0, 10)}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          
+          showNotification('📥 Файл экспортирован успешно', 'success');
+        } else {
+          const error = await response.json();
+          throw new Error(error.error || 'Ошибка экспорта');
+        }
+        
+      } catch (error) {
+        console.error('Ошибка экспорта:', error);
+        showNotification('❌ Ошибка экспорта: ' + error.message, 'error');
+      } finally {
+        const exportBtn = document.getElementById('exportLogsBtn');
+        exportBtn.textContent = '📥 Экспорт';
+        exportBtn.disabled = false;
+      }
+    }
 
     // === ФУНКЦИИ ДЛЯ LIQUID GLASS ИНТЕРФЕЙСА ===
 
@@ -2707,6 +2779,13 @@
         if (dateTo) params.append('date_to', dateTo);
         if (camera) params.append('camera', camera);
         
+        // Показываем индикатор загрузки
+        document.getElementById('journalList').innerHTML = `
+          <div class="journal-loading" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+            ⏳ Загрузка актов...
+          </div>
+        `;
+        
         const response = await fetch(`/api/journal/list?${params}`);
         const data = await response.json();
         
@@ -2715,12 +2794,16 @@
         }
         
         displayJournalActs(data);
+        showNotification('📊 Журнал обновлен', 'success');
         
       } catch (error) {
         console.error('Ошибка загрузки актов:', error);
         document.getElementById('journalList').innerHTML = `
-          <div class="journal-empty">❌ Ошибка загрузки: ${error.message}</div>
+          <div class="journal-empty" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+            ❌ Ошибка загрузки: ${error.message}
+          </div>
         `;
+        showNotification('❌ Ошибка загрузки журнала: ' + error.message, 'error');
       }
     }
 
@@ -2736,7 +2819,13 @@
       const journalList = document.getElementById('journalList');
       
       if (data.acts.length === 0) {
-        journalList.innerHTML = '<div class="journal-empty">📝 Нет актов взвешивания</div>';
+        journalList.innerHTML = `
+          <div class="journal-empty" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+            <div style="font-size: 48px; margin-bottom: 16px;">📝</div>
+            <div style="font-size: 16px; font-weight: 500;">Нет актов взвешивания</div>
+            <div style="font-size: 14px; margin-top: 8px; opacity: 0.7;">Попробуйте изменить фильтры или добавить новый акт</div>
+          </div>
+        `;
         return;
       }
       
@@ -2748,27 +2837,38 @@
         const group = act.group || 'Не указана';
         
         return `
-          <div class="journal-item">
-            <div class="journal-item-info">
-              <div class="journal-item-date">${act.date}</div>
-              <div class="journal-item-time">${act.time}</div>
-              <div class="journal-item-group">${group} • ${source}</div>
-              <div class="journal-item-metrics">
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${count}</div>
-                  <div class="journal-item-metric-label">голов</div>
+          <div class="journal-item" style="background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px; transition: all 0.2s ease;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+              <div>
+                <div style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">
+                  ${act.date} в ${act.time}
                 </div>
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${weight}</div>
-                  <div class="journal-item-metric-label">кг</div>
+                <div style="font-size: 14px; color: var(--text-secondary);">
+                  ${group} • ${source}
                 </div>
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${avgWeight}</div>
-                  <div class="journal-item-metric-label">кг/гол</div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 2px;">ID потока</div>
+                <div style="font-size: 14px; color: var(--accent-color); font-weight: 500;">
+                  ${act.stream_id || 'manual'}
                 </div>
               </div>
             </div>
-            <div class="journal-item-camera">${act.stream_id || 'manual'}</div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+              <div style="text-align: center; padding: 12px; background: rgba(44, 123, 229, 0.1); border-radius: var(--radius-sm);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1;">${count}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">голов</div>
+              </div>
+              <div style="text-align: center; padding: 12px; background: rgba(40, 167, 69, 0.1); border-radius: var(--radius-sm);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1;">${weight}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">кг</div>
+              </div>
+              <div style="text-align: center; padding: 12px; background: rgba(255, 193, 7, 0.1); border-radius: var(--radius-sm);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1;">${avgWeight}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">кг/гол</div>
+              </div>
+            </div>
           </div>
         `;
       }).join('');
@@ -2790,13 +2890,13 @@
           return;
         }
         
-        const response = await fetch('/api/weighing/manual/save', {
+        const response = await fetch('/api/journal/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             count: count,
-            total_weight: weight,
-            stream_id: 'manual'
+            weight: weight,
+            camera: 'cam1'
           })
         });
         
