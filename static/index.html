@@ -2510,20 +2510,23 @@
       verificationUploadArea.addEventListener('click', () => verificationFileInput.click());
       verificationUploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        verificationUploadArea.style.borderColor = '#007bff';
-        verificationUploadArea.style.background = 'rgba(0,123,255,0.1)';
+        verificationUploadArea.style.borderColor = 'var(--accent-color)';
+        verificationUploadArea.style.background = 'var(--liquid-glass-hover)';
       });
       verificationUploadArea.addEventListener('dragleave', (e) => {
         e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+        verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)';
+        verificationUploadArea.style.background = 'var(--liquid-glass-bg)';
       });
       verificationUploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        verificationUploadArea.style.borderColor = '#ccc';
-        verificationUploadArea.style.background = 'rgba(255,255,255,0.5)';
+        verificationUploadArea.style.borderColor = 'var(--liquid-glass-border)';
+        verificationUploadArea.style.background = 'var(--liquid-glass-bg)';
         if (e.dataTransfer.files.length > 0) {
-          verificationFileInput.files = e.dataTransfer.files;
+          // Создаем новый FileList для input
+          const dt = new DataTransfer();
+          dt.items.add(e.dataTransfer.files[0]);
+          verificationFileInput.files = dt.files;
           handleVerificationFile();
         }
       });
@@ -2545,10 +2548,26 @@
       const startBtn = document.getElementById('startVerificationBtn');
       
       if (file) {
-        document.querySelector('#verificationUploadArea div div').textContent = `📎 ${file.name}`;
-        startBtn.disabled = false;
+        // Проверяем формат файла
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+          // Обновляем текст в области загрузки
+          const uploadText = document.querySelector('#verificationUploadArea div div:nth-child(2)');
+          if (uploadText) {
+            uploadText.textContent = `📎 ${file.name}`;
+          }
+          startBtn.disabled = false;
+          showNotification('📄 Файл загружен: ' + file.name, 'success');
+        } else {
+          showNotification('❌ Поддерживаются только Excel файлы (.xlsx, .xls)', 'error');
+          startBtn.disabled = true;
+        }
       } else {
         startBtn.disabled = true;
+        // Восстанавливаем исходный текст
+        const uploadText = document.querySelector('#verificationUploadArea div div:nth-child(2)');
+        if (uploadText) {
+          uploadText.textContent = 'Перетащите Excel файл сюда';
+        }
       }
     }
 
@@ -2557,9 +2576,15 @@
       try {
         const fileInput = document.getElementById('verificationFileInput');
         if (!fileInput.files[0]) {
-          alert('Пожалуйста, выберите файл для сверки');
+          showNotification('❌ Пожалуйста, выберите файл для сверки', 'error');
           return;
         }
+
+        // Показываем индикатор загрузки
+        const startBtn = document.getElementById('startVerificationBtn');
+        const originalText = startBtn.textContent;
+        startBtn.textContent = '⏳ Обработка...';
+        startBtn.disabled = true;
 
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
@@ -2573,12 +2598,18 @@
 
         if (response.ok) {
           displayVerificationResults(result);
+          showNotification('✅ Сверка выполнена успешно', 'success');
         } else {
-          alert('Ошибка сверки: ' + (result.detail || 'Неизвестная ошибка'));
+          showNotification('❌ Ошибка сверки: ' + (result.error || result.detail || 'Неизвестная ошибка'), 'error');
         }
       } catch (error) {
         console.error('Error during verification:', error);
-        alert('Ошибка сверки: ' + error.message);
+        showNotification('❌ Ошибка сверки: ' + error.message, 'error');
+      } finally {
+        // Восстанавливаем кнопку
+        const startBtn = document.getElementById('startVerificationBtn');
+        startBtn.textContent = '▶ Проверить';
+        startBtn.disabled = false;
       }
     }
 
@@ -2596,36 +2627,53 @@
       
       resultsContainer.className = `journal-comparison-result ${statusClass}`;
       
-      resultsContainer.innerHTML = `
-        <h4 style="margin: 0 0 12px 0; color: var(--text);">${result.message}</h4>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-          <div>
-            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Excel файл:</h5>
-            <p style="margin: 0; font-size: 13px;">
-              Количество: ${result.comparison.excel.total_count}<br>
-              Вес: ${result.comparison.excel.total_weight} кг<br>
-              Записей: ${result.comparison.excel.rows}
-            </p>
-          </div>
-          <div>
-            <h5 style="margin: 0 0 8px 0; color: var(--muted);">Наши акты:</h5>
-            <p style="margin: 0; font-size: 13px;">
-              Количество: ${result.comparison.acts.total_count}<br>
-              Вес: ${result.comparison.acts.total_weight} кг<br>
-              Записей: ${result.comparison.acts.rows}
-            </p>
-          </div>
-        </div>
-        ${result.comparison.differences ? `
-          <div style="margin-top: 12px; padding: 8px; background: rgba(255,193,7,0.1); border-radius: 6px; font-size: 12px;">
-            <strong>Расхождения:</strong><br>
-            Количество: ±${result.comparison.differences.count_diff} (${result.comparison.differences.count_diff_percent}%)<br>
-            Вес: ±${result.comparison.differences.weight_diff} кг (${result.comparison.differences.weight_diff_percent}%)
-          </div>
-        ` : ''}
-      `;
+      // Проверяем наличие данных сравнения
+      const comparison = result.comparison || {};
+      const excel = comparison.excel || {};
+      const acts = comparison.acts || {};
+      const differences = comparison.differences || {};
       
-      showNotification('📊 Сверка выполнена', 'info');
+      resultsContainer.innerHTML = `
+        <div style="background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 16px; margin-top: 12px;">
+          <h4 style="margin: 0 0 12px 0; color: var(--text-primary); font-size: 16px;">${result.message || 'Результаты сверки'}</h4>
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <div style="background: rgba(40, 167, 69, 0.1); border-radius: var(--radius-sm); padding: 12px;">
+              <h5 style="margin: 0 0 8px 0; color: var(--text-secondary); font-size: 14px;">📄 Excel файл:</h5>
+              <div style="font-size: 13px; color: var(--text-primary);">
+                <div>Количество: <strong>${excel.total_count || 0}</strong></div>
+                <div>Вес: <strong>${excel.total_weight || 0} кг</strong></div>
+                <div>Записей: <strong>${excel.rows || 0}</strong></div>
+              </div>
+            </div>
+            
+            <div style="background: rgba(44, 123, 229, 0.1); border-radius: var(--radius-sm); padding: 12px;">
+              <h5 style="margin: 0 0 8px 0; color: var(--text-secondary); font-size: 14px;">📊 Наши акты:</h5>
+              <div style="font-size: 13px; color: var(--text-primary);">
+                <div>Количество: <strong>${acts.total_count || 0}</strong></div>
+                <div>Вес: <strong>${acts.total_weight || 0} кг</strong></div>
+                <div>Записей: <strong>${acts.rows || 0}</strong></div>
+              </div>
+            </div>
+          </div>
+          
+          ${Object.keys(differences).length > 0 ? `
+            <div style="background: rgba(255, 193, 7, 0.1); border-radius: var(--radius-sm); padding: 12px; border-left: 4px solid #ffc107;">
+              <h5 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px;">⚠️ Расхождения:</h5>
+              <div style="font-size: 13px; color: var(--text-primary);">
+                <div>Количество: <strong>±${differences.count_diff || 0}</strong> (${differences.count_diff_percent || 0}%)</div>
+                <div>Вес: <strong>±${differences.weight_diff || 0} кг</strong> (${differences.weight_diff_percent || 0}%)</div>
+              </div>
+            </div>
+          ` : `
+            <div style="background: rgba(40, 167, 69, 0.1); border-radius: var(--radius-sm); padding: 12px; border-left: 4px solid #28a745;">
+              <div style="font-size: 14px; color: var(--text-primary); text-align: center;">
+                ✅ <strong>Данные полностью соответствуют</strong>
+              </div>
+            </div>
+          `}
+        </div>
+      `;
     }
 
     // Автоматическая загрузка данных при запуске
@@ -2646,58 +2694,76 @@
       // Обработчик кнопки обновления журнала
       document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
 
+      // Обработчик кнопки экспорта
+      document.getElementById('exportLogsBtn').addEventListener('click', exportJournalActs);
+
       // Обработчик изменения фильтров
       document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
       document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
       document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
 
-      // Обработчики для загрузки Excel файла
-      const uploadArea = document.getElementById('verificationUploadArea');
-      const fileInput = document.getElementById('verificationFileInput');
-
-      uploadArea.addEventListener('click', () => fileInput.click());
-      uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('dragover');
-      });
-      uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
-      });
-      uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.classList.remove('dragover');
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-          handleExcelFile(files[0]);
-        }
-      });
-
-      fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-          handleExcelFile(e.target.files[0]);
-        }
-      });
-
-      // Обработчик кнопки проверки (унифицирован)
-      const startBtn2 = document.getElementById('startVerificationBtn');
-      startBtn2.addEventListener('click', () => {
-        const file = fileInput.files[0];
-        if (file) {
-          compareWithExcel(file);
-        } else {
-          fileInput.click();
-        }
-      });
+      // Обработчики для панели сверки уже инициализированы выше
 
       function handleExcelFile(file) {
         if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
           document.getElementById('startVerificationBtn').disabled = false;
           showNotification('📄 Файл загружен: ' + file.name, 'success');
+          // Обновляем текст в области загрузки
+          const uploadText = document.querySelector('#verificationUploadArea div div:nth-child(2)');
+          if (uploadText) {
+            uploadText.textContent = `📎 ${file.name}`;
+          }
         } else {
           showNotification('❌ Поддерживаются только Excel файлы', 'error');
         }
       }
     });
+
+    // Экспорт журнала актов
+    async function exportJournalActs() {
+      try {
+        const dateFrom = document.getElementById('logsDateFrom').value;
+        const dateTo = document.getElementById('logsDateTo').value;
+        
+        const params = new URLSearchParams();
+        params.append('format', 'csv');
+        if (dateFrom) params.append('date_from', dateFrom);
+        if (dateTo) params.append('date_to', dateTo);
+        
+        const exportBtn = document.getElementById('exportLogsBtn');
+        const originalText = exportBtn.textContent;
+        exportBtn.textContent = '⏳ Экспорт...';
+        exportBtn.disabled = true;
+        
+        const response = await fetch(`/api/journal/export?${params}`);
+        
+        if (response.ok) {
+          // Создаем ссылку для скачивания файла
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `journal_export_${new Date().toISOString().slice(0, 10)}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          
+          showNotification('📥 Файл экспортирован успешно', 'success');
+        } else {
+          const error = await response.json();
+          throw new Error(error.error || 'Ошибка экспорта');
+        }
+        
+      } catch (error) {
+        console.error('Ошибка экспорта:', error);
+        showNotification('❌ Ошибка экспорта: ' + error.message, 'error');
+      } finally {
+        const exportBtn = document.getElementById('exportLogsBtn');
+        exportBtn.textContent = '📥 Экспорт';
+        exportBtn.disabled = false;
+      }
+    }
 
     // === ФУНКЦИИ ДЛЯ LIQUID GLASS ИНТЕРФЕЙСА ===
 
@@ -2713,7 +2779,14 @@
         if (dateTo) params.append('date_to', dateTo);
         if (camera) params.append('camera', camera);
         
-        const response = await fetch(`/api/journal/acts?${params}`);
+        // Показываем индикатор загрузки
+        document.getElementById('journalList').innerHTML = `
+          <div class="journal-loading" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+            ⏳ Загрузка актов...
+          </div>
+        `;
+        
+        const response = await fetch(`/api/journal/list?${params}`);
         const data = await response.json();
         
         if (data.error) {
@@ -2721,12 +2794,16 @@
         }
         
         displayJournalActs(data);
+        showNotification('📊 Журнал обновлен', 'success');
         
       } catch (error) {
         console.error('Ошибка загрузки актов:', error);
         document.getElementById('journalList').innerHTML = `
-          <div class="journal-empty">❌ Ошибка загрузки: ${error.message}</div>
+          <div class="journal-empty" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+            ❌ Ошибка загрузки: ${error.message}
+          </div>
         `;
+        showNotification('❌ Ошибка загрузки журнала: ' + error.message, 'error');
       }
     }
 
@@ -2742,33 +2819,59 @@
       const journalList = document.getElementById('journalList');
       
       if (data.acts.length === 0) {
-        journalList.innerHTML = '<div class="journal-empty">📝 Нет актов взвешивания</div>';
+        journalList.innerHTML = `
+          <div class="journal-empty" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+            <div style="font-size: 48px; margin-bottom: 16px;">📝</div>
+            <div style="font-size: 16px; font-weight: 500;">Нет актов взвешивания</div>
+            <div style="font-size: 14px; margin-top: 8px; opacity: 0.7;">Попробуйте изменить фильтры или добавить новый акт</div>
+          </div>
+        `;
         return;
       }
       
-      journalList.innerHTML = data.acts.map(act => `
-        <div class="journal-item">
-          <div class="journal-item-info">
-            <div class="journal-item-date">${act.date}</div>
-            <div class="journal-item-time">${act.time}</div>
-            <div class="journal-item-metrics">
-              <div class="journal-item-metric">
-                <div class="journal-item-metric-value">${act.count}</div>
-                <div class="journal-item-metric-label">голов</div>
+      journalList.innerHTML = data.acts.map(act => {
+        const count = act.total || act.count || 0;
+        const weight = act.weight || 0;
+        const avgWeight = count > 0 ? (weight / count).toFixed(1) : '0.0';
+        const source = act.source || 'система';
+        const group = act.group || 'Не указана';
+        
+        return `
+          <div class="journal-item" style="background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px; transition: all 0.2s ease;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+              <div>
+                <div style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">
+                  ${act.date} в ${act.time}
+                </div>
+                <div style="font-size: 14px; color: var(--text-secondary);">
+                  ${group} • ${source}
+                </div>
               </div>
-              <div class="journal-item-metric">
-                <div class="journal-item-metric-value">${act.weight}</div>
-                <div class="journal-item-metric-label">кг</div>
+              <div style="text-align: right;">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 2px;">ID потока</div>
+                <div style="font-size: 14px; color: var(--accent-color); font-weight: 500;">
+                  ${act.stream_id || 'manual'}
+                </div>
               </div>
-              <div class="journal-item-metric">
-                <div class="journal-item-metric-value">${(act.weight / act.count).toFixed(1)}</div>
-                <div class="journal-item-metric-label">кг/гол</div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+              <div style="text-align: center; padding: 12px; background: rgba(44, 123, 229, 0.1); border-radius: var(--radius-sm);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1;">${count}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">голов</div>
+              </div>
+              <div style="text-align: center; padding: 12px; background: rgba(40, 167, 69, 0.1); border-radius: var(--radius-sm);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1;">${weight}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">кг</div>
+              </div>
+              <div style="text-align: center; padding: 12px; background: rgba(255, 193, 7, 0.1); border-radius: var(--radius-sm);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1;">${avgWeight}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">кг/гол</div>
               </div>
             </div>
           </div>
-          <div class="journal-item-camera">${act.camera}</div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     // Сохранение нового акта
