@@ -7,7 +7,8 @@ from typing import Dict, Any
 import cv2
 import numpy as np
 from av import VideoFrame as _VideoFrame
-from fastapi import APIRouter, Body, Query, JSONResponse, FastAPI
+from fastapi import APIRouter, Body, Query, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 # aiortc components
 try:
@@ -39,11 +40,11 @@ def init_webrtc(app: FastAPI, stream_manager: Any, frame_broker: Any, config: An
             if frame_broker is not None:
                 latest = frame_broker.get_latest(self.stream_id)
                 if latest and latest.get('jpeg'):
-                    jpeg = latest.get('jpeg')
+                    jpeg_data = latest.get('jpeg')
                     source = "FRAME_BROKER"
-                    if not isinstance(jpeg, bytes):
-                        logger.warning(f"BrokerVideoTrack {self.stream_id}: FRAME_BROKER returned non-bytes jpeg: {type(jpeg)}")
-                        jpeg = None
+                    if not isinstance(jpeg_data, bytes):
+                        logger.warning(f"BrokerVideoTrack {self.stream_id}: FRAME_BROKER returned non-bytes jpeg: {type(jpeg_data)}")
+                        jpeg_data = None
                 else:
                     logger.debug(f"BrokerVideoTrack {self.stream_id}: FRAME_BROKER returned empty or no jpeg")
 

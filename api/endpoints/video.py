@@ -1,5 +1,5 @@
-
-from fastapi import APIRouter, UploadFile, File, JSONResponse
+from fastapi import APIRouter, UploadFile, File
+from fastapi.responses import JSONResponse
 from pathlib import Path
 
 # This is a temporary solution and might cause circular imports.

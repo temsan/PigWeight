@@ -323,10 +323,12 @@ class ModelAdapter:
                 imgsz = int(os.getenv('IMG_SIZE', '960'))
                 conf = float(os.getenv('CONF_THRESHOLD', '0.30'))
                 
-                for r in self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True):
+                if self.use_half:
+                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True, half=True)
+                else:
+                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True, half=False)
                     if r is None:
                         out.append({'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []})
-                        continue
 
                     current_masks = []
                     current_bboxes = []

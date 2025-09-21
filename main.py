@@ -112,7 +112,7 @@ def main():
                 app,
                 host=CONFIG.HOST,
                 port=CONFIG.PORT,
-                reload=CONFIG.RELOAD or CONFIG.DEBUG,
+                reload=CONFIG.RELOAD,
                 log_level="debug" if CONFIG.DEBUG else "info",
                 reload_dirs=[
                     str(Path(__file__).parent / "api"),

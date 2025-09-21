@@ -25,19 +25,21 @@ except ImportError as e:
 # Performance logging
 perf_logger = logging.getLogger("perf.api")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form, Body, Request
 from fastapi.responses import StreamingResponse, HTMLResponse, Response, JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 try:
     from fastapi.responses import ORJSONResponse
-except Exception:
-    ORJSONResponse = JSONResponse  # type: ignore
+except ImportError:
+    ORJSONResponse = JSONResponse
+
 try:
     import orjson as _orjson  # noqa: F401
     _HAVE_ORJSON = True
-except Exception:
+except ImportError:
     _HAVE_ORJSON = False
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 try:
     from dotenv import load_dotenv
@@ -81,10 +83,9 @@ if load_dotenv:
 # Импорт упрощенной системы логирования и конфигурации
 try:
     from core.config import setup_logging, get_config
-    logger = setup_logging(debug=os.getenv("DEBUG", "false").lower() == "true")
     config = get_config()
-    BATCH_SIZE = config.get("BATCH_SIZE", 8)
-    MAX_WAIT_MS = config.get("MAX_WAIT_MS", 50)
+    logger = setup_logging(debug=config.DEBUG)
+
 except ImportError:
     # Fallback если core.config недоступен
     import logging
@@ -95,11 +96,11 @@ except ImportError:
 
 # --- Config from environment ---
 # Model config
-DETECTION_MODE = config['DETECTION_MODE']
-PIG_CLASS_ID = config['PIG_CLASS_ID']
+DETECTION_MODE = config.DETECTION_MODE
+PIG_CLASS_ID = config.PIG_CLASS_ID
 
 if DETECTION_MODE == "pig-only":
-    _chosen_path = config.get('MODEL_PATH') or config.get('PIG_MODEL_PATH')
+    _chosen_path = config.MODEL_PATH or config.PIG_MODEL_PATH
     if not _chosen_path:
         raise RuntimeError("MODEL_PATH или PIG_MODEL_PATH не задан в .env")
     _p = Path(_chosen_path)
@@ -108,8 +109,8 @@ if DETECTION_MODE == "pig-only":
     MODEL_PATH = _chosen_path
     TARGET_CLASS_IDS = {PIG_CLASS_ID}
 else:
-    TARGET_CLASS_IDS = set(map(int, config['TARGET_CLASS_IDS'].split(",")))
-    _ENV_MODEL_PATH = config.get('MODEL_PATH')
+    TARGET_CLASS_IDS = set(map(int, config.TARGET_CLASS_IDS.split(",")))
+    _ENV_MODEL_PATH = config.MODEL_PATH
     if not _ENV_MODEL_PATH:
         raise RuntimeError("MODEL_PATH не задан в .env для текущего DETECTION_MODE")
     if not Path(_ENV_MODEL_PATH).exists():
@@ -152,13 +153,13 @@ def cameras_from_env() -> Dict[str, str]:
             cams[f"cam{num}"] = url
         return cams
     # Fallback
-    url = config.get('CAM_URL') or config['CAM_DEFAULT']
+    url = config.CAM_URL or config.CAM_DEFAULT
     if url:
         cams["cam101"] = url
     return cams
 
 def encode_jpeg(frame, quality: int = None) -> bytes:
-    q = quality or config['JPEG_QUALITY']
+    q = quality or config.JPEG_QUALITY
     encode_params = [
         cv2.IMWRITE_JPEG_QUALITY, q,
         cv2.IMWRITE_JPEG_OPTIMIZE, 1,
@@ -439,7 +440,7 @@ class VideoStream(abc.ABC):
         self.model_loaded = False
         self.last_count = 0
         # Оценка количества: максимум по окну и монотоничный отчёт (не прыгает)
-        self.window_max = WindowMaxEstimator(config['AVG_WINDOW'])
+        self.window_max = WindowMaxEstimator(config.AVG_WINDOW)
         self.reported_count = 0
         # flow counters and per-track state
         self.left_in = 0
@@ -602,27 +603,24 @@ class VideoStream(abc.ABC):
     
 
     async def _update_line_counters(self, ids: List[int], centers_x: List[float], centers_y: Optional[List[float]] = None):
-        """Count entries from left/right by crossing vertical lines at 0.25 and 0.75 of width.
-        A crossing is counted when center crosses:
-        - from <0.25 to >=0.25 (left_in) - вход слева направо через левую линию
-        - from <=0.75 to >0.75 (right_in) - вход справа налево через правую линию
+        """Count entries from left/right by crossing vertical lines.
         Directional and with cooldown to avoid bouncing.
         """
         async with self.lock:
             now = time.time()
-            # Линии сдвинуты к краям (настраиваются через env)
-            config['LINE_LEFT_X']
-            R = float(config['LINE_RIGHT_X'])
+            L = config.LINE_LEFT_X
+            R = config.LINE_RIGHT_X
             cy_iter: List[float] = centers_y if centers_y is not None else [0.5] * len(centers_x)
+            
             for tid, cx, cy in zip(ids, centers_x, cy_iter):
                 if tid is None:
                     continue
+                
                 prev = self._track_prev_x.get(tid)
                 prev_y = getattr(self, '_track_prev_y', {}).get(tid)
-                if not hasattr(self, '_track_prev_y'):
-                    self._track_prev_y = {}
-                if not hasattr(self, '_track_is_inside'):
-                    self._track_is_inside = {}
+                if not hasattr(self, '_track_prev_y'): self._track_prev_y = {}
+                if not hasattr(self, '_track_is_inside'): self._track_is_inside = {}
+                
                 prev_inside = bool(self._track_is_inside.get(tid, (prev is not None and L <= prev <= R)))
                 cur_inside = bool(L <= cx <= R)
 
@@ -636,16 +634,16 @@ class VideoStream(abc.ABC):
                 if prev is not None and prev_y is not None:
                     # enter events
                     if (not prev_inside) and cur_inside:
-                                            if prev < L <= cx:
-                                                key = (tid, 'enter_left')
-                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                                                    self.left_in += 1
-                                                    self.total_crossings += 1  # Увеличиваем общий счетчик                                self.left_flow += 1
+                        if prev < L <= cx:
+                            key = (tid, 'enter_left')
+                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
+                                self.left_in += 1
+                                self.total_crossings += 1
+                                self.left_flow += 1
                                 self._track_last_side_time[key] = now
-                                logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}, cooldown={config['CROSS_COOLDOWN_SEC'] * 0.3:.1f}s")
+                                logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
                                 y_at = _interp_y(prev, prev_y, cx, cy, L)
                                 self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
-                                # долгосрочный лог для дашборда
                                 try:
                                     self._act_crossings.append({
                                         "id": int(tid), "side": "left", "mode": "enter",
@@ -653,19 +651,19 @@ class VideoStream(abc.ABC):
                                         "x": float(L), "y": float(y_at),
                                         "count_est": int(self.reported_count)
                                     })
-                                    # порядковый номер пересечения слева
                                     if int(tid) not in self._left_cross_rank:
                                         self._left_cross_rank[int(tid)] = self._left_cross_counter
                                         self._left_cross_counter += 1
                                 except Exception:
                                     pass
-                                            elif cx > R >= prev:
-                                                key = (tid, 'enter_right')
-                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                                                    self.right_in += 1
-                                                    self.total_crossings += 1  # Увеличиваем общий счетчик                                self.right_flow += 1  # Исправлено: должно быть +1 для входа справа
+                        elif cx > R >= prev:
+                            key = (tid, 'enter_right')
+                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
+                                self.right_in += 1
+                                self.total_crossings += 1
+                                self.right_flow += 1
                                 self._track_last_side_time[key] = now
-                                logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}, cooldown={config['CROSS_COOLDOWN_SEC'] * 0.3:.1f}s")
+                                logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
                                 y_at = _interp_y(prev, prev_y, cx, cy, R)
                                 self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
                                 try:
@@ -679,11 +677,11 @@ class VideoStream(abc.ABC):
                                     pass
                     # exit events
                     if prev_inside and (not cur_inside):
-                                            if cx < L <= prev:
-                                                key = (tid, 'exit_left')
-                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                                                    # treat as -1 on left side
-                                                    self.left_in = max(0, self.left_in - 1)                                self.left_flow -= 1
+                        if cx < L <= prev:
+                            key = (tid, 'exit_left')
+                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
+                                self.left_in = max(0, self.left_in - 1)
+                                self.left_flow -= 1
                                 self._track_last_side_time[key] = now
                                 y_at = _interp_y(prev, prev_y, cx, cy, L)
                                 self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
@@ -696,11 +694,12 @@ class VideoStream(abc.ABC):
                                     })
                                 except Exception:
                                     pass
-                                            elif prev > R >= cx:
-                                                key = (tid, 'exit_right')
-                                                if now - self._track_last_side_time.get(key, 0.0) >= (config['CROSS_COOLDOWN_SEC'] * 0.3):  # Уменьшен коэффициент для более точного подсчета
-                                                    self.right_in = max(0, self.right_in - 1)
-                                                    self.right_flow -= 1  # Исправлено: должно быть -1 для выхода справа                                self._track_last_side_time[key] = now
+                        elif prev > R >= cx:
+                            key = (tid, 'exit_right')
+                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
+                                self.right_in = max(0, self.right_in - 1)
+                                self.right_flow -= 1
+                                self._track_last_side_time[key] = now
                                 y_at = _interp_y(prev, prev_y, cx, cy, R)
                                 self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
                                 try:
@@ -716,6 +715,7 @@ class VideoStream(abc.ABC):
                 self._track_prev_x[tid] = cx
                 self._track_prev_y[tid] = cy
                 self._track_is_inside[tid] = cur_inside
+            
             try:
                 cutoff = now - 2.0
                 if self._recent_crossings:
@@ -933,14 +933,12 @@ class FileStream(VideoStream):
                     pts = frame_data.get('pts')
                     time_base = frame_data.get('time_base')
                     
-                    # Calculate timestamp in seconds if possible
-                    ts = self.current_time # fallback to incremental time
+                    ts = self.current_time
                     if pts is not None and time_base is not None and time_base > 0:
                         ts = pts * time_base
                     
                     self.current_time = ts
 
-                    # Use pts as frame_id for uniqueness
                     frame_id = pts if pts is not None else int(ts * 1000)
 
                     try:
@@ -1288,7 +1286,7 @@ async def api_records_list():
 async def api_record_details(act_name: str):
     try:
         # Sanitize filename
-        if ".." in act_name or "/" in act_name or "\" in act_name:
+        if ".." in act_name or "/" in act_name or "\\" in act_name:
             raise HTTPException(status_code=400, detail="Invalid act name")
         p = RECORDS_DIR / act_name
         if not p.exists() or not p.is_file():
