@@ -1121,6 +1121,13 @@ app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_r
 from api.dependencies import init_dependencies
 init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta)
 
+# Setup middleware
+from api.middleware import setup_cors, setup_error_handling, setup_request_logging, setup_security_headers
+setup_cors(app)
+setup_error_handling(app)
+setup_request_logging(app)
+setup_security_headers(app)
+
 # Подключаем эндпоинты из модулей
 from api.endpoints import video, stream, health, files
 app.include_router(health.router, tags=["health"])
