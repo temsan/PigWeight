@@ -47,12 +47,12 @@ class UnifiedVideoProcessor:
         self.stream_id = stream_id
         self.loop = loop
         self.options = options or ProcessingOptions(
-            conf_threshold=CONFIG.get("CONF_THRESHOLD", 0.3),
-            img_size=CONFIG.get("IMG_SIZE", 960)
+            conf_threshold=getattr(CONFIG, "CONF_THRESHOLD", 0.3),
+            img_size=getattr(CONFIG, "IMG_SIZE", 960)
         )
 
         self.model_adapter = ModelAdapter(
-            model_path=CONFIG.get("MODEL_PATH", "")
+            model_path=getattr(CONFIG, "MODEL_PATH", "")
         )
 
         if not self.model_adapter.backend:
@@ -62,8 +62,8 @@ class UnifiedVideoProcessor:
         else:
             self.is_active = True
             batcher_config = BatcherConfig(
-                max_batch_size=CONFIG.get("MAX_BATCH_SIZE", 16),
-                target_latency_ms=CONFIG.get("TARGET_LATENCY_MS", 50.0)
+                max_batch_size=getattr(CONFIG, "MAX_BATCH_SIZE", 16),
+                target_latency_ms=getattr(CONFIG, "TARGET_LATENCY_MS", 50.0)
             )
             self.batcher = DynamicBatcher[BatchItem](batcher_config, self._execute_batch)
             logger.info(f"[{self.stream_id}] Унифицированный процессор активен. Backend: {self.model_adapter.backend}")

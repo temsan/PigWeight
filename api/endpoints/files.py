@@ -1,232 +1,110 @@
 """
-File management endpoints
+File upload endpoints
 """
 
-import json
-import csv
-import os
+import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any
 
-from fastapi import APIRouter, UploadFile, File, Query
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, UploadFile, File
+from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["files"])
 
-# Директории для записей
-RECORDS_DIR = Path("records")
-RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+# Configuration
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 
-@router.post("/weighing/manual/save")
-async def save_manual_weighing(data: Dict[str, Any]):
-    """Сохранение ручного акта взвешивания"""
+@router.post("/upload")
+async def upload_video_file(file: UploadFile = File(...)):
+    """Загрузка видеофайла для обработки"""
     try:
-        # Валидация данных
-        required_fields = ['count', 'total_weight']
-        for field in required_fields:
-            if field not in data:
-                return JSONResponse(
-                    {"error": f"Отсутствует обязательное поле: {field}"},
-                    status_code=400
-                )
-        
-        count = int(data['count'])
-        total_weight = float(data['total_weight'])
-        
-        if count <= 0 or total_weight <= 0:
+        # Валидация файла
+        if not file.filename:
             return JSONResponse(
-                {"error": "Количество и вес должны быть больше нуля"},
+                {"error": "Имя файла не указано"}, 
                 status_code=400
             )
         
-        # Создание записи акта
-        act_data = {
-            'id': f"manual_{int(datetime.now().timestamp())}",
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'time': datetime.now().strftime('%H:%M:%S'),
-            'group': data.get('group', 'Ручной ввод'),
-            'total': count,
-            'weight': total_weight,
-            'avg_weight': round(total_weight / count, 2),
-            'source': 'manual',
-            'stream_id': data.get('stream_id', 'manual'),
-            'created_at': datetime.now().isoformat()
-        }
+        # Проверяем расширение файла
+        allowed_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v', '.flv', '.wmv'}
+        file_ext = Path(file.filename).suffix.lower()
         
-        # Сохранение в файл
-        acts_file = RECORDS_DIR / "weighing_acts.json"
-        acts = []
+        if file_ext not in allowed_extensions:
+            return JSONResponse(
+                {"error": f"Неподдерживаемый формат файла: {file_ext}. Поддерживаемые: {', '.join(allowed_extensions)}"}, 
+                status_code=400
+            )
         
-        if acts_file.exists():
-            try:
-                with open(acts_file, 'r', encoding='utf-8') as f:
-                    acts = json.load(f)
-            except Exception:
-                acts = []
+        # Читаем содержимое файла
+        content = await file.read()
         
-        acts.append(act_data)
+        # Проверяем размер файла (максимум 500MB)
+        max_size = 500 * 1024 * 1024  # 500MB
+        if len(content) > max_size:
+            return JSONResponse(
+                {"error": f"Файл слишком большой: {len(content)/1024/1024:.1f}MB. Максимум: 500MB"}, 
+                status_code=413
+            )
         
-        with open(acts_file, 'w', encoding='utf-8') as f:
-            json.dump(acts, f, ensure_ascii=False, indent=2)
+        if len(content) == 0:
+            return JSONResponse(
+                {"error": "Файл пустой"}, 
+                status_code=400
+            )
         
-        return {
-            "status": "success",
-            "act_id": act_data['id'],
-            "message": "Акт взвешивания сохранен"
-        }
-        
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@router.get("/journal/list")
-async def get_journal_acts(
-    date_from: str = Query(None),
-    date_to: str = Query(None),
-    camera: str = Query(None),
-    limit: int = Query(100)
-):
-    """Получить список актов взвешивания с фильтрацией"""
-    try:
-        acts_file = RECORDS_DIR / "weighing_acts.json"
-        if not acts_file.exists():
-            return {
-                "acts": [],
-                "summary": {
-                    "total_acts": 0,
-                    "total_count": 0,
-                    "total_weight": 0,
-                    "avg_weight": 0
-                }
-            }
-        
-        with open(acts_file, 'r', encoding='utf-8') as f:
-            acts = json.load(f)
-        
-        # Применяем фильтры
-        filtered_acts = []
-        for act in acts:
-            # Фильтр по дате
-            if date_from and act.get('date', '') < date_from:
-                continue
-            if date_to and act.get('date', '') > date_to:
-                continue
-            # Фильтр по камере/потоку
-            if camera and act.get('stream_id', '') != camera:
-                continue
-            
-            filtered_acts.append(act)
-        
-        # Сортируем по дате (новые сверху)
-        filtered_acts.sort(key=lambda x: (x.get('date', ''), x.get('time', '')), reverse=True)
-        
-        # Ограничиваем количество
-        filtered_acts = filtered_acts[:limit]
-        
-        # Добавляем статистику
-        total_count = sum(act.get('total', 0) for act in filtered_acts)
-        total_weight = sum(act.get('weight', 0) for act in filtered_acts)
-        avg_weight = total_weight / total_count if total_count > 0 else 0
-        
-        return {
-            "acts": filtered_acts,
-            "summary": {
-                "total_acts": len(filtered_acts),
-                "total_count": total_count,
-                "total_weight": round(total_weight, 1),
-                "avg_weight": round(avg_weight, 2)
-            }
-        }
-        
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@router.get("/journal/export")
-async def export_journal_acts(
-    format: str = Query("csv", regex="^(csv|excel)$"),
-    date_from: str = Query(None),
-    date_to: str = Query(None)
-):
-    """Экспорт актов взвешивания в CSV или Excel"""
-    try:
-        acts_file = RECORDS_DIR / "weighing_acts.json"
-        if not acts_file.exists():
-            return JSONResponse({"error": "Нет данных для экспорта"}, status_code=404)
-        
-        with open(acts_file, 'r', encoding='utf-8') as f:
-            acts = json.load(f)
-        
-        # Фильтрация по датам
-        if date_from or date_to:
-            filtered_acts = []
-            for act in acts:
-                act_date = act.get('date', '')
-                if date_from and act_date < date_from:
-                    continue
-                if date_to and act_date > date_to:
-                    continue
-                filtered_acts.append(act)
-            acts = filtered_acts
-        
-        if not acts:
-            return JSONResponse({"error": "Нет данных в указанном диапазоне дат"}, status_code=404)
-        
-        # Подготовка данных для экспорта
-        export_data = []
-        for act in acts:
-            export_data.append({
-                'Дата': act.get('date', ''),
-                'Время': act.get('time', ''),
-                'Группа': act.get('group', ''),
-                'Количество голов': act.get('total', 0),
-                'Общий вес (кг)': act.get('weight', 0),
-                'Средний вес (кг)': act.get('avg_weight', 0),
-                'Источник': act.get('source', ''),
-                'ID потока': act.get('stream_id', '')
-            })
-        
+        # Создаем безопасное имя файла с timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"journal_export_{timestamp}.csv"
-        filepath = RECORDS_DIR / filename
+        safe_filename = f"{timestamp}_{file.filename}"
+        file_path = UPLOAD_DIR / safe_filename
         
-        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-            if export_data:
-                fieldnames = export_data[0].keys()
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(export_data)
+        # Сохраняем файл
+        with open(file_path, 'wb') as f:
+            f.write(content)
         
-        return FileResponse(
-            filepath,
-            filename=filename,
-            media_type='text/csv'
-        )
+        # Получаем метаданные видео
+        try:
+            import cv2
+            cap = cv2.VideoCapture(str(file_path))
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
+            cap.release()
+        except Exception as e:
+            logger.warning(f"Could not get video metadata: {e}")
+            fps = 25.0
+            duration = 0.0
         
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@router.post("/journal/compare")
-async def compare_with_excel(file: UploadFile = File(...)):
-    """Сверка актов взвешивания с Excel файлом"""
-    try:
-        if not file.filename.endswith(('.xlsx', '.xls')):
-            return JSONResponse(
-                {"error": "Поддерживаются только Excel файлы (.xlsx, .xls)"}, 
-                status_code=400
-            )
+        logger.info(f"📁 Video uploaded: {safe_filename}, size: {len(content)/1024/1024:.1f}MB, duration: {duration:.1f}s")
         
-        # Здесь будет логика сверки с Excel
-        # Пока возвращаем заглушку
         return {
             "status": "success",
-            "message": "Сверка выполнена",
-            "matches": 0,
-            "differences": 0,
-            "comparison": {
-                "excel": {"total_count": 0, "total_weight": 0, "rows": 0},
-                "acts": {"total_count": 0, "total_weight": 0, "rows": 0}
-            }
+            "filename": file.filename,
+            "safe_filename": safe_filename,
+            "file_path": str(file_path),  # Фронтенд ожидает file_path
+            "path": str(file_path),       # Оставляем для совместимости
+            "size": len(content),
+            "size_mb": round(len(content) / 1024 / 1024, 2),
+            "fps": fps,
+            "duration": duration,
+            "message": "Файл успешно загружен"
         }
         
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        logger.error(f"❌ Error uploading video: {e}", exc_info=True)
+        
+        # Более информативные сообщения об ошибках
+        error_msg = str(e)
+        if "Permission denied" in error_msg:
+            error_msg = "Нет прав для сохранения файла. Проверьте права доступа к папке uploads."
+        elif "No space left" in error_msg:
+            error_msg = "Недостаточно места на диске для сохранения файла."
+        elif "File too large" in error_msg:
+            error_msg = "Файл слишком большой для загрузки."
+        else:
+            error_msg = f"Ошибка при загрузке файла: {error_msg}"
+        
+        return JSONResponse({"error": error_msg}, status_code=500)

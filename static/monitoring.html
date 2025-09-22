@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PigWeight - Мониторинг системы</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .status-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-ok { background-color: #28a745; }
+        .status-degraded { background-color: #ffc107; }
+        .status-critical { background-color: #dc3545; }
+        .status-error { background-color: #dc3545; }
+        .status-unknown { background-color: #6c757d; }
+        
+        .component-details {
+            margin-top: 15px;
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .alerts {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .alert {
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        
+        .alert-critical { background-color: #f8d7da; border-left: 4px solid #dc3545; }
+        .alert-error { background-color: #f8d7da; border-left: 4px solid #dc3545; }
+        .alert-warning { background-color: #fff3cd; border-left: 4px solid #ffc107; }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        
+        .metric-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .refresh-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            padding: 15px 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .refresh-btn:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
+        
+        .last-updated {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 20px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐷 PigWeight</h1>
+            <p>Мониторинг системы обработки видео</p>
+        </div>
+        
+        <div class="status-overview" id="statusOverview">
+            <!-- Компоненты будут загружены динамически -->
+        </div>
+        
+        <div class="alerts" id="alertsSection" style="display: none;">
+            <h3>🚨 Предупреждения</h3>
+            <div id="alertsList"></div>
+        </div>
+        
+        <div class="metrics" id="metricsSection">
+            <!-- Метрики будут загружены динамически -->
+        </div>
+        
+        <div class="last-updated" id="lastUpdated"></div>
+    </div>
+    
+    <button class="refresh-btn" onclick="loadDashboard()">🔄 Обновить</button>
+    
+    <script>
+        let autoRefreshInterval;
+        
+        function getStatusClass(status) {
+            return `status-${status}`;
+        }
+        
+        function getAlertClass(level) {
+            return `alert-${level}`;
+        }
+        
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hours}ч ${minutes}м ${secs}с`;
+        }
+        
+        async function loadDashboard() {
+            try {
+                const response = await fetch('/api/dashboard');
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load dashboard');
+                }
+                
+                // Update status overview
+                updateStatusOverview(data.components);
+                
+                // Update alerts
+                updateAlerts(data.alerts);
+                
+                // Update metrics
+                updateMetrics(data.overview, data.performance);
+                
+                // Update last updated time
+                document.getElementById('lastUpdated').textContent = 
+                    `Последнее обновление: ${new Date().toLocaleString('ru-RU')}`;
+                
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                document.getElementById('statusOverview').innerHTML = 
+                    '<div class="status-card"><h3>❌ Ошибка загрузки</h3><p>' + error.message + '</p></div>';
+            }
+        }
+        
+        function updateStatusOverview(components) {
+            const container = document.getElementById('statusOverview');
+            container.innerHTML = '';
+            
+            for (const [name, data] of Object.entries(components)) {
+                const card = document.createElement('div');
+                card.className = 'status-card';
+                
+                const displayName = {
+                    'av_worker': 'AV Worker',
+                    'frame_broker': 'Frame Broker',
+                    'processors': 'Процессоры',
+                    'model_adapter': 'Model Adapter'
+                }[name] || name;
+                
+                let details = '';
+                if (name === 'av_worker') {
+                    details = `
+                        <div class="component-details">
+                            Процесс: ${data.process_alive ? '✅ Активен' : '❌ Неактивен'}<br>
+                            Сбои: ${data.consecutive_failures || 0}<br>
+                            Ping: ${data.ping_status || 'unknown'}
+                        </div>
+                    `;
+                } else if (name === 'frame_broker') {
+                    details = `
+                        <div class="component-details">
+                            Потоки: ${data.total_streams || 0}<br>
+                            Подписчики: ${data.total_subscribers || 0}<br>
+                            Успешность: ${((data.success_rate || 0) * 100).toFixed(1)}%
+                        </div>
+                    `;
+                } else if (name === 'processors') {
+                    details = `
+                        <div class="component-details">
+                            Всего: ${data.total_processors || 0}<br>
+                            Активных: ${data.active_processors || 0}
+                        </div>
+                    `;
+                } else if (name === 'model_adapter') {
+                    details = `
+                        <div class="component-details">
+                            Backend: ${data.backend || 'unknown'}<br>
+                            Устройство: ${data.device || 'unknown'}<br>
+                            Инференсы: ${data.total_inferences || 0}
+                        </div>
+                    `;
+                }
+                
+                card.innerHTML = `
+                    <h3>
+                        <span class="status-indicator ${getStatusClass(data.status)}"></span>
+                        ${displayName}
+                    </h3>
+                    <p>Статус: ${data.status}</p>
+                    ${details}
+                `;
+                
+                container.appendChild(card);
+            }
+        }
+        
+        function updateAlerts(alerts) {
+            const alertsSection = document.getElementById('alertsSection');
+            const alertsList = document.getElementById('alertsList');
+            
+            if (alerts && alerts.length > 0) {
+                alertsSection.style.display = 'block';
+                alertsList.innerHTML = '';
+                
+                alerts.forEach(alert => {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = `alert ${getAlertClass(alert.level)}`;
+                    alertDiv.innerHTML = `
+                        <strong>${alert.component}:</strong> ${alert.message}
+                        <small style="float: right;">${new Date(alert.timestamp * 1000).toLocaleTimeString('ru-RU')}</small>
+                    `;
+                    alertsList.appendChild(alertDiv);
+                });
+            } else {
+                alertsSection.style.display = 'none';
+            }
+        }
+        
+        function updateMetrics(overview, performance) {
+            const container = document.getElementById('metricsSection');
+            container.innerHTML = '';
+            
+            const metrics = [
+                {
+                    label: 'Время работы',
+                    value: formatUptime(overview.uptime_seconds || 0)
+                },
+                {
+                    label: 'Активные потоки',
+                    value: performance.total_streams || 0
+                },
+                {
+                    label: 'Активные процессоры',
+                    value: performance.active_processors || 0
+                },
+                {
+                    label: 'Успешность FrameBroker',
+                    value: `${((performance.frame_broker_success_rate || 0) * 100).toFixed(1)}%`
+                },
+                {
+                    label: 'Сбои AV Worker',
+                    value: performance.av_worker_failures || 0
+                },
+                {
+                    label: 'Общий статус',
+                    value: overview.status || 'unknown'
+                }
+            ];
+            
+            metrics.forEach(metric => {
+                const card = document.createElement('div');
+                card.className = 'metric-card';
+                card.innerHTML = `
+                    <div class="metric-value">${metric.value}</div>
+                    <div class="metric-label">${metric.label}</div>
+                `;
+                container.appendChild(card);
+            });
+        }
+        
+        // Load dashboard on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDashboard();
+            
+            // Auto-refresh every 30 seconds
+            autoRefreshInterval = setInterval(loadDashboard, 30000);
+        });
+        
+        // Stop auto-refresh when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearInterval(autoRefreshInterval);
+            } else {
+                loadDashboard();
+                autoRefreshInterval = setInterval(loadDashboard, 30000);
+            }
+        });
+    </script>
+</body>
+</html>

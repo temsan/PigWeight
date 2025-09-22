@@ -1122,10 +1122,11 @@ from api.dependencies import init_dependencies
 init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta)
 
 # Подключаем эндпоинты из модулей
-from api.endpoints import video, stream, health
+from api.endpoints import video, stream, health, files
 app.include_router(health.router, tags=["health"])
 app.include_router(video.router, tags=["video"])
 app.include_router(stream.router, tags=["stream"])
+app.include_router(files.router, tags=["files"])
 
 # Include WebRTC routes
 from api import webrtc
@@ -1158,6 +1159,11 @@ async def read_root():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def read_dashboard():
     return FileResponse(STATIC_DIR / "dashboard.html")
+
+@app.get("/monitoring", response_class=HTMLResponse)
+async def read_monitoring():
+    """Страница мониторинга системы"""
+    return FileResponse(STATIC_DIR / "monitoring.html")
 
 # Moved to api/endpoints/stream.py
 # @app.post("/api/stream/start")
