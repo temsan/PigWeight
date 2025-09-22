@@ -200,7 +200,7 @@ AVW: Optional[AVIsolate] = None
 def get_av() -> AVIsolate:
     global AVW
     if AVW is None:
-        AVW = AVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+        AVW = AVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=config.TARGET_FPS)
     return AVW
 
 def _av_safe_call(method_name: str, *args, **kwargs):
@@ -213,7 +213,7 @@ def _av_safe_call(method_name: str, *args, **kwargs):
     except Exception:
         try:
             global AVW
-            AVW = AVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=TARGET_FPS)
+            AVW = AVIsolate(jpeg_quality=int(os.getenv("JPEG_QUALITY", "80")), target_fps=config.TARGET_FPS)
             method = getattr(AVW, method_name, None)
             if not method:
                 raise AttributeError(f"AVIsolate lacks {method_name}")

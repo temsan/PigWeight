@@ -652,11 +652,32 @@
     }
 
     async function startStream(streamId, sourceUri) {
+        // Validate inputs
+        if (!streamId || !sourceUri || sourceUri === 'undefined') {
+            const error = `Недопустимые параметры потока: streamId=${streamId}, sourceUri=${sourceUri}`;
+            console.error(error);
+            showNotification(`❌ Ошибка запуска потока: ${error}`, 'error');
+            hideLoader();
+            return;
+        }
+        
         streamSources[streamId] = sourceUri;
         hasFirstFrame = false;
         showLoader('Запуск…');
         try { videoStream.style.opacity = '1'; } catch (e) {}
-        await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
+        
+        try {
+            const response = await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+        } catch (error) {
+            console.error('Stream start error:', error);
+            showNotification(`❌ Не удалось запустить поток: ${error.message}`, 'error');
+            hideLoader();
+            return;
+        }
 
         const transport = document.getElementById('transportSelect') ? document.getElementById('transportSelect').value : 'mjpeg';
         if (transport === 'webrtc') {
@@ -701,10 +722,24 @@
         // Configure seek UI (robust): drive state from /info on every poll
         if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
         let seekStepSet = false;
+        let pollErrorCount = 0;
         const poll = async () => {
             try {
                 const resp = await fetch(`/api/stream/${streamId}/info`);
-                if (!resp.ok) return; // don't flip UI on transient errors
+                if (!resp.ok) {
+                    pollErrorCount++;
+                    // Stop polling after 3 consecutive 404s to avoid spam
+                    if (resp.status === 404 && pollErrorCount >= 3) {
+                        console.warn(`Stream ${streamId} not found, stopping polling`);
+                        if (seekTimer) {
+                            clearInterval(seekTimer);
+                            seekTimer = null;
+                        }
+                        streamStatus.textContent = 'Поток не найден';
+                    }
+                    return;
+                }
+                pollErrorCount = 0; // Reset error count on success
                 const info = await resp.json();
                 if (info && info.type === 'file') {
                     const dur = Number(info.duration || 0);
@@ -1701,16 +1736,20 @@
         const formData = new FormData();
         formData.append('file', file);
 
-        const uploadResponse = await fetch('/api/upload', {
-            method: 'POST',
-            body: formData
-        });
+        try {
+            // Show loading indicator
+            showLoader('Загрузка файла...');
+            
+            const uploadResponse = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            });
 
-        const uploadData = await uploadResponse.json();
+            const uploadData = await uploadResponse.json();
 
-        if (uploadResponse.ok) {
-            const streamId = 'file_' + Date.now();
-            const sourceUri = uploadData.file_path;
+            if (uploadResponse.ok && uploadData.file_path) {
+                const streamId = 'file_' + Date.now();
+                const sourceUri = uploadData.file_path;
             
             // Сохраняем информацию о последнем файле
             saveLastFile(streamId, sourceUri, file.name);
@@ -1741,6 +1780,7 @@
                     }
                 }
             }
+            showNotification(`✅ Файл загружен: ${file.name}`, 'success');
             await startStream(streamId, sourceUri);
             // Confirm once more from /info
             try {
@@ -1756,7 +1796,16 @@
             } catch (_) {}
             // keep slider always enabled; just update values
         } else {
-            streamStatus.textContent = `Error uploading file: ${uploadData.error}`;
+            const errorMsg = uploadData.error || 'Неизвестная ошибка загрузки';
+            streamStatus.textContent = `Ошибка загрузки файла: ${errorMsg}`;
+            showNotification(`❌ Не удалось загрузить файл: ${errorMsg}`, 'error');
+        }
+        } catch (error) {
+            console.error('Upload error:', error);
+            streamStatus.textContent = 'Ошибка при загрузке файла';
+            showNotification(`❌ Ошибка загрузки: ${error.message}`, 'error');
+        } finally {
+            hideLoader();
         }
     });
 
@@ -1833,15 +1882,17 @@
         try { setFsState(false); } catch (e) {}
         // Worker disabled for now to avoid seek freezes
         // Load and display history from localStorage
-        const history = JSON.parse(localStorage.getItem('history') || '[]');
-        history.forEach(item => {
-            const row = historyTable.insertRow();
-            row.insertCell().textContent = item.date;
-            row.insertCell().textContent = item.camera;
-            row.insertCell().textContent = item.count;
-            row.insertCell().textContent = item.total_weight;
-            row.insertCell().textContent = item.avg_weight;
-        });
+        if (historyTable) {
+            const history = JSON.parse(localStorage.getItem('history') || '[]');
+            history.forEach(item => {
+                const row = historyTable.insertRow();
+                row.insertCell().textContent = item.date;
+                row.insertCell().textContent = item.camera;
+                row.insertCell().textContent = item.count;
+                row.insertCell().textContent = item.total_weight;
+                row.insertCell().textContent = item.avg_weight;
+            });
+        }
 
         // Save button logic
         const saveManualBtn = document.getElementById('saveManualBtn');

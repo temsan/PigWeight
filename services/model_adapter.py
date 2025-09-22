@@ -50,6 +50,10 @@ class ModelAdapter:
         # Performance tracking
         self._inference_times = []
         self._total_inferences = 0
+        self._type_conversion_times = []
+        self._dtype_performance_stats = {}  # Track performance by data type
+        self._compatibility_checks = 0
+        self._compatibility_failures = 0
 
         # Auto-detect optimal configuration
         self.device, self.use_half = self._detect_optimal_device(temp_device)
@@ -57,6 +61,12 @@ class ModelAdapter:
         
         # Initialize type safety manager
         self.type_manager = TypeSafetyManager(self.device)
+        
+        # Determine optimal inference dtype based on device and model
+        self.optimal_dtype = self._determine_optimal_dtype()
+        
+        # Type compatibility cache for performance
+        self._compatibility_cache = {}
         
         perf_logger = logging.getLogger("perf.model_adapter")
 
@@ -154,6 +164,80 @@ class ModelAdapter:
         if hasattr(self, 'type_manager'):
             type_stats = self.type_manager.get_stats()
             logger.info(f"Type safety manager initialized: {type_stats}")
+            logger.info(f"Optimal inference dtype: {self.optimal_dtype}")
+
+    def _determine_optimal_dtype(self):
+        """Определяет оптимальный тип данных для инференса на основе устройства и модели"""
+        try:
+            if self.device.startswith('cuda') and _HAVE_TORCH:
+                import torch
+                if torch.cuda.is_available():
+                    # Для GPU предпочитаем half precision для экономии памяти
+                    if self.use_half:
+                        return torch.float16
+                    else:
+                        return torch.float32
+                else:
+                    # Fallback to CPU
+                    return torch.float32
+            else:
+                # Для CPU всегда используем float32 для стабильности
+                if _HAVE_TORCH:
+                    import torch
+                    return torch.float32
+                else:
+                    return np.float32
+        except Exception as e:
+            logger.warning(f"Failed to determine optimal dtype: {e}")
+            return np.float32
+
+    def _check_tensor_compatibility(self, tensor1, tensor2, cache_key: str = None) -> bool:
+        """Проверяет совместимость типов тензоров с кэшированием"""
+        if cache_key and cache_key in self._compatibility_cache:
+            return self._compatibility_cache[cache_key]
+        
+        self._compatibility_checks += 1
+        start_time = time.time()
+        
+        try:
+            is_compatible = validate_tensor_compatibility(tensor1, tensor2)
+            if cache_key:
+                self._compatibility_cache[cache_key] = is_compatible
+            
+            # Track performance
+            check_time = time.time() - start_time
+            if not hasattr(self, '_compatibility_check_times'):
+                self._compatibility_check_times = []
+            self._compatibility_check_times.append(check_time)
+            
+            if not is_compatible:
+                self._compatibility_failures += 1
+                
+            return is_compatible
+        except Exception as e:
+            logger.warning(f"Compatibility check failed: {e}")
+            self._compatibility_failures += 1
+            return False
+
+    def _track_dtype_performance(self, dtype_str: str, inference_time: float, batch_size: int):
+        """Отслеживает производительность для различных типов данных"""
+        if dtype_str not in self._dtype_performance_stats:
+            self._dtype_performance_stats[dtype_str] = {
+                'total_time': 0.0,
+                'total_inferences': 0,
+                'total_samples': 0,
+                'avg_time_per_sample': 0.0,
+                'min_time': float('inf'),
+                'max_time': 0.0
+            }
+        
+        stats = self._dtype_performance_stats[dtype_str]
+        stats['total_time'] += inference_time
+        stats['total_inferences'] += 1
+        stats['total_samples'] += batch_size
+        stats['avg_time_per_sample'] = stats['total_time'] / stats['total_samples']
+        stats['min_time'] = min(stats['min_time'], inference_time)
+        stats['max_time'] = max(stats['max_time'], inference_time)
 
     def _handle_inference_error(self, error: Exception, context: str = "") -> None:
         """Handle and log inference errors with context"""
@@ -174,6 +258,90 @@ class ModelAdapter:
         if hasattr(self, 'type_manager'):
             return self.type_manager.get_stats()
         return {"type_manager": "not_initialized"}
+    
+    def get_performance_stats(self) -> dict:
+        """Get comprehensive performance statistics"""
+        stats = {
+            "total_inferences": self._total_inferences,
+            "backend": self.backend,
+            "device": self.device,
+            "optimal_dtype": str(self.optimal_dtype),
+            "use_half": self.use_half
+        }
+        
+        # Inference timing stats
+        if self._inference_times:
+            stats["inference_timing"] = {
+                "avg_time": sum(self._inference_times) / len(self._inference_times),
+                "min_time": min(self._inference_times),
+                "max_time": max(self._inference_times),
+                "total_samples": len(self._inference_times)
+            }
+        
+        # Type conversion stats
+        if self._type_conversion_times:
+            stats["type_conversion"] = {
+                "avg_time": sum(self._type_conversion_times) / len(self._type_conversion_times),
+                "total_conversions": len(self._type_conversion_times),
+                "total_time": sum(self._type_conversion_times)
+            }
+        
+        # Compatibility check stats
+        stats["compatibility_checks"] = {
+            "total_checks": self._compatibility_checks,
+            "failures": self._compatibility_failures,
+            "success_rate": (self._compatibility_checks - self._compatibility_failures) / max(1, self._compatibility_checks),
+            "cache_size": len(self._compatibility_cache)
+        }
+        
+        # Per-dtype performance stats
+        stats["dtype_performance"] = self._dtype_performance_stats.copy()
+        
+        # Type manager stats
+        if hasattr(self, 'type_manager'):
+            stats["type_manager"] = self.type_manager.get_stats()
+        
+        return stats
+    
+    def reset_performance_stats(self):
+        """Reset all performance statistics"""
+        self._inference_times.clear()
+        self._type_conversion_times.clear()
+        self._dtype_performance_stats.clear()
+        self._compatibility_cache.clear()
+        self._total_inferences = 0
+        self._compatibility_checks = 0
+        self._compatibility_failures = 0
+        
+        if hasattr(self, 'type_manager'):
+            self.type_manager.clear_cache()
+        
+        logger.info("Performance statistics reset")
+    
+    def optimize_for_device(self):
+        """Optimize model settings for current device"""
+        try:
+            if self.backend == 'ultralytics' and self._yolo is not None:
+                # Re-evaluate optimal settings
+                old_dtype = self.optimal_dtype
+                self.optimal_dtype = self._determine_optimal_dtype()
+                
+                if old_dtype != self.optimal_dtype:
+                    logger.info(f"Updated optimal dtype: {old_dtype} -> {self.optimal_dtype}")
+                
+                # Update type manager
+                if hasattr(self, 'type_manager'):
+                    self.type_manager.optimal_dtype = self.optimal_dtype
+                
+                # Try to optimize model for current device
+                if hasattr(self._yolo, 'to') and self.device:
+                    self._yolo.to(self.device)
+                    logger.info(f"Model moved to device: {self.device}")
+                
+                return True
+        except Exception as e:
+            logger.warning(f"Device optimization failed: {e}")
+            return False
 
     def _detect_optimal_device(self, requested_device: str = "auto"):
         """Автоматически определяет оптимальное устройство и настройки"""
@@ -241,6 +409,38 @@ class ModelAdapter:
     def infer(self, imgs: List[np.ndarray]) -> List[Dict[str, Any]]:
         import time
         inference_start = time.time()
+        batch_size = len(imgs)
+        
+        # Pre-inference type compatibility checks and conversions
+        conversion_start = time.time()
+        processed_imgs = []
+        input_dtype_str = "unknown"
+        
+        try:
+            for i, img in enumerate(imgs):
+                if img is None:
+                    processed_imgs.append(img)
+                    continue
+                
+                # Track input data type
+                if hasattr(img, 'dtype'):
+                    input_dtype_str = str(img.dtype)
+                
+                # Apply type safety conversions
+                safe_img = self.type_manager.prepare_tensor(img, self.optimal_dtype)
+                processed_imgs.append(safe_img)
+                
+                # Log type conversion if it occurred
+                if safe_img is not img:
+                    logger.debug(f"Applied type conversion for image {i}: {type(img)} -> {type(safe_img)}")
+            
+            conversion_time = time.time() - conversion_start
+            self._type_conversion_times.append(conversion_time)
+            
+        except Exception as e:
+            logger.warning(f"Type conversion failed, using original images: {e}")
+            processed_imgs = imgs
+            conversion_time = time.time() - conversion_start
 
         out: List[Dict[str, Any]] = []
 
@@ -340,6 +540,13 @@ class ModelAdapter:
                         results.append({'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []})
 
                 out = results
+                
+                # Track performance metrics for ONNX
+                total_inference_time = time.time() - inference_start
+                self._inference_times.append(total_inference_time)
+                self._total_inferences += 1
+                self._track_dtype_performance(input_dtype_str, total_inference_time, batch_size)
+                
                 return out
 
             except Exception as e:
@@ -451,6 +658,17 @@ class ModelAdapter:
                         'centroids': current_centroids
                     })
                 
+                # Track performance metrics for Ultralytics
+                total_inference_time = time.time() - inference_start
+                self._inference_times.append(total_inference_time)
+                self._total_inferences += 1
+                self._track_dtype_performance(input_dtype_str, total_inference_time, batch_size)
+                
+                # Log performance metrics periodically
+                if self._total_inferences % 10 == 0:
+                    avg_time = sum(self._inference_times[-10:]) / min(10, len(self._inference_times))
+                    logger.debug(f"Average inference time (last 10): {avg_time:.3f}s, backend: {self.backend}, dtype: {input_dtype_str}")
+                
                 return out
             except Exception as e:
                 self._handle_inference_error(e, "ultralytics_inference")
@@ -462,6 +680,19 @@ class ModelAdapter:
             return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
         if self.backend == 'torch' and self._torch_model is not None:
             return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
+
+        # Track performance metrics before returning
+        total_inference_time = time.time() - inference_start
+        self._inference_times.append(total_inference_time)
+        self._total_inferences += 1
+        
+        # Track performance by data type
+        self._track_dtype_performance(input_dtype_str, total_inference_time, batch_size)
+        
+        # Log performance metrics periodically
+        if self._total_inferences % 10 == 0:
+            avg_time = sum(self._inference_times[-10:]) / min(10, len(self._inference_times))
+            logger.debug(f"Average inference time (last 10): {avg_time:.3f}s, dtype: {input_dtype_str}")
 
         # fallback
         return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
