@@ -5,6 +5,9 @@ from typing import Any, Dict, List
 import numpy as np
 from datetime import datetime
 
+# Import type safety utilities
+from core.type_utils import TypeSafetyManager, safe_tensor_conversion, ensure_float32, validate_tensor_compatibility
+
 try:
     import onnxruntime as ort
     _HAVE_ONNX = True
@@ -51,6 +54,9 @@ class ModelAdapter:
         # Auto-detect optimal configuration
         self.device, self.use_half = self._detect_optimal_device(temp_device)
         self.model_path = self._select_best_model(model_path)
+        
+        # Initialize type safety manager
+        self.type_manager = TypeSafetyManager(self.device)
         
         perf_logger = logging.getLogger("perf.model_adapter")
 
@@ -143,6 +149,31 @@ class ModelAdapter:
                 self._torch_model = None
 
         logger.info(f"ModelAdapter initialized: path={self.model_path}, backend={self.backend}, device={self.device}")
+        
+        # Log type safety configuration
+        if hasattr(self, 'type_manager'):
+            type_stats = self.type_manager.get_stats()
+            logger.info(f"Type safety manager initialized: {type_stats}")
+
+    def _handle_inference_error(self, error: Exception, context: str = "") -> None:
+        """Handle and log inference errors with context"""
+        error_msg = str(error).lower()
+        
+        if "dtype" in error_msg or "half" in error_msg or "float" in error_msg:
+            logger.error(f"Type conversion error in {context}: {error}")
+            logger.info("This error is related to tensor type mismatches (c10::Half vs float)")
+            logger.info("The ModelAdapter will attempt automatic type conversion")
+        elif "cuda" in error_msg or "device" in error_msg:
+            logger.error(f"Device error in {context}: {error}")
+            logger.info("This error is related to GPU/CPU device mismatches")
+        else:
+            logger.error(f"General inference error in {context}: {error}")
+    
+    def get_type_stats(self) -> dict:
+        """Get type safety statistics"""
+        if hasattr(self, 'type_manager'):
+            return self.type_manager.get_stats()
+        return {"type_manager": "not_initialized"}
 
     def _detect_optimal_device(self, requested_device: str = "auto"):
         """Автоматически определяет оптимальное устройство и настройки"""
@@ -323,50 +354,94 @@ class ModelAdapter:
                 imgsz = int(os.getenv('IMG_SIZE', '960'))
                 conf = float(os.getenv('CONF_THRESHOLD', '0.30'))
                 
-                if self.use_half:
-                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True, half=True)
-                else:
-                    results = self._yolo.predict(imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True, half=False)
+                # Apply type safety before inference
+                processed_imgs = []
+                for img in imgs:
+                    try:
+                        # Ensure consistent data types
+                        safe_img = ensure_float32(img) if hasattr(img, 'dtype') else img
+                        processed_imgs.append(safe_img)
+                    except Exception as e:
+                        logger.warning(f"Type conversion failed for image: {e}")
+                        processed_imgs.append(img)
+                
+                # Run inference with type safety
+                try:
+                    if self.use_half:
+                        results = self._yolo.predict(processed_imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True, half=True)
+                    else:
+                        results = self._yolo.predict(processed_imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True, half=False)
+                except Exception as type_error:
+                    self._handle_inference_error(type_error, "ultralytics_predict")
+                    if "dtype" in str(type_error).lower() or "half" in str(type_error).lower():
+                        logger.warning(f"Retrying inference with explicit float32 mode")
+                        # Retry with explicit float32
+                        results = self._yolo.predict(processed_imgs, imgsz=imgsz, conf=conf, verbose=False, retina_masks=True, half=False)
+                    else:
+                        raise type_error
+                
+                # Process results with type safety
+                for r in results:
                     if r is None:
                         out.append({'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []})
+                        continue
 
                     current_masks = []
                     current_bboxes = []
                     current_centroids = []
                     current_confidence = 0.0
 
-                    if hasattr(r, 'masks') and r.masks is not None:
-                        polys = r.masks.xy
-                        current_masks = polys
-                        current_confidence = float(np.mean(r.boxes.conf.cpu().numpy())) if r.boxes.conf.numel() > 0 else 0.0
+                    try:
+                        if hasattr(r, 'masks') and r.masks is not None:
+                            polys = r.masks.xy
+                            current_masks = polys
+                            
+                            # Safe confidence extraction
+                            if hasattr(r, 'boxes') and r.boxes is not None and r.boxes.conf.numel() > 0:
+                                conf_tensor = ensure_float32(r.boxes.conf.cpu())
+                                current_confidence = float(np.mean(conf_tensor.numpy()))
 
-                        # Extract bboxes from masks or r.boxes
-                        if hasattr(r, 'boxes') and r.boxes is not None:
-                            current_bboxes = r.boxes.xyxy.cpu().numpy().tolist()
-                            # Calculate centroids from bboxes
+                            # Extract bboxes from masks or r.boxes
+                            if hasattr(r, 'boxes') and r.boxes is not None:
+                                bbox_tensor = ensure_float32(r.boxes.xyxy.cpu())
+                                current_bboxes = bbox_tensor.numpy().tolist()
+                                # Calculate centroids from bboxes
+                                current_centroids = [
+                                    ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+                                    for box in current_bboxes
+                                ]
+                            elif polys:
+                                # Fallback: calculate bboxes from mask polygons
+                                current_bboxes = [
+                                    [np.min(p[:, 0]), np.min(p[:, 1]), np.max(p[:, 0]), np.max(p[:, 1])]
+                                    for p in polys
+                                ]
+                                current_centroids = [
+                                    (np.mean(p[:, 0]), np.mean(p[:, 1]))
+                                    for p in polys
+                                ]
+
+                        elif hasattr(r, 'boxes') and r.boxes is not None:
+                            # If no masks, use only boxes
+                            bbox_tensor = ensure_float32(r.boxes.xyxy.cpu())
+                            current_bboxes = bbox_tensor.numpy().tolist()
+                            
+                            if r.boxes.conf.numel() > 0:
+                                conf_tensor = ensure_float32(r.boxes.conf.cpu())
+                                current_confidence = float(np.mean(conf_tensor.numpy()))
+                            
                             current_centroids = [
                                 ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
                                 for box in current_bboxes
                             ]
-                        elif polys:
-                            # Fallback: calculate bboxes from mask polygons
-                            current_bboxes = [
-                                [np.min(p[:, 0]), np.min(p[:, 1]), np.max(p[:, 0]), np.max(p[:, 1])]
-                                for p in polys
-                            ]
-                            current_centroids = [
-                                (np.mean(p[:, 0]), np.mean(p[:, 1]))
-                                for p in polys
-                            ]
 
-                    elif hasattr(r, 'boxes') and r.boxes is not None:
-                        # If no masks, use only boxes
-                        current_bboxes = r.boxes.xyxy.cpu().numpy().tolist()
-                        current_confidence = float(np.mean(r.boxes.conf.cpu().numpy())) if r.boxes.conf.numel() > 0 else 0.0
-                        current_centroids = [
-                            ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
-                            for box in current_bboxes
-                        ]
+                    except Exception as processing_error:
+                        logger.warning(f"Error processing result tensors: {processing_error}")
+                        # Fallback to empty result for this image
+                        current_masks = []
+                        current_bboxes = []
+                        current_centroids = []
+                        current_confidence = 0.0
 
                     out.append({
                         'detections': len(current_bboxes),
@@ -378,6 +453,7 @@ class ModelAdapter:
                 
                 return out
             except Exception as e:
+                self._handle_inference_error(e, "ultralytics_inference")
                 logger.error(f"Model inference error (ultralytics) on {self.model_path}: {e}", exc_info=True)
                 return [{'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []} for _ in imgs]
 

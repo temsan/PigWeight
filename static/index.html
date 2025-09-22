@@ -455,7 +455,7 @@
     const curTime = document.getElementById('curTime');
     const durTime = document.getElementById('durTime');
     const liveCountChart = document.getElementById('liveCountChart');
-    // const historyTable = document.getElementById('history').querySelector('tbody'); // history table removed
+    const historyTable = document.getElementById('historyTable');
     const loadingOverlay = document.getElementById('loadingOverlay');
     const loadingText = document.getElementById('loadingText');
 
@@ -1844,7 +1844,9 @@
         });
 
         // Save button logic
-        document.getElementById('saveManualBtn').addEventListener('click', () => {
+        const saveManualBtn = document.getElementById('saveManualBtn');
+        if (saveManualBtn) {
+            saveManualBtn.addEventListener('click', () => {
             const history = JSON.parse(localStorage.getItem('history') || '[]');
             const newEntry = {
                 date: new Date().toLocaleString(),
@@ -1856,7 +1858,8 @@
             history.unshift(newEntry);
             localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
             updateHistory();
-        });
+            });
+        }
 
         // Autostart the default stream
         const streams = await getStreams();
@@ -2030,29 +2033,33 @@
     // Загрузка файлов для анализа
     let analysisFiles = [];
 
-    const fileUploadArea = document.getElementById('fileUploadArea');
-    const analysisFileInput = document.getElementById('analysisFileInput');
-    const analyzeFilesBtn = document.getElementById('analyzeFilesBtn');
-    const analysisResults = document.getElementById('analysisResults');
+    const fileUploadArea = document.getElementById('verificationUploadArea');
+    const analysisFileInput = document.getElementById('verificationFileInput');
+    const analyzeFilesBtn = document.getElementById('startVerificationBtn');
+    const analysisResults = document.getElementById('verificationResults');
 
-    fileUploadArea.addEventListener('click', () => analysisFileInput.click());
-    fileUploadArea.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      fileUploadArea.style.borderColor = '#007bff';
-      fileUploadArea.style.background = 'rgba(0,123,255,0.05)';
-    });
-    fileUploadArea.addEventListener('dragleave', () => {
-      fileUploadArea.style.borderColor = '#ccc';
-      fileUploadArea.style.background = 'rgba(255,255,255,0.5)';
-    });
-    fileUploadArea.addEventListener('drop', (e) => {
-      e.preventDefault();
-      fileUploadArea.style.borderColor = '#ccc';
-      fileUploadArea.style.background = 'rgba(255,255,255,0.5)';
-      handleAnalysisFiles(e.dataTransfer.files);
-    });
+    if (fileUploadArea && analysisFileInput) {
+        fileUploadArea.addEventListener('click', () => analysisFileInput.click());
+        fileUploadArea.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          fileUploadArea.style.borderColor = '#007bff';
+          fileUploadArea.style.background = 'rgba(0,123,255,0.05)';
+        });
+        fileUploadArea.addEventListener('dragleave', () => {
+          fileUploadArea.style.borderColor = '#ccc';
+          fileUploadArea.style.background = 'rgba(255,255,255,0.5)';
+        });
+        fileUploadArea.addEventListener('drop', (e) => {
+          e.preventDefault();
+          fileUploadArea.style.borderColor = '#ccc';
+          fileUploadArea.style.background = 'rgba(255,255,255,0.5)';
+          handleAnalysisFiles(e.dataTransfer.files);
+        });
+    }
 
-    analysisFileInput.addEventListener('change', (e) => handleAnalysisFiles(e.target.files));
+    if (analysisFileInput) {
+        analysisFileInput.addEventListener('change', (e) => handleAnalysisFiles(e.target.files));
+    }
 
     function handleAnalysisFiles(files) {
       analysisFiles = [];
@@ -2116,7 +2123,8 @@
     }
 
     // Анализ загруженных файлов
-    analyzeFilesBtn.addEventListener('click', async () => {
+    if (analyzeFilesBtn) {
+        analyzeFilesBtn.addEventListener('click', async () => {
       if (analysisFiles.length === 0) return;
 
       analyzeFilesBtn.disabled = true;
@@ -2165,15 +2173,21 @@
         analyzeFilesBtn.disabled = false;
         analyzeFilesBtn.textContent = 'Анализировать';
       }
-    });
+        });
+    }
 
     // Обновление верификации
-    document.getElementById('refreshVerificationBtn').addEventListener('click', loadVerificationData);
+    const refreshVerificationBtn = document.getElementById('refreshVerificationBtn');
+    if (refreshVerificationBtn) {
+        refreshVerificationBtn.addEventListener('click', loadVerificationData);
+    }
 
 
 
     // Генерация отчета
-    document.getElementById('generateReportBtn').addEventListener('click', async () => {
+    const generateReportBtn = document.getElementById('generateReportBtn');
+    if (generateReportBtn) {
+        generateReportBtn.addEventListener('click', async () => {
       try {
         const response = await fetch('/api/verification/report');
         const report = await response.json();
@@ -2233,7 +2247,8 @@
         console.error('Error generating report:', error);
         alert('Ошибка при генерации отчета: ' + error.message);
       }
-    });
+        });
+    }
 
     // === ФУНКЦИИ ДЛЯ НОВЫХ ПАНЕЛЕЙ ===
 

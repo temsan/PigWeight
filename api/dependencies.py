@@ -1,27 +1,22 @@
 """
-Общие зависимости для API endpoints
+Shared dependencies for API endpoints
 """
 
-from typing import Optional
-from fastapi import Depends, HTTPException, status
+# This module will be populated with shared dependencies
+# to avoid circular imports between app.py and endpoints
 
-async def get_current_user():
-    """Получение текущего пользователя (заглушка)"""
-    # Здесь будет логика аутентификации
-    return {"user_id": "anonymous", "role": "user"}
+# Global variables that will be set by app.py
+STREAM_MANAGER = None
+TARGET_FPS = None
+FileStream = None
+perf_logger = None
+av_meta = None
 
-async def require_admin():
-    """Требование прав администратора"""
-    user = await get_current_user()
-    if user.get("role") != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin rights required"
-        )
-    return user
-
-def get_pagination(skip: int = 0, limit: int = 100):
-    """Параметры пагинации"""
-    if limit > 1000:
-        limit = 1000
-    return {"skip": skip, "limit": limit}
+def init_dependencies(stream_manager, target_fps, file_stream_class, perf_log, av_meta_func):
+    """Initialize shared dependencies"""
+    global STREAM_MANAGER, TARGET_FPS, FileStream, perf_logger, av_meta
+    STREAM_MANAGER = stream_manager
+    TARGET_FPS = target_fps
+    FileStream = file_stream_class
+    perf_logger = perf_log
+    av_meta = av_meta_func

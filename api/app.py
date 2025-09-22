@@ -1113,9 +1113,15 @@ async def lifespan(app: FastAPI):
 _DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
 app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
 
+# Initialize shared dependencies
+from api.dependencies import init_dependencies
+init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta)
+
 # Подключаем эндпоинты из модулей
-from api.endpoints import video
-app.include_router(video.router, prefix="/api", tags=["video"])
+from api.endpoints import video, stream, health
+app.include_router(health.router, tags=["health"])
+app.include_router(video.router, tags=["video"])
+app.include_router(stream.router, tags=["stream"])
 
 # Include WebRTC routes
 from api import webrtc
@@ -1133,9 +1139,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 
-@app.get("/api/health")
-async def api_health():
-    return {"status": "ok"}
+# Moved to api/endpoints/health.py
+# @app.get("/api/health")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
@@ -1150,118 +1155,25 @@ async def read_root():
 async def read_dashboard():
     return FileResponse(STATIC_DIR / "dashboard.html")
 
-@app.post("/api/stream/start")
-async def api_stream_start(stream_id: str, source_uri: str):
-    start_time = time.time()
-    try:
-        perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Starting stream {stream_id} with source {source_uri}")
+# Moved to api/endpoints/stream.py
+# @app.post("/api/stream/start")
 
-        # Basic validation for file paths to give clearer errors
-        if not source_uri.startswith("rtsp://") and not source_uri.startswith("demo://"):
-            p = Path(source_uri)
-            if not p.exists():
-                perf_logger.warning(".3f")
-                return JSONResponse({"error": f"file not found: {source_uri}"}, status_code=404)
-            if not p.is_file():
-                perf_logger.warning(".3f")
-                return JSONResponse({"error": f"not a file: {source_uri}"}, status_code=400)
+# Moved to api/endpoints/stream.py
+# @app.get("/api/stream/{stream_id}/stop")
 
-        stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
-        await stream.start()
-        resp = {"status": "started", "stream_id": stream_id}
-        
-        if isinstance(stream, FileStream):
-            # provide best-known meta immediately
-            resp.update({
-                "type": "file",
-                "duration": float(stream.duration or 0.0),
-            })
-        
-        perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Stream started in {(time.time() - start_time):.3f}s")
-        return resp
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+# Moved to api/endpoints/stream.py
+# @app.get("/api/stream/{stream_id}/snapshot")
 
-@app.get("/api/stream/{stream_id}/stop")
-async def api_stream_stop(stream_id: str):
-    start_time = time.time()
-    try:
-        perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Stopping stream {stream_id}")
-        await STREAM_MANAGER.stop_stream(stream_id)
-        end_time = time.time()
-        perf_logger.info(".3f")
-        return {"status": "stopped", "stream_id": stream_id}
-    except Exception as e:
-        end_time = time.time()
-        perf_logger.warning(".3f")
-        # Be resilient: never break UI on stop
-        logger.error(f"Stop stream error for {stream_id}: {e}")
-        return JSONResponse({"status": "stopped", "stream_id": stream_id, "warning": str(e)}, status_code=200)
-
-@app.get("/api/stream/{stream_id}/snapshot")
-async def api_stream_snapshot(stream_id: str):
-    stream = STREAM_MANAGER.streams.get(stream_id)
-    if not stream or not stream.running:
-        return JSONResponse({"error": "stream not found or not running"}, status_code=404)
-    
-    jpeg = await stream.get_jpeg()
-    if not jpeg:
-        return JSONResponse({"error": "no frame"}, status_code=404)
-    
-    return Response(content=jpeg, media_type="image/jpeg")
-
-async def mjpeg_generator(stream: VideoStream):
-    while stream.running:
-        jpeg = await stream.get_jpeg()
-        if jpeg:
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
-        await asyncio.sleep(1.0 / TARGET_FPS)
-
-@app.get("/api/stream/{stream_id}/feed")
-async def api_stream_feed(stream_id: str):
-    start_time = time.time()
-    stream = STREAM_MANAGER.streams.get(stream_id)
-    if not stream or not stream.running:
-        perf_logger.warning(".3f")
-        return JSONResponse({"error": "stream not found or not running"}, status_code=404)
-
-    perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Starting MJPEG feed for {stream_id}")
-    headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "X-Accel-Buffering": "no"
-    }
-    return StreamingResponse(mjpeg_generator(stream), media_type="multipart/x-mixed-replace; boundary=frame", headers=headers)
+# Moved to api/endpoints/stream.py
+# mjpeg_generator and @app.get("/api/stream/{stream_id}/feed")
 
 @app.get("/api/cameras")
 async def api_cameras():
     """Return available cameras as defined in .env (env vars)."""
     return cameras_from_env()
 
-@app.get("/api/stream/{stream_id}/info")
-async def api_stream_info(stream_id: str):
-    stream = STREAM_MANAGER.streams.get(stream_id)
-    if not stream:
-        return JSONResponse({"error": "stream not found"}, status_code=404)
-    if isinstance(stream, FileStream):
-        # Refresh meta lazily if duration is unknown
-        if not stream.duration or stream.duration <= 0.0:
-            try:
-                meta = av_meta(stream.stream_id)
-                stream.duration = float(meta.get("duration", stream.duration or 0.0) or 0.0)
-                stream.fps = float(meta.get("fps", stream.fps or 0.0) or 0.0)
-            except Exception:
-                pass
-        return {
-            "type": "file",
-            "duration": float(stream.duration or 0.0),
-            "current_time": float(stream.current_time or 0.0),
-            "fps": float(stream.fps or 0.0),
-        }
-    else:
-        return {"type": "rtsp", "duration": None}
+# Moved to api/endpoints/stream.py
+# @app.get("/api/stream/{stream_id}/info")
 
 # --- Records API for dashboard ---
 @app.get("/api/records")
