@@ -737,6 +737,10 @@ class VideoStream(abc.ABC):
                 return bytes(frame_data)
             return None
 
+    async def _infer_loop(self):
+        """Inference loop for processing frames"""
+        return await _global_infer_loop(self)
+    
     async def get_frame_data(self) -> Optional[Dict[str, Any]]:
         async with self.lock:
             return self.last_frame_data
