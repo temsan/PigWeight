@@ -21,6 +21,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 @router.post("/upload")
 async def upload_video_file(file: UploadFile = File(...)):
     """Загрузка видеофайла для обработки"""
+    logger.info(f"🎬 FILES ENDPOINT: Upload request received for file: {file.filename}")
     try:
         # Валидация файла
         if not file.filename:

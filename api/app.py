@@ -2269,8 +2269,9 @@ async def compare_with_measurements(file: UploadFile = File(...)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # === API для загрузки видеофайлов ===
+# ОТКЛЮЧЕН: используется модульный endpoint из api/endpoints/video.py
 
-@app.post("/api/upload")
+# @app.post("/api/upload")
 async def upload_video_file(file: UploadFile = File(...)):
     """Загрузка видеофайла для обработки"""
     try:
@@ -2523,8 +2524,9 @@ async def export_weighing_data(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # === API для загрузки видеофайлов ===
+# ОТКЛЮЧЕН: используется модульный endpoint из api/endpoints/video.py
 
-@app.post("/api/upload")
+# @app.post("/api/upload")
 async def upload_video_file(file: UploadFile = File(...)):
     """Загрузка видеофайла для обработки"""
     try:
