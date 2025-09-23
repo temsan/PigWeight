@@ -185,6 +185,7 @@
           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">
           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>
         </div>
+        <button id="diagnosticsBtn" class="nowrap" title="Диагностика системы" onclick="openDiagnostics()" style="flex:0 0 auto; padding:4px 8px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:7; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">🔧</button>
         <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:var(--text-secondary); background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 4px 8px; margin-left:6px; white-space:nowrap;"></span>
       </div>
     </div>
@@ -3001,6 +3002,100 @@
         setTimeout(() => notification.remove(), 300);
       }, 3000);
     }
+
+    // Функции диагностики
+    function openDiagnostics() {
+      window.open('/static/diagnostics.html', '_blank');
+    }
+
+    async function runQuickDiagnostics() {
+      try {
+        const response = await fetch('/api/diagnostics/quick');
+        const data = await response.json();
+        
+        if (data.status === 'ok') {
+          showNotification('✅ Система работает нормально', 'success');
+        } else {
+          let issues = [];
+          if (!data.memory_ok) issues.push('память');
+          if (!data.disk_ok) issues.push('диск');
+          if (!data.model_ok) issues.push('модель');
+          
+          showNotification(`⚠️ Обнаружены проблемы: ${issues.join(', ')}`, 'warning');
+        }
+      } catch (error) {
+        showNotification('❌ Ошибка диагностики: ' + error.message, 'error');
+      }
+    }
+
+    function showNotification(message, type = 'info') {
+      // Создаем уведомление
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        z-index: 10000;
+        padding: 12px 16px;
+        border-radius: 8px;
+        color: white;
+        font-weight: 500;
+        max-width: 300px;
+        word-wrap: break-word;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        transition: all 0.3s ease;
+        transform: translateX(100%);
+      `;
+      
+      // Цвета в зависимости от типа
+      switch (type) {
+        case 'success':
+          notification.style.background = 'rgba(34, 197, 94, 0.9)';
+          break;
+        case 'warning':
+          notification.style.background = 'rgba(251, 191, 36, 0.9)';
+          break;
+        case 'error':
+          notification.style.background = 'rgba(239, 68, 68, 0.9)';
+          break;
+        default:
+          notification.style.background = 'rgba(59, 130, 246, 0.9)';
+      }
+      
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      // Анимация появления
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+      
+      // Автоматическое скрытие через 5 секунд
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 300);
+      }, 5000);
+      
+      // Клик для закрытия
+      notification.addEventListener('click', () => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 300);
+      });
+    }
+
+    // Автоматическая диагностика при загрузке страницы
+    window.addEventListener('load', () => {
+      setTimeout(runQuickDiagnostics, 2000);
+    });
 
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

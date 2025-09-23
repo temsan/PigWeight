@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Руководство по устранению неполадок - PigWeight</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            padding: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .nav-links {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section h2 {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            color: #fff;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 10px;
+        }
+
+        .section h3 {
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+            margin-top: 25px;
+            color: #f0f8ff;
+        }
+
+        .problem-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid;
+        }
+
+        .problem-card.critical { border-left-color: #ef4444; }
+        .problem-card.warning { border-left-color: #fbbf24; }
+        .problem-card.info { border-left-color: #3b82f6; }
+
+        .problem-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .problem-symptoms {
+            margin-bottom: 15px;
+        }
+
+        .problem-symptoms h4 {
+            font-size: 1rem;
+            margin-bottom: 8px;
+            color: #fbbf24;
+        }
+
+        .problem-solutions h4 {
+            font-size: 1rem;
+            margin-bottom: 8px;
+            color: #4ade80;
+        }
+
+        .steps {
+            list-style: none;
+            counter-reset: step-counter;
+        }
+
+        .steps li {
+            counter-increment: step-counter;
+            margin-bottom: 10px;
+            padding-left: 30px;
+            position: relative;
+        }
+
+        .steps li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 0;
+            top: 0;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .back-link {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            text-decoration: none;
+            font-size: 1.1rem;
+            padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .back-link:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .quick-fixes {
+            background: rgba(34, 197, 94, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .quick-fixes h3 {
+            color: #4ade80;
+            margin-top: 0;
+        }
+
+        .browser-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .browser-table th,
+        .browser-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .browser-table th {
+            background: rgba(255, 255, 255, 0.1);
+            font-weight: 600;
+        }
+
+        .status-good { color: #4ade80; }
+        .status-limited { color: #fbbf24; }
+        .status-poor { color: #ef4444; }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-link">← Назад к приложению</a>
+    
+    <div class="container">
+        <div class="header">
+            <h1>📚 Руководство по устранению неполадок</h1>
+            <p>Решение распространенных проблем PigWeight</p>
+        </div>
+
+        <div class="nav-links">
+            <a href="#quick-fixes" class="nav-link">Быстрые решения</a>
+            <a href="#upload-issues" class="nav-link">Проблемы загрузки</a>
+            <a href="#video-issues" class="nav-link">Проблемы видео</a>
+            <a href="#performance" class="nav-link">Производительность</a>
+            <a href="#browser-compatibility" class="nav-link">Совместимость</a>
+            <a href="/static/diagnostics.html" class="nav-link">🔧 Диагностика</a>
+        </div>
+
+        <div id="quick-fixes" class="quick-fixes">
+            <h3>⚡ Быстрые решения</h3>
+            <p>Попробуйте эти решения в первую очередь:</p>
+            <ol class="steps">
+                <li>Обновите страницу (Ctrl+F5 или Cmd+Shift+R)</li>
+                <li>Проверьте подключение к интернету</li>
+                <li>Убедитесь, что сервер запущен</li>
+                <li>Очистите кэш браузера</li>
+                <li>Попробуйте другой браузер (Chrome или Firefox)</li>
+            </ol>
+        </div>
+
+        <div id="upload-issues" class="section">
+            <h2>📁 Проблемы с загрузкой файлов</h2>
+
+            <div class="problem-card critical">
+                <div class="problem-title">
+                    ❌ "Ошибка загрузки файла: Неизвестная ошибка"
+                </div>
+                <div class="problem-symptoms">
+                    <h4>Симптомы:</h4>
+                    <ul>
+                        <li>Файл не загружается</li>
+                        <li>Появляется сообщение об ошибке</li>
+                        <li>Индикатор загрузки зависает</li>
+                    </ul>
+                </div>
+                <div class="problem-solutions">
+                    <h4>Решения:</h4>
+                    <ol class="steps">
+                        <li>Проверьте размер файла (максимум 500MB)</li>
+                        <li>Убедитесь, что формат поддерживается: <span class="code">.mp4, .avi, .mov, .mkv, .webm, .m4v, .flv, .wmv</span></li>
+                        <li>Проверьте свободное место на диске сервера</li>
+                        <li>Попробуйте загрузить файл меньшего размера</li>
+                        <li>Проверьте права доступа к папке uploads</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="problem-card warning">
+                <div class="problem-title">
+                    ⚠️ Медленная загрузка файлов
+                </div>
+                <div class="problem-symptoms">
+                    <h4>Симптомы:</h4>
+                    <ul>
+                        <li>Загрузка занимает очень много времени</li>
+                        <li>Прогресс-бар движется медленно</li>
+                    </ul>
+                </div>
+                <div class="problem-solutions">
+                    <h4>Решения:</h4>
+                    <ol class="steps">
+                        <li>Проверьте скорость интернет-соединения</li>
+                        <li>Закройте другие приложения, использующие сеть</li>
+                        <li>Попробуйте сжать видеофайл</li>
+                        <li>Используйте проводное подключение вместо Wi-Fi</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <div id="video-issues" class="section">
+            <h2>🎥 Проблемы с воспроизведением видео</h2>
+
+            <div class="problem-card critical">
+                <div class="problem-title">
+                    ❌ Видео не воспроизводится
+                </div>
+                <div class="problem-symptoms">
+                    <h4>Симптомы:</h4>
+                    <ul>
+                        <li>Черный экран вместо видео</li>
+                        <li>Ошибка "Не удается загрузить видео"</li>
+                        <li>Видео зависает на первом кадре</li>
+                    </ul>
+                </div>
+                <div class="problem-solutions">
+                    <h4>Решения:</h4>
+                    <ol class="steps">
+                        <li>Проверьте, что файл не поврежден</li>
+                        <li>Убедитесь, что формат видео поддерживается</li>
+                        <li>Попробуйте другой видеофайл</li>
+                        <li>Перезапустите сервер</li>
+                        <li>Проверьте логи сервера на наличие ошибок</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="problem-card warning">
+                <div class="problem-title">
+                    ⚠️ Низкое качество видео или задержки
+                </div>
+                <div class="problem-symptoms">
+                    <h4>Симптомы:</h4>
+                    <ul>
+                        <li>Размытое или пикселизированное изображение</li>
+                        <li>Задержка между действиями и откликом</li>
+                        <li>Прерывистое воспроизведение</li>
+                    </ul>
+                </div>
+                <div class="problem-solutions">
+                    <h4>Решения:</h4>
+                    <ol class="steps">
+                        <li>Увеличьте качество JPEG в настройках: <span class="code">JPEG_QUALITY=90</span></li>
+                        <li>Уменьшите FPS для экономии ресурсов: <span class="code">FPS=10</span></li>
+                        <li>Переключитесь на MJPEG транспорт</li>
+                        <li>Закройте другие ресурсоемкие приложения</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <div id="performance" class="section">
+            <h2>⚡ Проблемы производительности</h2>
+
+            <div class="problem-card warning">
+                <div class="problem-title">
+                    ⚠️ Высокое использование памяти
+                </div>
+                <div class="problem-symptoms">
+                    <h4>Симптомы:</h4>
+                    <ul>
+                        <li>Система работает медленно</li>
+                        <li>Браузер "тормозит"</li>
+                        <li>Ошибки "Out of memory"</li>
+                    </ul>
+                </div>
+                <div class="problem-solutions">
+                    <h4>Решения:</h4>
+                    <ol class="steps">
+                        <li>Перезапустите браузер</li>
+                        <li>Закройте ненужные вкладки</li>
+                        <li>Уменьшите размер батча: <span class="code">BATCH_SIZE=4</span></li>
+                        <li>Используйте CPU вместо GPU: <span class="code">DEVICE=cpu</span></li>
+                        <li>Перезапустите сервер</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="problem-card info">
+                <div class="problem-title">
+                    ℹ️ Медленная обработка видео
+                </div>
+                <div class="problem-symptoms">
+                    <h4>Симптомы:</h4>
+                    <ul>
+                        <li>Долгая инициализация модели</li>
+                        <li>Низкий FPS обработки</li>
+                        <li>Задержка в детекции объектов</li>
+                    </ul>
+                </div>
+                <div class="problem-solutions">
+                    <h4>Решения:</h4>
+                    <ol class="steps">
+                        <li>Используйте GPU если доступно: <span class="code">DEVICE=cuda</span></li>
+                        <li>Уменьшите размер изображения: <span class="code">IMG_SIZE=640</span></li>
+                        <li>Увеличьте пропуск кадров: <span class="code">FRAME_SKIP=5</span></li>
+                        <li>Понизьте порог уверенности: <span class="code">CONF_THRESHOLD=0.25</span></li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <div id="browser-compatibility" class="section">
+            <h2>🌐 Совместимость браузеров</h2>
+
+            <div class="problem-card info">
+                <div class="problem-title">
+                    ℹ️ Поддержка браузеров
+                </div>
+                <table class="browser-table">
+                    <thead>
+                        <tr>
+                            <th>Браузер</th>
+                            <th>Поддержка</th>
+                            <th>WebRTC</th>
+                            <th>Рекомендации</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Chrome</td>
+                            <td class="status-good">✅ Отлично</td>
+                            <td class="status-good">✅ Полная</td>
+                            <td>Рекомендуется</td>
+                        </tr>
+                        <tr>
+                            <td>Firefox</td>
+                            <td class="status-good">✅ Хорошо</td>
+                            <td class="status-good">✅ Хорошая</td>
+                            <td>Рекомендуется</td>
+                        </tr>
+                        <tr>
+                            <td>Safari</td>
+                            <td class="status-limited">⚠️ Ограничено</td>
+                            <td class="status-limited">⚠️ Частичная</td>
+                            <td>Используйте MJPEG</td>
+                        </tr>
+                        <tr>
+                            <td>Edge</td>
+                            <td class="status-good">✅ Хорошо</td>
+                            <td class="status-good">✅ Хорошая</td>
+                            <td>Поддерживается</td>
+                        </tr>
+                        <tr>
+                            <td>Internet Explorer</td>
+                            <td class="status-poor">❌ Не поддерживается</td>
+                            <td class="status-poor">❌ Нет</td>
+                            <td>Обновите браузер</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="problem-card warning">
+                <div class="problem-title">
+                    ⚠️ Проблемы с WebRTC
+                </div>
+                <div class="problem-symptoms">
+                    <h4>Симптомы:</h4>
+                    <ul>
+                        <li>Видеопоток не подключается</li>
+                        <li>Ошибки соединения WebRTC</li>
+                        <li>Черный экран при WebRTC</li>
+                    </ul>
+                </div>
+                <div class="problem-solutions">
+                    <h4>Решения:</h4>
+                    <ol class="steps">
+                        <li>Переключитесь на MJPEG транспорт</li>
+                        <li>Проверьте настройки брандмауэра</li>
+                        <li>Разрешите доступ к камере в браузере</li>
+                        <li>Используйте HTTPS вместо HTTP</li>
+                        <li>Попробуйте другой браузер</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🔧 Дополнительная помощь</h2>
+            <p>Если проблема не решена:</p>
+            <ol class="steps">
+                <li>Запустите <a href="/static/diagnostics.html" style="color: #4ade80;">полную диагностику системы</a></li>
+                <li>Проверьте логи сервера в файле <span class="code">logs/app.log</span></li>
+                <li>Откройте консоль разработчика в браузере (F12)</li>
+                <li>Сделайте скриншот ошибки</li>
+                <li>Обратитесь к администратору системы</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>

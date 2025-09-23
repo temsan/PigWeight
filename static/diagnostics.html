@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Диагностика системы - PigWeight</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 1.1rem;
+        }
+
+        #results {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 Диагностика системы</h1>
+            <p>Проверка совместимости и производительности</p>
+        </div>
+
+        <div class="controls">
+            <button class="btn" onclick="runDiagnostics()">Запустить диагностику</button>
+            <a href="/" class="btn">Назад к приложению</a>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Выполняется диагностика...
+        </div>
+
+        <div id="results">
+            <div id="diagnosticsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        async function runDiagnostics() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/diagnostics');
+                const data = await response.json();
+                
+                document.getElementById('loading').style.display = 'none';
+                displayResults(data);
+                document.getElementById('results').style.display = 'block';
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                alert('Ошибка при выполнении диагностики: ' + error.message);
+            }
+        }
+
+        function displayResults(data) {
+            const content = document.getElementById('diagnosticsContent');
+            content.innerHTML = `
+                <div class="card">
+                    <h3>Результаты диагностики</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                </div>
+            `;
+        }
+
+        // Автоматический запуск при загрузке
+        window.addEventListener('load', () => {
+            setTimeout(runDiagnostics, 500);
+        });
+    </script>
+</body>
+</html>
