@@ -282,28 +282,9 @@ class EventsManager {
     }
     
     showMessage(message, type = 'info') {
-        // Простое уведомление (можно заменить на более красивое)
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-        notification.textContent = message;
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 10px 20px;
-            border-radius: 4px;
-            color: white;
-            z-index: 10000;
-            background: ${type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : type === 'warning' ? '#ff9800' : '#2196f3'};
-        `;
-        
-        document.body.appendChild(notification);
-        
-        setTimeout(() => {
-            if (notification.parentElement) {
-                notification.parentElement.removeChild(notification);
-            }
-        }, 5000);
+        // Уведомления отключены - только в консоль
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        return;
     }
     
     startAutoRefresh() {

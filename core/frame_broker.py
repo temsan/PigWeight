@@ -102,10 +102,10 @@ class FrameBroker:
         # Log performance metrics periodically
         if self._publish_stats[stream_id]['total_frames'] % 100 == 0:
             stats = self._publish_stats[stream_id]
-            perf_logger.info(f"Stream {stream_id}: {stats['total_frames']} frames, "
-                           f"avg size: {stats['avg_frame_size']:.1f}KB, "
-                           f"rate: {stats['publish_rate']:.1f}fps, "
-                           f"success rate: {stats['successful_notifications']/(stats['successful_notifications']+stats['failed_notifications'])*100:.1f}%")
+            total_notifications = stats['successful_notifications'] + stats['failed_notifications']
+            success_rate_str = "100.0%" if total_notifications == 0 else f"{stats['successful_notifications']/total_notifications*100:.1f}%"
+            logger.debug(f"Published frame {frame_id} to {len(subs)} subscribers for stream {stream_id}. "
+                         f"Queue size: {qsize}, Success rate: {success_rate_str}")
 
         perf_logger.debug(f"Published frame {frame_id} to {stream_id} in {publish_duration*1000:.1f}ms, "
                          f"size: {jpeg_size_kb:.1f}KB, notified: {subscribers_notified}/{len(subs)}")

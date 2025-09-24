@@ -353,37 +353,9 @@
     };
     
     window.showNotification = function(message, type = 'info') {
-      const notification = document.createElement('div');
-      notification.className = `notification notification-${type}`;
-      notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 12px 20px;
-        background: ${type === 'success' ? '#51cf66' : type === 'error' ? '#ff6b6b' : '#2c7be5'};
-        color: white;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        z-index: 10000;
-        font-size: 14px;
-        font-weight: 500;
-        transform: translateX(100%);
-        transition: all 0.3s ease;
-      `;
-      notification.textContent = message;
-      
-      document.body.appendChild(notification);
-      
-      setTimeout(() => {
-        notification.style.transform = 'translateX(0)';
-        notification.style.opacity = '1';
-      }, 100);
-      
-      setTimeout(() => {
-        notification.style.transform = 'translateX(100%)';
-        notification.style.opacity = '0';
-        setTimeout(() => notification.remove(), 300);
-      }, 3000);
+      // Уведомления отключены - только в консоль
+      console.log(`[${type.toUpperCase()}] ${message}`);
+      return;
     };
     
     // Инициализация совместимости при загрузке DOM

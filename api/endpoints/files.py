@@ -57,10 +57,23 @@ async def upload_video_file(file: UploadFile = File(...)):
                 status_code=400
             )
         
-        # Создаем безопасное имя файла с timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_filename = f"{timestamp}_{file.filename}"
+        # Создаем безопасное имя файла без timestamp префикса
+        # Сохраняем оригинальное имя файла для предотвращения искажения
+        import re
+        
+        # Очищаем имя файла от потенциально опасных символов
+        safe_filename = re.sub(r'[^\w\-_\.]', '_', file.filename)
+        
+        # Если файл с таким именем уже существует, добавляем уникальный суффикс
         file_path = UPLOAD_DIR / safe_filename
+        if file_path.exists():
+            name_part = file_path.stem
+            extension = file_path.suffix
+            counter = 1
+            while file_path.exists():
+                safe_filename = f"{name_part}_{counter}{extension}"
+                file_path = UPLOAD_DIR / safe_filename
+                counter += 1
         
         # Сохраняем файл
         with open(file_path, 'wb') as f:

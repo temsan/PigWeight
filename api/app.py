@@ -877,7 +877,7 @@ async def _global_infer_loop(self):
                                 "peak_concurrent": int(self._act_peak),
                                 "duration_sec": float(max(0.0, time.time() - self._act_start_ts))
                             },
-                            "lines": {"left_x": float(LINE_LEFT_X), "right_x": float(LINE_RIGHT_X)},
+                            "lines": {"left_x": float(config.LINE_LEFT_X), "right_x": float(config.LINE_RIGHT_X)},
                             "crossings": list(self._recent_crossings)
                         }
                     }
@@ -2592,10 +2592,23 @@ async def upload_video_file(file: UploadFile = File(...)):
                 status_code=400
             )
         
-        # Создание уникального имени файла
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_filename = f"{timestamp}_{file.filename}"
+        # Создание безопасного имени файла без timestamp префикса
+        # Сохраняем оригинальное имя файла для предотвращения искажения
+        import re
+        
+        # Очищаем имя файла от потенциально опасных символов
+        safe_filename = re.sub(r'[^\w\-_\.]', '_', file.filename)
+        
+        # Если файл с таким именем уже существует, добавляем уникальный суффикс
         file_path = UPLOAD_DIR / safe_filename
+        if file_path.exists():
+            name_part = file_path.stem
+            extension = file_path.suffix
+            counter = 1
+            while file_path.exists():
+                safe_filename = f"{name_part}_{counter}{extension}"
+                file_path = UPLOAD_DIR / safe_filename
+                counter += 1
         
         # Сохранение файла
         with open(file_path, "wb") as f:

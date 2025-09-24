@@ -945,8 +945,32 @@
         } catch (e) {}
     }
 
+    function saveLastPosition(streamId, time) {
+        try {
+            const positions = JSON.parse(localStorage.getItem('lastPositions') || '{}');
+            positions[streamId] = { time: time, timestamp: Date.now() };
+            localStorage.setItem('lastPositions', JSON.stringify(positions));
+        } catch (e) {
+            console.warn('Failed to save last position:', e);
+        }
+    }
+
+    function loadLastPosition(streamId) {
+        try {
+            const positions = JSON.parse(localStorage.getItem('lastPositions') || '{}');
+            return positions[streamId] || null;
+        } catch (e) {
+            console.warn('Failed to load last position:', e);
+            return null;
+        }
+    }
+
     async function stopStream(id = activeStreamId) {
         if (id) {
+            const currentTime = Number(seekRange.value || 0);
+            if (currentTime > 0) {
+                saveLastPosition(id, currentTime);
+            }
             await fetch(`/api/stream/${id}/stop`);
         }
         hideLoader();
@@ -1014,6 +1038,7 @@
                         let maxTs = prevTs;
                         let enterCounter = 0;
                         let exitCounter = 0;
+                        // Восстановлено создание всплывающих уведомлений при пересечениях
                         cr.forEach(c => {
                             const tsMs = Number(c.ts || 0) * 1000;
                             if (tsMs > prevTs) {
@@ -1034,7 +1059,10 @@
                         window.__lastPopupTs = maxTs;
                     } catch (e) {}
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
-                    if (Array.isArray(lastMasks) && lastMasks.length) streamStatus.textContent = 'Live + overlay';
+                    if (lastMasks && lastMasks.length) {
+                        scheduleOverlay(lastMasks, lastIds);
+                        streamStatus.textContent = 'Live + overlay';
+                    }
                 }
                 if (data.debug && data.debug.flow) {
                     requestAnimationFrame(() => updateFlowCounters(data.debug.flow));
@@ -1207,14 +1235,10 @@
 
     function drawOverlay(masks, ids = null) {
         console.log("Drawing overlay with", masks ? masks.length : 0, "masks");
-        // Allow drawing overlays if we either have a first rendered video frame
-        // or we already have masks from the backend — this lets users see
-        // segmentation overlays under the WebRTC loading spinner.
         if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) return;
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
         const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-        // Обеспечить единый масштаб в device pixels для чёткости
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         const cw = overlayCanvas.width;
         const ch = overlayCanvas.height;
@@ -1222,19 +1246,16 @@
 
         const rect = getRenderedImageRect();
 
-        // Выделенные линии отсечки по третям ширины
         try {
             ctx.save();
             const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
             const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
             const x1 = rect.x + rect.w * leftX;
             const x2 = rect.x + rect.w * rightX;
-            // полупрозрачные направляющие полосы
             ctx.fillStyle = 'rgba(44,123,229,0.12)';
             ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
             ctx.fillStyle = 'rgba(81,207,102,0.12)';
             ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
-            // основные яркие линии
             ctx.setLineDash([]);
             ctx.lineWidth = 2;
             ctx.strokeStyle = 'rgba(44,123,229,0.9)';
@@ -1247,7 +1268,6 @@
             ctx.moveTo(x2, rect.y);
             ctx.lineTo(x2, rect.y + rect.h);
             ctx.stroke();
-            // маленькие маркеры вверху
             ctx.fillStyle = 'rgba(44,123,229,0.95)';
             ctx.beginPath();
             ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
@@ -1256,8 +1276,6 @@
             ctx.beginPath();
             ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
             ctx.fill();
-            // Подписи к линиям выключены по требованию UX
-            // Перетаскивание линий отсечки мышью/тапом
             try {
                 if (!window.__linesDragInit) {
                     window.__linesDragInit = true;
@@ -1267,7 +1285,7 @@
                         const x = clientX - r.left;
                         return Math.max(0, Math.min(1, (x - rect.x) / rect.w));
                     };
-                    let dragging = null; // 'left' | 'right'
+                    let dragging = null;
                     const onDown = (e) => {
                         if (!overlayEnabled) return;
                         const nx = onPos(e);
@@ -1287,11 +1305,9 @@
                         let rx = (window.__lines && typeof window.__lines.right_x==='number') ? window.__lines.right_x : 0.75;
                         const nearLine = (Math.abs(nx - lx) < 0.02) || (Math.abs(nx - rx) < 0.02);
                         if (!dragging) {
-                            // Подсказка курсора при наведении
                             overlayCanvas.style.cursor = nearLine ? 'ew-resize' : 'crosshair';
                             return;
                         }
-                        // Перетаскивание
                         if (dragging === 'left') lx = nx; else rx = nx;
                         if (lx > rx) { const t = lx; lx = rx; rx = t; }
                         const minGap = 0.05;
@@ -1311,8 +1327,6 @@
                         try {
                             const { left_x, right_x } = window.__lines || {};
                             await fetch('/api/lines', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ left_x, right_x }) });
-                            
-                            // Сохраняем линии для конкретного видеофайла
                             const activeStreamId = document.querySelector('#streamRadios .toggle-btn.active')?.dataset?.streamId;
                             if (activeStreamId) {
                                 await fetch(`/api/stream/${activeStreamId}/line_positions`, {
@@ -1321,8 +1335,6 @@
                                     body: JSON.stringify({ left_x, right_x })
                                 });
                             }
-                            
-                            // Сохраняем в localStorage для текущего файла
                             const currentFileName = fileInputLabel.title;
                             if (currentFileName && currentFileName !== 'Открыть видеофайл') {
                                 saveLinePositions(currentFileName, left_x, right_x);
@@ -1343,7 +1355,6 @@
             ctx.restore();
         } catch (e) {}
 
-        // Отрисовать кратковременные маркеры пересечений (если пришли)
         try {
             const cr = window.__lastCrossings || [];
             if (Array.isArray(cr) && cr.length) {
@@ -1360,7 +1371,7 @@
             }
         } catch (e) {}
 
-        // Всплывающие кругляши "+1/-1" над точкой пересечения
+        // Всплывающие кругляши "+1/-1" над точкой пересечения (восстановлены)
         try {
             if (Array.isArray(window.__popups) && window.__popups.length) {
                 const now = performance.now();
@@ -1368,22 +1379,19 @@
                 const keep = [];
                 window.__popups.forEach(p => {
                     const k = Math.min(1, Math.max(0, (now - p.t0) / (p.dur || 900)));
-                    const alpha = 1 - k;                 // плавное исчезание
-                    const ease = k * (2 - k);             // ease-out для подъёма
+                    const alpha = 1 - k;
+                    const ease = k * (2 - k);
                     const px = rect.x + (Number(p.x) || 0.5) * rect.w;
                     const py = rect.y + (Number(p.y) || 0.5) * rect.h - ease * (p.rise || 28);
-                    const r = 13;                         // радиус пузыря
-                    // фон пузыря
+                    const r = 13;
                     ctx.globalAlpha = Math.max(0, alpha);
                     ctx.beginPath();
                     ctx.fillStyle = (p.color || '#2c7be5').replace('0.9', '1');
                     ctx.arc(px, py, r, 0, Math.PI * 2);
                     ctx.fill();
-                    // тонкая окантовка
                     ctx.lineWidth = 2;
                     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
                     ctx.stroke();
-                    // текст
                     ctx.font = '700 14px system-ui, Segoe UI, Arial';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
@@ -1393,7 +1401,6 @@
                 });
                 ctx.restore();
                 window.__popups = keep;
-                // пока есть активные попапы — продолжаем анимацию
                 if (keep.length) {
                     try { scheduleOverlay(lastMasks, lastIds); } catch (_) {}
                 }
@@ -1402,14 +1409,12 @@
 
         if (!masks || !masks.length) return;
 
-        // Soft pastel segmentation overlays, optional instance ids (from backend)
         masks.forEach((poly, idx) => {
             if (!Array.isArray(poly) || poly.length < 3) return;
             const labelArr = (window.__lastLabels && Array.isArray(window.__lastLabels)) ? window.__lastLabels : null;
             const instId = labelArr ? (labelArr[idx] || (idx + 1)) : ((ids && ids[idx]) ? ids[idx] : (idx + 1));
             const fill = colorForInstance(instId);
             ctx.beginPath();
-            // Decimate polygon points adaptively to reduce path complexity
             const plen = poly.length;
             const step = Math.max(1, Math.floor(plen / 200));
             for (let i = 0; i < plen; i += step) {
@@ -1419,41 +1424,32 @@
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.closePath();
-            // Fill without expensive filters (avoid canvas blur to prevent jank)
             ctx.save();
-            // мягкая, но более заметная заливка
             ctx.fillStyle = fill;
             ctx.globalAlpha = 0.60;
             ctx.fill();
-            // лёгкий контур для читаемости
             ctx.globalAlpha = 0.50;
             ctx.lineWidth = 1.0;
             ctx.strokeStyle = 'rgba(30,50,80,0.20)';
             ctx.stroke();
             ctx.restore();
 
-            // Number centered inside the object, colored like the mask
-            // Compute simple centroid of polygon points (average)
-            // Labeling: order instances right-to-left within the frame
             let sx = 0, sy = 0, pc = 0;
             poly.forEach(([nx, ny]) => { sx += nx; sy += ny; pc++; });
             if (pc > 0) {
                 const cx = rect.x + (sx / pc) * rect.w;
                 const cy = rect.y + (sy / pc) * rect.h;
-                // compute display label: if labels array exists use it, otherwise compute order based on x position
                 let displayLabel = (labelArr && labelArr[idx]) ? labelArr[idx] : null;
                 if (!displayLabel) {
-                    // derive rank right-to-left: higher x => smaller index
                     const ranks = (window.__lastLabelsOrder || []);
                     if (ranks.length === 0) {
-                        // build order by x of current lastMasks
                         try {
                             const arr = (lastMasks || []).map((m, i) => {
                                 let sx2 = 0, pc2 = 0;
                                 m.forEach(([nx2, ny2]) => { sx2 += nx2; pc2++; });
                                 return { i, cx: pc2? (sx2/pc2) : 0 };
                             });
-                            arr.sort((a,b) => b.cx - a.cx); // right-to-left
+                            arr.sort((a,b) => b.cx - a.cx);
                             window.__lastLabelsOrder = arr.map(a=>a.i);
                         } catch(e) { window.__lastLabelsOrder = []; }
                     }
@@ -1465,11 +1461,9 @@
                 ctx.font = '700 14px system-ui, Segoe UI, Arial';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                // Outline for readability
                 ctx.lineWidth = 3.5;
                 ctx.strokeStyle = 'rgba(0,0,0,0.65)';
                 ctx.strokeText(label, cx, cy);
-                // Белая цифра поверх пастельной маски
                 ctx.fillStyle = '#ffffff';
                 ctx.fillText(label, cx, cy);
                 ctx.restore();
@@ -1657,47 +1651,20 @@
 
     videoPlayPauseBtn.addEventListener('click', async () => {
         if (isVideoPlaying) {
-            // Сохраняем текущую позицию перед остановкой
-            const currentTime = Number(seekRange.value || 0);
-            if (activeStreamId && currentTime > 0) {
-                try {
-                    await fetch(`/api/stream/${activeStreamId}/seek`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ time: currentTime })
-                    });
-                } catch (e) {
-                    console.warn('Failed to save position:', e);
-                }
-            }
-            
-            // Стоп без запуска демо — остаёмся на текущем файле, можно возобновить
             await stopStream();
             isVideoPlaying = false;
             videoPlayPauseBtn.textContent = 'Старт';
-            // не меняем activeStreamId и streamSources
         } else {
             const sourceUri = streamSources[activeStreamId];
             if (activeStreamId && sourceUri) {
-                // Получаем текущую позицию seekbar для возобновления с этой позиции
-                const currentSeekTime = Number(seekRange.value || 0);
+                const lastPosition = loadLastPosition(activeStreamId);
                 await startStream(activeStreamId, sourceUri);
-                
-                // Восстанавливаем позицию после запуска
-                if (currentSeekTime > 0) {
+                if (lastPosition && lastPosition.time > 0) {
                     setTimeout(async () => {
-                        try {
-                            await fetch(`/api/stream/${activeStreamId}/seek`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ time: currentSeekTime })
-                            });
-                        } catch (e) {
-                            console.warn('Failed to restore position:', e);
-                        }
-                    }, 1000); // Небольшая задержка для стабилизации потока
+                        await requestSeekTo(lastPosition.time);
+                        console.log(`Воспроизведение продолжено с ${lastPosition.time.toFixed(1)}с`);
+                    }, 1000);
                 }
-                
                 isVideoPlaying = true;
                 videoPlayPauseBtn.textContent = 'Стоп';
             } else {
@@ -1920,6 +1887,10 @@
         updateVideoLayout();
         window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
         setPlaceholder();
+        
+        // Initialize overlay system
+        overlayTick(); // Start the overlay rendering loop
+        
         // Initialize fullscreen button icon
         try { setFsState(false); } catch (e) {}
         // Worker disabled for now to avoid seek freezes
@@ -3086,46 +3057,11 @@
       showNotification('📊 Сверка выполнена', 'info');
     }
 
-    // Уведомления
+    // Уведомления (отключены)
     function showNotification(message, type = 'info') {
-      const notification = document.createElement('div');
-      notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: var(--journal-glass);
-        backdrop-filter: blur(20px);
-        border: 1px solid var(--journal-border);
-        border-radius: var(--radius-md);
-        padding: 12px 16px;
-        font-size: 14px;
-        font-weight: 500;
-        z-index: 10000;
-        transition: all 0.3s ease;
-        transform: translateX(100%);
-        opacity: 0;
-        max-width: 300px;
-        border-left-width: 4px;
-      `;
-      
-      if (type === 'success') notification.style.borderLeftColor = '#28a745';
-      else if (type === 'error') notification.style.borderLeftColor = '#dc3545';
-      else if (type === 'warning') notification.style.borderLeftColor = '#ffc107';
-      else notification.style.borderLeftColor = '#10addd';
-      
-      notification.textContent = message;
-      document.body.appendChild(notification);
-      
-      setTimeout(() => {
-        notification.style.transform = 'translateX(0)';
-        notification.style.opacity = '1';
-      }, 100);
-      
-      setTimeout(() => {
-        notification.style.transform = 'translateX(100%)';
-        notification.style.opacity = '0';
-        setTimeout(() => notification.remove(), 300);
-      }, 3000);
+      // Notifications disabled - only log to console
+      console.log(`[${type.toUpperCase()}] ${message}`);
+      return;
     }
 
     // Функции диагностики
