@@ -243,10 +243,12 @@ class UnifiedVideoProcessor:
                         preprocessed_shape=p_data['img'].shape[:2],
                         timestamp=timestamp
                     )
-                    self.loop.call_soon_threadsafe(future.set_result, frame_result)
+                    if not future.done():
+                        self.loop.call_soon_threadsafe(future.set_result, frame_result)
                 else:
                     # Если для кадра нет результата инференса
-                    self.loop.call_soon_threadsafe(future.set_result, FrameResult(timestamp=timestamp))
+                    if not future.done():
+                        self.loop.call_soon_threadsafe(future.set_result, FrameResult(timestamp=timestamp))
 
         except Exception as e:
             logger.error(f"[{self.stream_id}] Ошибка в цикле обработки батча: {e}", exc_info=True)

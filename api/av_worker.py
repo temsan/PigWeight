@@ -320,7 +320,7 @@ class AVIsolate:
             return False
     
     @retry_with_backoff(max_retries=3, base_delay=0.1, max_delay=2.0)
-    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 1.5):
+    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 5.0):
         # Periodic health check
         current_time = time.time()
         if current_time - self._last_health_check > self._health_check_interval:

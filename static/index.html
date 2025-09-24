@@ -630,34 +630,27 @@
 
     function setupFirstFrameWatch() {
         try {
-            console.log('Setting up first frame watch');
             const onFirst = () => {
                 if (!hasFirstFrame) {
-                    console.log('First frame received!');
                     hasFirstFrame = true;
                     try { videoStream.style.opacity = '1'; } catch (e) {}
                     hideLoader();
                 }
             };
-            // For MJPEG <img>, load may fire on frames; guard with flag
-            // Also debounce rapid flicker by only treating the first frame event within 500ms
             let firstFired = false;
             const wrapped = () => {
-                console.log('Video load event fired');
                 if (firstFired) return;
                 firstFired = true;
                 setTimeout(() => { firstFired = false; }, 500);
                 onFirst();
             };
             
-            // Add error handler
             videoStream.addEventListener('error', (e) => {
                 console.error('Video error:', e);
                 console.error('Video src:', videoStream.src);
             });
             
             videoStream.addEventListener('load', wrapped);
-            // Also ensure loader hides if WebRTC is active and no MJPEG frames
             try {
                 const v = document.getElementById('webrtcVideo');
                 if (v) v.addEventListener('playing', () => { try { hideLoader(); } catch(e){} });
@@ -747,9 +740,7 @@
         try { videoStream.style.opacity = '1'; } catch (e) {}
         
         try {
-            console.log(`Starting stream: ${streamId} with source: ${sourceUri}`);
             const response = await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
-            console.log(`Stream start response: ${response.status}`);
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 console.error('Stream start error data:', errorData);
@@ -1257,7 +1248,6 @@
     }
 
     function drawOverlay(masks, ids = null) {
-        console.log("Drawing overlay with", masks ? masks.length : 0, "masks");
         if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) return;
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
@@ -1500,12 +1490,10 @@
     let overlayLastDraw = 0;
     const overlayMaxFps = 12; // cap overlay to 12 fps for smoothness
     function scheduleOverlay(masks, ids) {
-        console.log("Scheduling overlay");
         if (performance.now() < overlayBlockUntil) return;
         overlayPending = { masks, ids };
     }
     function overlayTick() {
-        console.log("Overlay tick");
         const now = performance.now();
         const minDt = 1000 / overlayMaxFps;
         if (overlayPending && (now - overlayLastDraw >= minDt)) {
@@ -1514,7 +1502,6 @@
             drawOverlay(job.masks, job.ids);
             overlayLastDraw = now;
         } else if (!overlayPending && lastMasks && (now - overlayLastDraw >= minDt)) {
-            console.log("Redrawing last overlay");
             drawOverlay(lastMasks, lastIds);
             overlayLastDraw = now;
         }

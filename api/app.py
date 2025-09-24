@@ -901,6 +901,91 @@ class RtspStream(VideoStream):
         super().__init__(stream_id)
         self.rtsp_url = rtsp_url
 
+    async def start(self):
+        if not getattr(self, 'running', False):
+            self.running = True
+            self._stream_task = asyncio.create_task(self._stream_loop())
+            self._infer_task = asyncio.create_task(self._infer_loop())
+
+    async def start(self):
+        if not getattr(self, 'running', False):
+            self.running = True
+            self._stream_task = asyncio.create_task(self._stream_loop())
+            self._infer_task = asyncio.create_task(self._infer_loop())
+        self.fps = 25.0  # Default RTSP framerate
+        self.current_time = 0.0
+
+    async def start(self):
+        if not getattr(self, 'running', False):
+            self.running = True
+            self._stream_task = asyncio.create_task(self._stream_loop())
+            self._infer_task = asyncio.create_task(self._infer_loop())
+
+    async def _stream_loop(self):
+        try:
+            meta = av_open_rtsp(self.stream_id, self.rtsp_url)
+            self.fps = meta.get("fps", 25.0)
+            
+            frame_counter = 0
+            start_time = time.time()
+            
+            while self.running:
+                frame_data = av_read_jpeg(self.stream_id, timeout=2.0)
+                if frame_data and isinstance(frame_data, dict) and frame_data.get('jpeg'):
+                    async with self.lock:
+                        self.last_frame_data = frame_data
+                    
+                    # Calculate current time for RTSP stream
+                    frame_counter += 1
+                    self.current_time = (time.time() - start_time)
+                    
+                    jpeg = frame_data['jpeg']
+                    frame_id = frame_counter
+                    
+                    try:
+                        if FRAME_BROKER is not None:
+                            asyncio.create_task(FRAME_BROKER.publish(self.stream_id, frame_id, self.current_time, jpeg))
+                    except Exception:
+                        pass
+                    
+                    # Adaptive sleep based on FPS
+                    await asyncio.sleep(1.0 / self.fps)
+                else:
+                    # No frame received, wait a bit and retry
+                    await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error(f"RTSP stream {self.stream_id} error: {e}")
+        finally:
+            ocv_close(self.stream_id)
+            self.running = False
+
+    async def stop(self):
+        if getattr(self, 'running', False):
+            self.running = False
+        t1 = getattr(self, '_stream_task', None)
+        t2 = getattr(self, '_infer_task', None)
+        if t1:
+            try:
+                t1.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t1
+            except Exception:
+                pass
+            self._stream_task = None
+        if t2:
+            try:
+                t2.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t2
+            except Exception:
+                pass
+            self._infer_task = None
+        # Сохранить акт для дашборда
+        try:
+            self._finalize_act_to_files()
+        except Exception:
+            pass
+
 
 
 class FileStream(VideoStream):
