@@ -993,44 +993,38 @@
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/count?id=${streamId}`);
         ws.onmessage = (event) => {
+            console.log("WebSocket message received");
             const data = JSON.parse(event.data);
             if (data.type === 'count_update') {
                 document.getElementById('manualCount').value = data.count;
-                // Recalculate average weight if total is set
                 if (typeof recalcAvgWeight === 'function') {
                     recalcAvgWeight();
                 }
-                if (data.debug && data.debug.masks) {
-                    lastMasks = data.debug.masks;
+                if (data.debug) {
+                    lastMasks = data.debug.masks || [];
                     lastIds = data.debug.ids || null;
+                    console.log("Scheduling overlay with", lastMasks.length, "masks");
+                    scheduleOverlay(lastMasks, lastIds);
                     try {
                         window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
-                        // анимированные всплывающие +N/-N с порядковым номером
                         const now = performance.now();
                         window.__popups = window.__popups || [];
-                        const prevTs = window.__lastPopupTs || 0; // ms
+                        const prevTs = window.__lastPopupTs || 0;
                         const cr = window.__lastCrossings;
                         let maxTs = prevTs;
-                        
-                        // Счетчик для последовательной нумерации пересечений
                         let enterCounter = 0;
                         let exitCounter = 0;
-                        
                         cr.forEach(c => {
                             const tsMs = Number(c.ts || 0) * 1000;
                             if (tsMs > prevTs) {
                                 const side = String(c.side || 'left');
                                 const mode = String(c.mode || 'enter');
                                 const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
-                                
-                                // Увеличиваем соответствующий счетчик
                                 if (isPositive) {
                                     enterCounter++;
                                 } else {
                                     exitCounter++;
                                 }
-                                
-                                // Текст с номером
                                 const text = isPositive ? `+${enterCounter}` : `-${exitCounter}`;
                                 const color = isPositive ? '#51cf66' : '#ff6b6b';
                                 window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
@@ -1040,63 +1034,21 @@
                         window.__lastPopupTs = maxTs;
                     } catch (e) {}
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
-                    scheduleOverlay(lastMasks, lastIds);
-                    try { if (Array.isArray(lastMasks) && lastMasks.length) streamStatus.textContent = 'Live + overlay'; } catch (e) {}
+                    if (Array.isArray(lastMasks) && lastMasks.length) streamStatus.textContent = 'Live + overlay';
                 }
                 if (data.debug && data.debug.flow) {
-                    const f = data.debug.flow;
-                    const leftInCount = Number(f.left_in ?? 0);
-                    const rightInCount = Number(f.right_in ?? 0);
-                    const totalCrossingsCount = Number(f.total_crossings ?? 0);
-                    try {
-                        // Обновляем значения с анимацией
-                        if (leftInCount !== lastLeftIn) {
-                        leftInEl.textContent = String(leftInCount);
-                            animateCounterChange(leftInEl, leftInCount, lastLeftIn);
-                            lastLeftIn = leftInCount;
-                        }
-                        
-                        if (rightInCount !== lastRightIn) {
-                        rightInEl.textContent = String(rightInCount);
-                            animateCounterChange(rightInEl, rightInCount, lastRightIn);
-                            lastRightIn = rightInCount;
-                        }
-                        
-                        if (totalCrossingsCount !== lastTotalCrossings) {
-                            totalCrossingsEl.textContent = String(totalCrossingsCount);
-                            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
-                            lastTotalCrossings = totalCrossingsCount;
-                        }
-                    } catch (e) {}
-                    // Отобразить имя модели (если пришло) и размер входа
-                    let modelInfo = '';
-                    try {
-                        const m = data.debug && data.debug.model ? data.debug.model : null;
-                        const imgsz = data.debug && data.debug.imgsz ? `, ${data.debug.imgsz}` : '';
-                        if (m && m.name) {
-                            const dev = m.device ? `, ${m.device}${m.half?'/fp16':''}` : '';
-                            modelInfo = ` | GPU: ${dev || 'cpu'} | Модель: ${m.name}${imgsz}`;
-                        }
-                    } catch (_) {}
-                    streamStatus.textContent = `Live | Всего пересечений: ${totalCrossingsCount} | Слева: ${leftInCount} | Справа: ${rightInCount}${modelInfo}`;
+                    requestAnimationFrame(() => updateFlowCounters(data.debug.flow));
                 }
                 if (data.debug && data.debug.act) {
-                    const a = data.debug.act;
-                    try {
-                        actSeenEl.textContent = String(Number(a.seen_total||0));
-                        actPeakEl.textContent = String(Number(a.peak_concurrent||0));
-                        actDurEl.textContent = String((Number(a.duration_sec||0)).toFixed(1));
-                    } catch (e) {}
+                    requestAnimationFrame(() => updateActData(data.debug.act));
                 }
                 if (data.debug && data.debug.lines) {
-                    try {
-                        // Не перетирать локальное перетаскивание
+                    requestAnimationFrame(() => {
                         if (!window.__isDraggingLines) {
                             window.__lines = data.debug.lines;
                         }
-                    } catch (e) {}
+                    });
                 }
-                // Update chart with low overhead
                 if (chart) {
                     const now = performance.now();
                     if (!window.__lastChartTs || now - window.__lastChartTs > 400) {
@@ -1254,6 +1206,7 @@
     }
 
     function drawOverlay(masks, ids = null) {
+        console.log("Drawing overlay with", masks ? masks.length : 0, "masks");
         // Allow drawing overlays if we either have a first rendered video frame
         // or we already have masks from the backend — this lets users see
         // segmentation overlays under the WebRTC loading spinner.
@@ -1530,18 +1483,21 @@
     let overlayLastDraw = 0;
     const overlayMaxFps = 12; // cap overlay to 12 fps for smoothness
     function scheduleOverlay(masks, ids) {
+        console.log("Scheduling overlay");
         if (performance.now() < overlayBlockUntil) return;
         overlayPending = { masks, ids };
     }
     function overlayTick() {
+        console.log("Overlay tick");
         const now = performance.now();
         const minDt = 1000 / overlayMaxFps;
         if (overlayPending && (now - overlayLastDraw >= minDt)) {
             const job = overlayPending; overlayPending = null;
+            console.log("Drawing overlay from pending job");
             drawOverlay(job.masks, job.ids);
             overlayLastDraw = now;
         } else if (!overlayPending && lastMasks && (now - overlayLastDraw >= minDt)) {
-            // redraw last masks periodically to keep UI responsive even without new WS
+            console.log("Redrawing last overlay");
             drawOverlay(lastMasks, lastIds);
             overlayLastDraw = now;
         }
@@ -2024,6 +1980,35 @@
             row.insertCell().textContent = item.total_weight;
             row.insertCell().textContent = item.avg_weight;
         });
+    }
+
+    function updateFlowCounters(flow) {
+        const leftInCount = Number(flow.left_in ?? 0);
+        const rightInCount = Number(flow.right_in ?? 0);
+        const totalCrossingsCount = Number(flow.total_crossings ?? 0);
+        if (leftInCount !== lastLeftIn) {
+            leftInEl.textContent = String(leftInCount);
+            animateCounterChange(leftInEl, leftInCount, lastLeftIn);
+            lastLeftIn = leftInCount;
+        }
+        if (rightInCount !== lastRightIn) {
+            rightInEl.textContent = String(rightInCount);
+            animateCounterChange(rightInEl, rightInCount, lastRightIn);
+            lastRightIn = rightInCount;
+        }
+        if (totalCrossingsCount !== lastTotalCrossings) {
+            totalCrossingsEl.textContent = String(totalCrossingsCount);
+            animateCounterChange(totalCrossingsEl, totalCrossingsCount, lastTotalCrossings);
+            lastTotalCrossings = totalCrossingsCount;
+        }
+    }
+
+    function updateActData(act) {
+        try {
+            actSeenEl.textContent = String(Number(act.seen_total||0));
+            actPeakEl.textContent = String(Number(act.peak_concurrent||0));
+            actDurEl.textContent = String((Number(act.duration_sec||0)).toFixed(1));
+        } catch (e) {}
     }
 
     function recalcAvgWeight() {
