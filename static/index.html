@@ -1566,6 +1566,12 @@
     }
 
     function initChart() {
+        // Проверяем, загружен ли Chart.js
+        if (typeof Chart === 'undefined') {
+            console.warn('Chart.js не загружен, график недоступен');
+            return;
+        }
+        
         // Ensure previous chart instance is gone before reusing the canvas
         destroyChart();
         const ctx = liveCountChart.getContext('2d');
@@ -2417,11 +2423,15 @@
         const response = await fetch(`/api/weighing/logs?date_from=${dateFrom}&date_to=${dateTo}`);
         const data = await response.json();
 
-        const logsList = document.getElementById('logsList');
-        logsList.innerHTML = '';
+        const journalList = document.getElementById('journalList');
+        if (!journalList) {
+          console.error('Element journalList not found');
+          return;
+        }
+        journalList.innerHTML = '';
 
         if (data.length === 0) {
-          logsList.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет записей за выбранный период</div>';
+          journalList.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Нет записей за выбранный период</div>';
           return;
         }
 
@@ -2499,12 +2509,15 @@
           
           dateGroup.appendChild(dateHeader);
           dateGroup.appendChild(logsContainer);
-          logsList.appendChild(dateGroup);
+          journalList.appendChild(dateGroup);
         });
 
       } catch (error) {
         console.error('Error refreshing logs:', error);
-        document.getElementById('logsList').innerHTML = '<div style="text-align:center; color:#dc3545; padding:20px;">Ошибка загрузки данных</div>';
+        const journalList = document.getElementById('journalList');
+        if (journalList) {
+          journalList.innerHTML = '<div style="text-align:center; color:#dc3545; padding:20px;">Ошибка загрузки данных</div>';
+        }
       }
     }
 
@@ -3098,6 +3111,22 @@
     });
 
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // Загрузка Chart.js с fallback
+    function loadChartJS() {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+      script.onload = function() {
+        console.log('Chart.js загружен успешно');
+      };
+      script.onerror = function() {
+        console.warn('Не удалось загрузить Chart.js из CDN');
+      };
+      document.head.appendChild(script);
+    }
+    
+    // Загружаем Chart.js
+    loadChartJS();
+  </script>
 </body>
 </html>

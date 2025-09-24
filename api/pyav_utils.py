@@ -3,7 +3,6 @@ import time
 from typing import Optional, Tuple, Dict, Any
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # PyAV removed from runtime in this build — provide minimal stubs so callers don't crash.
 # These stubs intentionally do not attempt any decoding; they only log and return safe defaults.

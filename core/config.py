@@ -139,7 +139,8 @@ def setup_logging(debug: bool = False) -> logging.Logger:
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
-    level = logging.DEBUG if debug else logging.INFO
+    # В production режиме показываем только WARNING и ERROR
+    level = logging.DEBUG if debug else logging.WARNING
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     root_logger = logging.getLogger()
@@ -152,16 +153,36 @@ def setup_logging(debug: bool = False) -> logging.Logger:
     # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
+    console_handler.setLevel(level)
     root_logger.addHandler(console_handler)
     
-    # File handler
+    # File handler - в файл записываем все уровни для отладки
+    file_level = logging.DEBUG if debug else logging.INFO
     file_handler = logging.FileHandler(log_dir / "app.log", encoding="utf-8")
     file_handler.setFormatter(formatter)
+    file_handler.setLevel(file_level)
     root_logger.addHandler(file_handler)
     
-    # Silence overly verbose loggers
-    logging.getLogger("aiortc").setLevel(logging.WARNING)
-    logging.getLogger("aioice").setLevel(logging.WARNING)
-    logging.getLogger("av").setLevel(logging.WARNING)
+    # Подавляем внешние библиотеки
+    external_loggers = [
+        "aiortc", "aioice", "av", "uvicorn", "uvicorn.access", "uvicorn.error", 
+        "fastapi", "websockets", "asyncio", "multipart", "httpx", "starlette"
+    ]
+    for logger_name in external_loggers:
+        logging.getLogger(logger_name).setLevel(logging.ERROR if not debug else logging.WARNING)
+    
+    # В production режиме подавляем INFO сообщения наших модулей
+    if not debug:
+        our_loggers = [
+            "pigweight", "core", "api", "inference", "stream",
+            "core.processor", "core.frame_broker", "core.dynamic_batcher",
+            "core.performance_monitor", "core.priority_frame_queue",
+            "core.demo_generator", "core.h264_direct_track",
+            "api.app_backup", "api.simple_endpoints", "api.optimized_endpoints",
+            "api.webrtc", "api.av_worker", "api.app_modular",
+            "perf.api", "perf.webrtc", "perf.results_store", "perf.frame_broker"
+        ]
+        for logger_name in our_loggers:
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
     
     return logging.getLogger("pigweight")

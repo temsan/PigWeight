@@ -97,16 +97,22 @@ def check_dependencies() -> Dict[str, Any]:
     
     # Проверка ключевых зависимостей
     required_packages = [
-        "fastapi", "uvicorn", "opencv-python", "torch", 
-        "ultralytics", "numpy", "pillow", "psutil"
+        ("fastapi", "fastapi"),
+        ("uvicorn", "uvicorn"), 
+        ("opencv-python", "cv2"),
+        ("torch", "torch"),
+        ("ultralytics", "ultralytics"),
+        ("numpy", "numpy"),
+        ("pillow", "PIL"),
+        ("psutil", "psutil")
     ]
     
-    for package in required_packages:
+    for package_name, import_name in required_packages:
         try:
-            __import__(package.replace("-", "_"))
-            deps["dependencies"][package] = "installed"
+            __import__(import_name)
+            deps["dependencies"][package_name] = "installed"
         except ImportError:
-            deps["dependencies"][package] = "missing"
+            deps["dependencies"][package_name] = "missing"
     
     # Проверка конфигурации
     config_vars = [
@@ -267,7 +273,9 @@ async def browser_test(request: Request):
             "File API support", 
             "WebSocket support",
             "Canvas support",
-            "Local Storage support"
+            "Local Storage support",
+            "Chart.js loading",
+            "External script loading"
         ],
         "recommendations": []
     }

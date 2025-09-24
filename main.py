@@ -94,9 +94,13 @@ def main():
         ensure_dir('stream')
         ensure_dir('uploads')
 
-        logger.info(f'Запуск сервера на http://{CONFIG.HOST}:{CONFIG.PORT}')
-        logger.info(f'Проверка здоровья API: http://{CONFIG.HOST}:{CONFIG.PORT}/api/health')
-        logger.info(f'Режим отладки: {CONFIG.DEBUG}, Горячая перезагрузка: {CONFIG.RELOAD}')
+        if CONFIG.DEBUG:
+            logger.info(f'Запуск сервера на http://{CONFIG.HOST}:{CONFIG.PORT}')
+            logger.info(f'Проверка здоровья API: http://{CONFIG.HOST}:{CONFIG.PORT}/api/health')
+            logger.info(f'Режим отладки: {CONFIG.DEBUG}, Горячая перезагрузка: {CONFIG.RELOAD}')
+        else:
+            # В production показываем только основную информацию
+            print(f'🚀 PigWeight сервер запущен на http://{CONFIG.HOST}:{CONFIG.PORT}')
 
         try:
             import uvicorn
@@ -113,7 +117,7 @@ def main():
                 host=CONFIG.HOST,
                 port=CONFIG.PORT,
                 reload=CONFIG.RELOAD,
-                log_level="debug" if CONFIG.DEBUG else "info",
+                log_level="debug" if CONFIG.DEBUG else "warning",
                 reload_dirs=[
                     str(Path(__file__).parent / "api"),
                     str(Path(__file__).parent / "core"),
