@@ -366,7 +366,8 @@ class AVIsolate:
 
     @retry_with_backoff(max_retries=2, base_delay=0.2, max_delay=3.0)
     def open_file(self, sid: str, path: str) -> Dict[str, Any]:
-        return self._req('open_file', {'id': sid, 'path': path})
+        # Увеличиваем timeout для открытия файлов, так как это может занять больше времени
+        return self._req('open_file', {'id': sid, 'path': path}, timeout=5.0)
 
     def close(self, sid: str) -> None:
         try:
@@ -380,7 +381,7 @@ class AVIsolate:
         except Exception:
             return None
 
-    def seek_read_jpeg(self, sid: str, t: float, timeout: float = 1.5) -> Optional[Dict[str, Any]]:
+    def seek_read_jpeg(self, sid: str, t: float, timeout: float = 3.0) -> Optional[Dict[str, Any]]:
         try:
             return self._req('seek_read_jpeg', {'id': sid, 't': float(t)}, timeout=timeout)
         except Exception:

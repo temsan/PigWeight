@@ -1109,10 +1109,50 @@ except Exception:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    logger.info("🚀 PigWeight API starting up...")
+    
+    # Запускаем фоновую задачу очистки событий
+    cleanup_task = None
+    try:
+        from services.event_logger import get_event_logger
+        event_logger = get_event_logger()
+        
+        async def cleanup_events_periodically():
+            """Периодическая очистка старых событий"""
+            while True:
+                try:
+                    await asyncio.sleep(3600)  # Каждый час
+                    await event_logger.cleanup_old_events(max_age_hours=24)
+                    logger.info("✅ Автоматическая очистка событий выполнена")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при очистке событий: {e}")
+        
+        cleanup_task = asyncio.create_task(cleanup_events_periodically())
+        logger.info("✅ Фоновая задача очистки событий запущена")
+        
+    except ImportError:
+        logger.warning("⚠️ Система событий недоступна")
+    
     yield
+    
     # Shutdown
+    logger.info("🛑 PigWeight API shutting down...")
+    
+    # Останавливаем фоновую задачу
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    
+    # Останавливаем потоки
     for stream in list(STREAM_MANAGER.streams.values()):
         await stream.stop()
+    
+    logger.info("✅ PigWeight API shutdown complete")
 
 _DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
 app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
@@ -1129,12 +1169,13 @@ setup_request_logging(app)
 setup_security_headers(app)
 
 # Подключаем эндпоинты из модулей
-from api.endpoints import video, stream, health, files, diagnostics
+from api.endpoints import video, stream, health, files, diagnostics, events
 app.include_router(health.router, tags=["health"])
 app.include_router(video.router, tags=["video"])
 app.include_router(stream.router, tags=["stream"])
 app.include_router(files.router, tags=["files"])
 app.include_router(diagnostics.router, tags=["diagnostics"])
+app.include_router(events.router, tags=["events"])
 
 # Include WebRTC routes
 from api import webrtc

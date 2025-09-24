@@ -25,7 +25,7 @@ except ImportError:
     UPLOAD_DIR = Path("uploads")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-@router.post("/video/upload")
+@router.post("/upload")
 async def upload_video_file(file: UploadFile = File(...)):
     """Загрузка видеофайла для обработки"""
     try:

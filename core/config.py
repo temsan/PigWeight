@@ -67,7 +67,7 @@ class Config:
     FPS: int = 12
     JPEG_QUALITY: int = 80
     TARGET_FPS: int = 12
-    CAM_DEFAULT: str = "rtsp://admin:Qwerty.123@10.15.6.24/1/1"
+    CAM_DEFAULT: str = "rtsp://rtsp:Qwerty.12!@10.15.6.27:554/ISAPI/Streaming/Channels/101"
     CAM_URL: Optional[str] = None
 
     # Logic

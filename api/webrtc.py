@@ -148,7 +148,13 @@ def init_webrtc(app: FastAPI, stream_manager: Any, frame_broker: Any, config: An
         if not pc:
             return JSONResponse({'error': 'peer not found'}, status_code=404)
         
-        await pc.addIceCandidate(RTCIceCandidate(**candidate))
+        # Исправляем структуру candidate для RTCIceCandidate
+        ice_candidate = RTCIceCandidate(
+            candidate=candidate.get('candidate'),
+            sdpMid=candidate.get('sdpMid'),
+            sdpMLineIndex=candidate.get('sdpMLineIndex')
+        )
+        await pc.addIceCandidate(ice_candidate)
         return {'status': 'ok'}
 
     @router.post('/stop')

@@ -1,10 +1,12 @@
 """
 Единый, унифицированный видео-процессор для проекта PigWeight.
 Интегрирован с DynamicBatcher для адаптивной обработки.
+Поддерживает журналирование ключевых событий.
 """
 
 import asyncio
 import logging
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 import numpy as np
@@ -14,6 +16,13 @@ from services.model_adapter import ModelAdapter
 from core.optimized_preprocess import center_crop_resize
 from core.preprocess import map_polys_from_center_crop
 from core.dynamic_batcher import DynamicBatcher, BatcherConfig
+
+# Импорт системы событий
+try:
+    from services.event_logger import get_event_logger
+    HAVE_EVENT_LOGGER = True
+except ImportError:
+    HAVE_EVENT_LOGGER = False
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +50,7 @@ BatchItem = Tuple[np.ndarray, float, asyncio.Future]
 class UnifiedVideoProcessor:
     """
     Универсальный процессор с асинхронной обработкой и адаптивным батчингом.
+    Поддерживает журналирование ключевых событий.
     """
 
     def __init__(self, stream_id: str, loop: asyncio.AbstractEventLoop, options: Optional[ProcessingOptions] = None):
@@ -55,6 +65,19 @@ class UnifiedVideoProcessor:
             model_path=getattr(CONFIG, "MODEL_PATH", "")
         )
 
+        # Инициализация системы событий
+        self.event_logger = get_event_logger() if HAVE_EVENT_LOGGER else None
+        
+        # Состояние для отслеживания событий
+        self.last_count = 0
+        self.peak_count = 0
+        self.last_event_time = 0.0
+        self.event_cooldown = 2.0  # Минимальный интервал между событиями одного типа
+        
+        # Настройки для детекции линий (можно вынести в конфиг)
+        self.line_left_x = getattr(CONFIG, "LINE_LEFT_X", 0.25)
+        self.line_right_x = getattr(CONFIG, "LINE_RIGHT_X", 0.75)
+
         if not self.model_adapter.backend:
             logger.error(f"[{self.stream_id}] Не удалось загрузить модель. Процессор неактивен.")
             self.is_active = False
@@ -67,6 +90,11 @@ class UnifiedVideoProcessor:
             )
             self.batcher = DynamicBatcher[BatchItem](batcher_config, self._execute_batch)
             logger.info(f"[{self.stream_id}] Унифицированный процессор активен. Backend: {self.model_adapter.backend}")
+            
+            if self.event_logger:
+                logger.info(f"[{self.stream_id}] Система событий активна")
+            else:
+                logger.warning(f"[{self.stream_id}] Система событий недоступна")
 
     async def start(self):
         """Запускает фоновые задачи процессора (батчер)."""
@@ -81,13 +109,94 @@ class UnifiedVideoProcessor:
     async def process_frame_async(self, frame: np.ndarray, timestamp: float = 0.0) -> FrameResult:
         """
         Асинхронно отправляет кадр на обработку и возвращает результат.
+        Включает журналирование ключевых событий.
         """
         if not self.is_active or self.batcher is None:
             return FrameResult(timestamp=timestamp) # Возвращаем пустой результат, если процессор неактивен
 
         future = self.loop.create_future()
         await self.batcher.add_item((frame, timestamp, future))
-        return await future
+        result = await future
+        
+        # Обработка событий после получения результата
+        if self.event_logger and result.detections > 0:
+            await self._process_events(frame, result)
+        
+        return result
+    
+    async def _process_events(self, frame: np.ndarray, result: FrameResult):
+        """Обрабатывает и логирует ключевые события"""
+        current_time = time.time()
+        current_count = result.detections
+        
+        # Проверяем cooldown для предотвращения спама событий
+        if current_time - self.last_event_time < self.event_cooldown:
+            return
+        
+        try:
+            # 1. Проверка пересечения линий (упрощенная логика)
+            if self._detect_line_crossing(result.centroids):
+                await self.event_logger.log_line_crossing(
+                    stream_id=self.stream_id,
+                    pig_count=current_count,
+                    confidence=result.confidence,
+                    frame=frame.copy(),
+                    metadata={
+                        'centroids': result.centroids,
+                        'bboxes': result.bboxes,
+                        'line_positions': [self.line_left_x, self.line_right_x]
+                    }
+                )
+                self.last_event_time = current_time
+            
+            # 2. Проверка нового пика количества
+            if current_count > self.peak_count:
+                await self.event_logger.log_peak_count(
+                    stream_id=self.stream_id,
+                    pig_count=current_count,
+                    confidence=result.confidence,
+                    frame=frame.copy(),
+                    metadata={
+                        'previous_peak': self.peak_count,
+                        'centroids': result.centroids
+                    }
+                )
+                self.peak_count = current_count
+                self.last_event_time = current_time
+            
+            # 3. Проверка всплеска активности
+            await self.event_logger.log_activity_spike(
+                stream_id=self.stream_id,
+                pig_count=current_count,
+                confidence=result.confidence,
+                frame=frame.copy(),
+                metadata={
+                    'previous_count': self.last_count,
+                    'centroids': result.centroids
+                }
+            )
+            
+            self.last_count = current_count
+            
+        except Exception as e:
+            logger.error(f"[{self.stream_id}] Ошибка при обработке событий: {e}")
+    
+    def _detect_line_crossing(self, centroids: List[Tuple[float, float]]) -> bool:
+        """
+        Упрощенная детекция пересечения линий.
+        В реальной системе здесь должна быть более сложная логика отслеживания траекторий.
+        """
+        if not centroids:
+            return False
+        
+        # Проверяем, есть ли объекты в зоне между линиями
+        for x, y in centroids:
+            # Нормализуем координаты (предполагаем, что они уже в диапазоне 0-1)
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                if self.line_left_x <= x <= self.line_right_x:
+                    return True
+        
+        return False
 
     def _execute_batch(self, batch: List[BatchItem]):
         """

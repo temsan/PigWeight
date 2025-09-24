@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/events.css">
   <style>
     .top-toolbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(255, 255, 255, 0.56); backdrop-filter: blur(12px); box-shadow: 0 2px 12px rgba(40,60,90,0.12); overflow: visible !important; height: auto !important; max-height: none !important; }
     .top-toolbar .container { overflow: visible !important; height: auto !important; max-height: none !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; gap: 8px; }
@@ -221,6 +222,10 @@
             <button class="journal-tab-btn" onclick="switchPanel('verification')">
               <span class="journal-tab-icon">🔍</span>
               <span class="journal-tab-text">Сверка</span>
+            </button>
+            <button class="journal-tab-btn" onclick="switchPanel('events')">
+              <span class="journal-tab-icon">🎯</span>
+              <span class="journal-tab-text">События</span>
             </button>
           </div>
 
@@ -438,6 +443,58 @@
               </div>
             </div>
           </div>
+
+          <!-- Панель События (liquid glass стиль) -->
+          <div id="eventsPanel" class="panel-content" style="padding:0; display:none;">
+            <div class="journal-container">
+              <div class="journal-header">
+                <div class="journal-title">
+                  🎯 Журнал событий
+                </div>
+                <div class="journal-controls">
+                  <select id="eventTypeFilter" class="form-control">
+                    <option value="">Все события</option>
+                    <option value="line_crossing">Пересечения линий</option>
+                    <option value="peak_count">Пики количества</option>
+                    <option value="activity_spike">Всплески активности</option>
+                  </select>
+                  <select id="eventTimeFilter" class="form-control">
+                    <option value="">Все время</option>
+                    <option value="1">Последний час</option>
+                    <option value="6">Последние 6 часов</option>
+                    <option value="24">Последние 24 часа</option>
+                  </select>
+                  <button id="refreshEventsBtn" class="btn btn-primary">🔄</button>
+                  <button id="exportEventsBtn" class="btn btn-secondary">📥</button>
+                </div>
+              </div>
+
+              <!-- Статистика событий -->
+              <div class="journal-stats" id="eventsStats">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="totalEvents">0</div>
+                  <div class="journal-stat-label">Всего событий</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="peakCount" style="color: #ff9800;">0</div>
+                  <div class="journal-stat-label">Пик количества</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="lineCrossings" style="color: #4caf50;">0</div>
+                  <div class="journal-stat-label">Пересечений</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="activitySpikes" style="color: #f44336;">0</div>
+                  <div class="journal-stat-label">Всплесков</div>
+                </div>
+              </div>
+
+              <!-- Список событий -->
+              <div class="journal-events-list" id="eventsList">
+                <div class="loading-message">Выберите поток для просмотра событий</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -568,8 +625,10 @@
 
     function setupFirstFrameWatch() {
         try {
+            console.log('Setting up first frame watch');
             const onFirst = () => {
                 if (!hasFirstFrame) {
+                    console.log('First frame received!');
                     hasFirstFrame = true;
                     try { videoStream.style.opacity = '1'; } catch (e) {}
                     hideLoader();
@@ -579,18 +638,28 @@
             // Also debounce rapid flicker by only treating the first frame event within 500ms
             let firstFired = false;
             const wrapped = () => {
+                console.log('Video load event fired');
                 if (firstFired) return;
                 firstFired = true;
                 setTimeout(() => { firstFired = false; }, 500);
                 onFirst();
             };
+            
+            // Add error handler
+            videoStream.addEventListener('error', (e) => {
+                console.error('Video error:', e);
+                console.error('Video src:', videoStream.src);
+            });
+            
             videoStream.addEventListener('load', wrapped);
             // Also ensure loader hides if WebRTC is active and no MJPEG frames
             try {
                 const v = document.getElementById('webrtcVideo');
                 if (v) v.addEventListener('playing', () => { try { hideLoader(); } catch(e){} });
             } catch(e) {}
-        } catch (e) {}
+        } catch (e) {
+            console.error('Error in setupFirstFrameWatch:', e);
+        }
     }
 
     async function getStreams() {
@@ -647,6 +716,11 @@
                 await stopStream(activeStreamId);
             }
             activeStreamId = newStreamId;
+            
+            // Уведомляем менеджер событий о смене потока
+            if (window.eventsManager) {
+                window.eventsManager.setCurrentStream(activeStreamId);
+            }
         });
 
         streamRadios.appendChild(select);
@@ -668,9 +742,12 @@
         try { videoStream.style.opacity = '1'; } catch (e) {}
         
         try {
+            console.log(`Starting stream: ${streamId} with source: ${sourceUri}`);
             const response = await fetch(`/api/stream/start?stream_id=${streamId}&source_uri=${encodeURIComponent(sourceUri)}`, { method: 'POST' });
+            console.log(`Stream start response: ${response.status}`);
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
+                console.error('Stream start error data:', errorData);
                 throw new Error(errorData.error || `HTTP ${response.status}`);
             }
         } catch (error) {
@@ -700,7 +777,9 @@
             // classic MJPEG
             try { document.getElementById('webrtcVideo').style.display = 'none'; } catch (e) {}
             try { videoStream.style.display = 'block'; } catch (e) {}
-            videoStream.src = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+            const feedUrl = `/api/stream/${streamId}/feed?ts=${Date.now()}`;
+            console.log(`Setting video src to: ${feedUrl}`);
+            videoStream.src = feedUrl;
             setupFirstFrameWatch();
         }
 
@@ -2000,6 +2079,13 @@
         loadJournalActs();
       }
 
+      // Загружаем данные для панели событий
+      if (panelName === 'events') {
+        if (window.eventsManager && activeStreamId) {
+          window.eventsManager.setCurrentStream(activeStreamId);
+        }
+      }
+
       // Загружаем данные для панели
       if (panelName === 'weighing') {
         loadWeighingData();
@@ -2417,6 +2503,13 @@
     // Обновление журналов
     async function refreshLogs() {
       try {
+        // Проверяем, что мы находимся на панели журналов
+        const logsPanel = document.getElementById('logsPanel');
+        if (!logsPanel || logsPanel.style.display === 'none') {
+          console.log('Logs panel not active, skipping refresh');
+          return;
+        }
+
         const dateFrom = document.getElementById('logsDateFrom').value;
         const dateTo = document.getElementById('logsDateTo').value;
         
@@ -2566,6 +2659,44 @@
       document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
       document.getElementById('logsDateFrom').addEventListener('change', refreshLogs);
       document.getElementById('logsDateTo').addEventListener('change', refreshLogs);
+      
+      // Обработчики для панели событий
+      const refreshEventsBtn = document.getElementById('refreshEventsBtn');
+      const exportEventsBtn = document.getElementById('exportEventsBtn');
+      const eventTypeFilter = document.getElementById('eventTypeFilter');
+      const eventTimeFilter = document.getElementById('eventTimeFilter');
+      
+      if (refreshEventsBtn) {
+        refreshEventsBtn.addEventListener('click', () => {
+          if (window.eventsManager) {
+            window.eventsManager.loadEvents();
+          }
+        });
+      }
+      
+      if (exportEventsBtn) {
+        exportEventsBtn.addEventListener('click', () => {
+          if (window.eventsManager) {
+            window.eventsManager.exportEvents();
+          }
+        });
+      }
+      
+      if (eventTypeFilter) {
+        eventTypeFilter.addEventListener('change', () => {
+          if (window.eventsManager) {
+            window.eventsManager.loadEvents();
+          }
+        });
+      }
+      
+      if (eventTimeFilter) {
+        eventTimeFilter.addEventListener('change', () => {
+          if (window.eventsManager) {
+            window.eventsManager.loadEvents();
+          }
+        });
+      }
       
       // Обработчики для панели сверки
       const verificationUploadArea = document.getElementById('verificationUploadArea');
@@ -2717,12 +2848,8 @@
       // Обработчик кнопки сохранения акта
       document.getElementById('saveManualBtn').addEventListener('click', saveNewAct);
 
-      // Обработчик кнопки обновления журнала
-      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
-
-      // Обработчик изменения фильтров
-      document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
-      document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
+      // Обработчик изменения фильтров для журнала актов (используем loadJournalActs для актов взвешивания)
+      // refreshLogsBtn уже привязан к refreshLogs выше
       document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
 
       // Обработчики для загрузки Excel файла
@@ -3041,69 +3168,7 @@
       }
     }
 
-    function showNotification(message, type = 'info') {
-      // Создаем уведомление
-      const notification = document.createElement('div');
-      notification.style.cssText = `
-        position: fixed;
-        top: 80px;
-        right: 20px;
-        z-index: 10000;
-        padding: 12px 16px;
-        border-radius: 8px;
-        color: white;
-        font-weight: 500;
-        max-width: 300px;
-        word-wrap: break-word;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        transition: all 0.3s ease;
-        transform: translateX(100%);
-      `;
-      
-      // Цвета в зависимости от типа
-      switch (type) {
-        case 'success':
-          notification.style.background = 'rgba(34, 197, 94, 0.9)';
-          break;
-        case 'warning':
-          notification.style.background = 'rgba(251, 191, 36, 0.9)';
-          break;
-        case 'error':
-          notification.style.background = 'rgba(239, 68, 68, 0.9)';
-          break;
-        default:
-          notification.style.background = 'rgba(59, 130, 246, 0.9)';
-      }
-      
-      notification.textContent = message;
-      document.body.appendChild(notification);
-      
-      // Анимация появления
-      setTimeout(() => {
-        notification.style.transform = 'translateX(0)';
-      }, 100);
-      
-      // Автоматическое скрытие через 5 секунд
-      setTimeout(() => {
-        notification.style.transform = 'translateX(100%)';
-        setTimeout(() => {
-          if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-          }
-        }, 300);
-      }, 5000);
-      
-      // Клик для закрытия
-      notification.addEventListener('click', () => {
-        notification.style.transform = 'translateX(100%)';
-        setTimeout(() => {
-          if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-          }
-        }, 300);
-      });
-    }
+
 
     // Автоматическая диагностика при загрузке страницы
     window.addEventListener('load', () => {
@@ -3128,5 +3193,6 @@
     // Загружаем Chart.js
     loadChartJS();
   </script>
+  <script src="/static/js/events-manager.js"></script>
 </body>
 </html>

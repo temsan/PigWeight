@@ -95,8 +95,8 @@ DEBUG=false
 RELOAD=false
 
 # Камеры (для RTSP)
-CAMERA_101_URL=rtsp://user:pass@camera-ip/live
-CAMERA_102_URL=rtsp://user:pass@camera-ip/live
+CAM_CH101=rtsp://user:pass@camera-ip/live
+CAM_CH102=rtsp://user:pass@camera-ip/live
 ```
 
 ## Тестирование производительности
