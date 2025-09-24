@@ -214,6 +214,9 @@ class UnifiedVideoProcessor:
 
             # 2. Инференс всего батча
             inference_results = self.model_adapter.infer(processed_frames)
+            # Проверяем только наличие масок, чтобы не засорять лог
+            mask_presence = [m.get('masks') is not None and len(m.get('masks')) > 0 for m in inference_results]
+            logger.debug(f"Batch of {len(inference_results)}. Masks presence: {mask_presence}")
 
             # 3. Постобработка и отправка результатов
             for i, future in enumerate(futures):

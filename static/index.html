@@ -249,7 +249,11 @@
               </div>
 
               <!-- Текущий акт взвешивания -->
-              <div class="journal-stats" style="grid-template-columns: 1fr 1fr;">
+              <div class="journal-stats" style="grid-template-columns: 1fr 1fr 1fr;">
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="actSeen">0</div>
+                  <div class="journal-stat-label">Замечено уникально</div>
+                </div>
                 <div class="journal-stat-card">
                   <div class="journal-stat-value" id="actPeak">0</div>
                   <div class="journal-stat-label">Пик одновременно</div>
@@ -542,6 +546,7 @@
     let lastTotalCrossings = 0;
     let lastLeftIn = 0;
     let lastRightIn = 0;
+    const actSeenEl = document.getElementById('actSeen');
     const actPeakEl = document.getElementById('actPeak');
     const actDurEl = document.getElementById('actDur');
     const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -1017,7 +1022,6 @@
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/count?id=${streamId}`);
         ws.onmessage = (event) => {
-            console.log("WebSocket message received");
             const data = JSON.parse(event.data);
             if (data.type === 'count_update') {
                 document.getElementById('manualCount').value = data.count;
@@ -1027,8 +1031,7 @@
                 if (data.debug) {
                     lastMasks = data.debug.masks || [];
                     lastIds = data.debug.ids || null;
-                    console.log("Scheduling overlay with", lastMasks.length, "masks");
-                    scheduleOverlay(lastMasks, lastIds);
+                    
                     try {
                         window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
                         const now = performance.now();
@@ -1058,7 +1061,9 @@
                         });
                         window.__lastPopupTs = maxTs;
                     } catch (e) {}
+                    
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
+                    
                     if (lastMasks && lastMasks.length) {
                         scheduleOverlay(lastMasks, lastIds);
                         streamStatus.textContent = 'Live + overlay';
@@ -1073,6 +1078,24 @@
                 if (data.debug && data.debug.lines) {
                     requestAnimationFrame(() => {
                         if (!window.__isDraggingLines) {
+                            // Проверяем, воспроизводим ли мы файл и есть ли сохраненные позиции
+                            const currentFileName = fileInputLabel ? fileInputLabel.title : null;
+                            const isPlayingFile = currentFileName && currentFileName !== 'Открыть видеофайл' && 
+                                                activeStreamId && activeStreamId.startsWith('file_');
+                            
+                            if (isPlayingFile) {
+                                // Для файлов используем сохраненные позиции, если они есть
+                                const savedPositions = loadLinePositions(currentFileName);
+                                if (savedPositions && savedPositions.left_x !== undefined && savedPositions.right_x !== undefined) {
+                                    // Сохраняем локальные позиции и не перезаписываем их серверными данными
+                                    if (!window.__lines || typeof window.__lines.left_x !== 'number') {
+                                        window.__lines = { left_x: savedPositions.left_x, right_x: savedPositions.right_x };
+                                    }
+                                    return; // Не перезаписываем серверными данными
+                                }
+                            }
+                            
+                            // Для живого потока или если нет сохраненных позиций - используем серверные данные
                             window.__lines = data.debug.lines;
                         }
                     });
