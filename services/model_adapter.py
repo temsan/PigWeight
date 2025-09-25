@@ -600,7 +600,9 @@ class ModelAdapter:
 
                     try:
                         if hasattr(r, 'masks') and r.masks is not None:
+                            logger.info(f"🎭 Model has masks: {type(r.masks)}, xy: {type(r.masks.xy)}")
                             polys = r.masks.xy
+                            logger.info(f"🎭 Extracted {len(polys)} mask polygons")
                             current_masks = polys
                             
                             # Safe confidence extraction
@@ -628,7 +630,10 @@ class ModelAdapter:
                                     for p in polys
                                 ]
 
-                        elif hasattr(r, 'boxes') and r.boxes is not None:
+                        else:
+                            logger.info(f"🎭 Model result has no masks - hasattr(r, 'masks'): {hasattr(r, 'masks')}, r.masks: {getattr(r, 'masks', None)}")
+
+                        if hasattr(r, 'boxes') and r.boxes is not None:
                             # If no masks, use only boxes
                             bbox_tensor = ensure_float32(r.boxes.xyxy.cpu())
                             current_bboxes = bbox_tensor.numpy().tolist()

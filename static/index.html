@@ -3,8 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="source-map" content="none">
   <title>PigWeight MVP</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <script>
+    // Отключаем source maps глобально
+    if (typeof window !== 'undefined') {
+      window.addEventListener('error', function(e) {
+        if (e.message && e.message.includes('.map')) {
+          e.preventDefault();
+          return false;
+        }
+      });
+    }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
   <link rel="stylesheet" href="/static/css/events.css">
@@ -1023,16 +1035,10 @@
                     lastMasks = data.debug.masks || [];
                     lastIds = data.debug.ids || null;
                     
-                    // Отладочная информация для масок
-                    if (data.debug.masks_debug) {
-                        console.log("🔍 Маски отладка:", data.debug.masks_debug);
-                    }
-                    if (lastMasks && lastMasks.length > 0) {
-                        console.log(`✅ Получены маски: ${lastMasks.length} шт.`);
-                        console.log("📊 Пример маски:", lastMasks[0]);
-                    } else {
-                        console.log("❌ Маски отсутствуют или пустые");
-                    }
+                        // Отладочная информация для масок (только при необходимости)
+                        if (data.debug.masks_debug && data.debug.masks_debug.count > 0) {
+                            console.log("🔍 Маски отладка:", data.debug.masks_debug);
+                        }
                     
                     try {
                         window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
@@ -1258,13 +1264,10 @@
         return `hsl(${hue}, 65%, 32%)`;
     }
 
-    function drawOverlay(masks, ids = null) {
-        console.log("🎨 drawOverlay вызвана с масками:", masks ? masks.length : 0, "hasFirstFrame:", hasFirstFrame);
-        
-        if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) {
-            console.log("⏭️ Пропуск отрисовки: нет первого кадра и нет масок");
-            return;
-        }
+            function drawOverlay(masks, ids = null) {
+                if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) {
+                    return;
+                }
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
         const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
@@ -1436,18 +1439,14 @@
             }
         } catch (e) {}
 
-        if (!masks || !masks.length) {
-            console.log("⚠️ Нет масок для отрисовки");
-            return;
-        }
+                if (!masks || !masks.length) {
+                    return;
+                }
 
-        console.log(`🎯 Начинаем отрисовку ${masks.length} масок`);
-        masks.forEach((poly, idx) => {
-            console.log(`🔍 Маска ${idx}:`, typeof poly, Array.isArray(poly) ? poly.length : 'не массив');
-            if (!Array.isArray(poly) || poly.length < 3) {
-                console.log(`⏭️ Пропуск маски ${idx}: некорректный формат`);
-                return;
-            }
+                masks.forEach((poly, idx) => {
+                    if (!Array.isArray(poly) || poly.length < 3) {
+                        return;
+                    }
             const labelArr = (window.__lastLabels && Array.isArray(window.__lastLabels)) ? window.__lastLabels : null;
             const instId = labelArr ? (labelArr[idx] || (idx + 1)) : ((ids && ids[idx]) ? ids[idx] : (idx + 1));
             const fill = colorForInstance(instId);
@@ -3138,11 +3137,21 @@
       script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
       // Отключаем source maps для избежания CSP предупреждений
       script.crossOrigin = 'anonymous';
+      
+      // Принудительно отключаем source maps
+      script.onerror = function(e) {
+        if (e.message && e.message.includes('.map')) {
+          console.log('Source map заблокирован (это нормально)');
+          return false;
+        }
+      };
+      
       script.onload = function() {
         console.log('Chart.js загружен успешно');
-      };
-      script.onerror = function() {
-        console.warn('Не удалось загрузить Chart.js из CDN');
+        // Дополнительно отключаем source maps в загруженной библиотеке
+        if (window.Chart && window.Chart.defaults) {
+          window.Chart.defaults.sourceMap = false;
+        }
       };
       document.head.appendChild(script);
     }

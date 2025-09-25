@@ -933,11 +933,13 @@ async def _global_infer_loop(self):
                     self.last_count = result.detections
                     self.last_masks = result.masks
                     
-                    # Отладочная информация для масок (только при DEBUG)
-                    if result.masks and config.DEBUG:
-                        logger.debug(f"[{self.stream_id}] Получены маски: {len(result.masks)} шт.")
-                    elif not result.masks and config.DEBUG:
-                        logger.debug(f"[{self.stream_id}] Маски не найдены в результате")
+                    # Отладочная информация для масок (временно включено для диагностики)
+                    if result.masks:
+                        logger.info(f"[{self.stream_id}] ✅ Получены маски: {len(result.masks)} шт.")
+                        if len(result.masks) > 0:
+                            logger.info(f"[{self.stream_id}] 📊 Первая маска: {type(result.masks[0])}, размер: {len(result.masks[0]) if hasattr(result.masks[0], '__len__') else 'N/A'}")
+                    else:
+                        logger.info(f"[{self.stream_id}] ❌ Маски не найдены в результате инференса")
 
                     # 3. Update statistics and broadcast (existing logic)
                     wnd_max = self.window_max.update(result.timestamp, int(self.last_count))

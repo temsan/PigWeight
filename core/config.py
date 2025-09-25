@@ -67,7 +67,7 @@ class Config:
     FPS: int = 30  # Увеличено для плавного видео
     JPEG_QUALITY: int = 85  # Улучшено качество
     TARGET_FPS: int = 30  # Увеличено для плавного видео
-    CAM_DEFAULT: str = "rtsp://rtsp:Qwerty.12!@10.15.6.27:554/ISAPI/Streaming/Channels/101"
+    CAM_DEFAULT: str = ""  # Отключено - камера недоступна
     CAM_URL: Optional[str] = None
 
     # Logic

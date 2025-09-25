@@ -227,11 +227,18 @@ class UnifiedVideoProcessor:
 
                     # Маппинг масок
                     mapped_masks = []
-                    if result_data.get('masks') and p_data.get('transform_meta'):
+                    raw_masks = result_data.get('masks')
+                    logger.info(f"[{self.stream_id}] 🔍 Raw masks from model: {type(raw_masks)}, count: {len(raw_masks) if raw_masks else 0}")
+                    
+                    if raw_masks and p_data.get('transform_meta'):
+                        logger.info(f"[{self.stream_id}] 📊 Processing {len(raw_masks)} raw masks")
                         mapped_masks = map_polys_from_center_crop(
-                            result_data['masks'],
+                            raw_masks,
                             p_data['transform_meta']
                         )
+                        logger.info(f"[{self.stream_id}] ✅ Mapped {len(mapped_masks)} masks")
+                    else:
+                        logger.info(f"[{self.stream_id}] ❌ No masks to map - raw_masks: {bool(raw_masks)}, transform_meta: {bool(p_data.get('transform_meta'))}")
                     
                     frame_result = FrameResult(
                         detections=result_data.get("detections", 0),
