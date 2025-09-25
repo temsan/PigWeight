@@ -319,8 +319,8 @@ class AVIsolate:
             logger.error(f"Failed to restart av_worker: {e}")
             return False
     
-    @retry_with_backoff(max_retries=3, base_delay=0.1, max_delay=2.0)
-    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 5.0):
+    @retry_with_backoff(max_retries=2, base_delay=0.1, max_delay=1.0)
+    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 3.0):
         # Periodic health check
         current_time = time.time()
         if current_time - self._last_health_check > self._health_check_interval:
@@ -364,10 +364,10 @@ class AVIsolate:
     def open_rtsp(self, sid: str, url: str) -> Dict[str, Any]:
         return self._req('open_rtsp', {'id': sid, 'url': url})
 
-    @retry_with_backoff(max_retries=2, base_delay=0.2, max_delay=3.0)
+    @retry_with_backoff(max_retries=2, base_delay=0.1, max_delay=1.0)
     def open_file(self, sid: str, path: str) -> Dict[str, Any]:
-        # Увеличиваем timeout для открытия файлов, так как это может занять больше времени
-        return self._req('open_file', {'id': sid, 'path': path}, timeout=5.0)
+        # Оптимизированный timeout для локальных файлов
+        return self._req('open_file', {'id': sid, 'path': path}, timeout=3.0)
 
     def close(self, sid: str) -> None:
         try:

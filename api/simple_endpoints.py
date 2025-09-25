@@ -42,7 +42,7 @@ def get_video_processor():
                 break
         
         options = ProcessingOptions(
-            confidence_threshold=float(os.getenv("CONF_THRESHOLD", "0.3")),
+            conf_threshold=float(os.getenv("CONF_THRESHOLD", "0.3")),
             img_size=int(os.getenv("IMG_SIZE", "640")),
             device=os.getenv("DEVICE", "auto"),
             batch_size=int(os.getenv("BATCH_SIZE", "1"))

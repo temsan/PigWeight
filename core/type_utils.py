@@ -43,7 +43,8 @@ def safe_tensor_conversion(tensor: Any, target_dtype: Any) -> Any:
             return target_dtype(tensor)
             
     except Exception as e:
-        logger.warning(f"Type conversion failed: {e}, using original tensor")
+        # Изменяем уровень на DEBUG чтобы не засорять логи
+        logger.debug(f"Type conversion failed: {e}, using original tensor")
         return tensor
 
 def ensure_float32(data: Any) -> Any:

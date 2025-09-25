@@ -13,6 +13,13 @@ from collections import deque
 import abc
 import subprocess
 
+# Импорт системы событий
+try:
+    from services.event_logger import get_event_logger
+    HAVE_EVENT_LOGGER = True
+except ImportError:
+    HAVE_EVENT_LOGGER = False
+
 # Импортируем новый единый процессор
 try:
     from core.processor import get_processor, ProcessingOptions, FrameResult
@@ -469,12 +476,24 @@ class VideoStream(abc.ABC):
         # Стабильная отображаемая метка для каждого track id (не прыгает)
         self._display_label_map: Dict[int, int] = {}
         self._next_display_label: int = 1
+        
+        # Инициализация системы событий
+        self.event_logger = get_event_logger() if HAVE_EVENT_LOGGER else None
+        if self.event_logger:
+            logger.info(f"[{self.stream_id}] Система журналирования событий активна")
+        else:
+            logger.warning(f"[{self.stream_id}] Система журналирования событий недоступна")
+        
         # Session numbering and act-of-weighing metrics
         self._session_id_map: Dict[int, int] = {}
         self._next_session_label: int = 1
         self._act_seen_labels: set[int] = set()
         self._act_peak: int = 0
         self._act_start_ts: float = time.time()
+        
+        # Очередь для неблокирующего журналирования
+        self._logging_queue = asyncio.Queue(maxsize=100)
+        self._logging_task: Optional[asyncio.Task] = None
         self._act_timeline: List[Dict[str, Any]] = []
         self._act_crossings: List[Dict[str, Any]] = []
         self._act_last_cross_ts: float = 0.0
@@ -644,6 +663,16 @@ class VideoStream(abc.ABC):
                                 logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
                                 y_at = _interp_y(prev, prev_y, cx, cy, L)
                                 self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
+                                
+                                # Журналирование события пересечения линии (неблокирующее)
+                                if self.event_logger:
+                                    # Создаем задачу в фоне без ожидания
+                                    try:
+                                        asyncio.create_task(self._log_crossing_async(
+                                            'left', 'enter', int(tid), self.left_in, L, y_at
+                                        ))
+                                    except Exception:
+                                        pass  # Игнорируем ошибки журналирования
                                 try:
                                     self._act_crossings.append({
                                         "id": int(tid), "side": "left", "mode": "enter",
@@ -666,6 +695,15 @@ class VideoStream(abc.ABC):
                                 logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
                                 y_at = _interp_y(prev, prev_y, cx, cy, R)
                                 self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
+                                
+                                # Журналирование события пересечения линии (неблокирующее)
+                                if self.event_logger:
+                                    try:
+                                        asyncio.create_task(self._log_crossing_async(
+                                            'right', 'enter', int(tid), self.right_in, R, y_at
+                                        ))
+                                    except Exception:
+                                        pass
                                 try:
                                     self._act_crossings.append({
                                         "id": int(tid), "side": "right", "mode": "enter",
@@ -685,6 +723,15 @@ class VideoStream(abc.ABC):
                                 self._track_last_side_time[key] = now
                                 y_at = _interp_y(prev, prev_y, cx, cy, L)
                                 self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
+                                
+                                # Журналирование события выхода (неблокирующее)
+                                if self.event_logger:
+                                    try:
+                                        asyncio.create_task(self._log_crossing_async(
+                                            'left', 'exit', int(tid), self.left_in, L, y_at
+                                        ))
+                                    except Exception:
+                                        pass
                                 try:
                                     self._act_crossings.append({
                                         "id": int(tid), "side": "left", "mode": "exit",
@@ -702,6 +749,15 @@ class VideoStream(abc.ABC):
                                 self._track_last_side_time[key] = now
                                 y_at = _interp_y(prev, prev_y, cx, cy, R)
                                 self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
+                                
+                                # Журналирование события выхода (неблокирующее)
+                                if self.event_logger:
+                                    try:
+                                        asyncio.create_task(self._log_crossing_async(
+                                            'right', 'exit', int(tid), self.right_in, R, y_at
+                                        ))
+                                    except Exception:
+                                        pass
                                 try:
                                     self._act_crossings.append({
                                         "id": int(tid), "side": "right", "mode": "exit",
@@ -724,6 +780,36 @@ class VideoStream(abc.ABC):
                 pass
 
 
+
+    async def _log_crossing_async(self, side: str, direction: str, track_id: int, pig_count: int, x: float, y: float):
+        """Асинхронное журналирование пересечения линии"""
+        try:
+            await self.event_logger.log_line_crossing(
+                stream_id=self.stream_id,
+                pig_count=pig_count,
+                confidence=0.9,
+                metadata={
+                    'track_id': track_id,
+                    'side': side,
+                    'direction': direction,
+                    'position': {'x': float(x), 'y': float(y)},
+                    'total_crossings': self.total_crossings
+                }
+            )
+        except Exception:
+            pass  # Игнорируем ошибки журналирования
+
+    async def _log_peak_async(self, pig_count: int, confidence: float, metadata: Dict[str, Any]):
+        """Асинхронное журналирование пикового значения"""
+        try:
+            await self.event_logger.log_peak_count(
+                stream_id=self.stream_id,
+                pig_count=pig_count,
+                confidence=confidence,
+                metadata=metadata
+            )
+        except Exception:
+            pass  # Игнорируем ошибки журналирования
 
     async def get_jpeg(self) -> Optional[bytes]:
         async with self.lock:
@@ -846,11 +932,33 @@ async def _global_infer_loop(self):
                     
                     self.last_count = result.detections
                     self.last_masks = result.masks
+                    
+                    # Отладочная информация для масок (только при DEBUG)
+                    if result.masks and CONFIG.DEBUG:
+                        logger.debug(f"[{self.stream_id}] Получены маски: {len(result.masks)} шт.")
+                    elif not result.masks and CONFIG.DEBUG:
+                        logger.debug(f"[{self.stream_id}] Маски не найдены в результате")
 
                     # 3. Update statistics and broadcast (existing logic)
                     wnd_max = self.window_max.update(result.timestamp, int(self.last_count))
                     est = max(self.reported_count, wnd_max)
                     self.reported_count = est
+                    
+                    # Журналирование пиковых значений (неблокирующее)
+                    if self.event_logger and est > self._act_peak:
+                        try:
+                            asyncio.create_task(self._log_peak_async(
+                                pig_count=int(est),
+                                confidence=result.confidence,
+                                metadata={
+                                    'previous_peak': self._act_peak,
+                                    'detection_count': int(self.last_count),
+                                    'window_max': wnd_max
+                                }
+                            ))
+                            self._act_peak = int(est)
+                        except Exception:
+                            pass  # Игнорируем ошибки журналирования
                     
                     # Update act timeline
                     now_ts = result.timestamp
@@ -869,6 +977,11 @@ async def _global_infer_loop(self):
                         "count": int(round(est)),
                         "debug": {
                             "masks": self.last_masks,
+                            "masks_debug": {
+                                "count": len(self.last_masks) if self.last_masks else 0,
+                                "has_masks": bool(self.last_masks),
+                                "mask_types": [type(m).__name__ for m in (self.last_masks or [])]
+                            },
                             "count_raw": int(self.last_count),
                             "flow": {"left_in": self.left_in, "right_in": self.right_in, "total_crossings": self.total_crossings},
                             "ids": ids,

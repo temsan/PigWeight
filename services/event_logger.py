@@ -76,23 +76,29 @@ class EventLogger:
         return f"evt_{timestamp}_{self.event_counter:06d}"
     
     def _save_frame(self, frame: np.ndarray, event_id: str) -> Optional[str]:
-        """Сохраняет кадр на диск и возвращает путь к файлу"""
+        """Сохраняет кадр на диск и возвращает путь к файлу (оптимизировано)"""
         try:
+            # Для производительности сохраняем кадры только для важных событий
+            # или если включен DEBUG режим
+            import os
+            if not os.getenv('DEBUG') and not os.getenv('SAVE_FRAMES'):
+                return None
+                
             frame_filename = f"{event_id}.jpg"
             frame_path = self.frames_dir / frame_filename
             
-            # Сохраняем кадр в JPEG формате
-            success = cv2.imwrite(str(frame_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            # Оптимизированное сохранение кадра
+            success = cv2.imwrite(str(frame_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             
             if success:
                 logger.debug(f"Frame saved: {frame_path}")
                 return str(frame_path)
             else:
-                logger.error(f"Failed to save frame: {frame_path}")
+                logger.debug(f"Failed to save frame: {frame_path}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Error saving frame for event {event_id}: {e}")
+            logger.debug(f"Error saving frame for event {event_id}: {e}")
             return None
     
     def _save_event_to_file(self, stream_id: str, event: EventData):

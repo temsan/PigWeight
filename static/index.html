@@ -1023,6 +1023,17 @@
                     lastMasks = data.debug.masks || [];
                     lastIds = data.debug.ids || null;
                     
+                    // Отладочная информация для масок
+                    if (data.debug.masks_debug) {
+                        console.log("🔍 Маски отладка:", data.debug.masks_debug);
+                    }
+                    if (lastMasks && lastMasks.length > 0) {
+                        console.log(`✅ Получены маски: ${lastMasks.length} шт.`);
+                        console.log("📊 Пример маски:", lastMasks[0]);
+                    } else {
+                        console.log("❌ Маски отсутствуют или пустые");
+                    }
+                    
                     try {
                         window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
                         const now = performance.now();
@@ -1248,7 +1259,12 @@
     }
 
     function drawOverlay(masks, ids = null) {
-        if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) return;
+        console.log("🎨 drawOverlay вызвана с масками:", masks ? masks.length : 0, "hasFirstFrame:", hasFirstFrame);
+        
+        if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) {
+            console.log("⏭️ Пропуск отрисовки: нет первого кадра и нет масок");
+            return;
+        }
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
         const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
@@ -1420,10 +1436,18 @@
             }
         } catch (e) {}
 
-        if (!masks || !masks.length) return;
+        if (!masks || !masks.length) {
+            console.log("⚠️ Нет масок для отрисовки");
+            return;
+        }
 
+        console.log(`🎯 Начинаем отрисовку ${masks.length} масок`);
         masks.forEach((poly, idx) => {
-            if (!Array.isArray(poly) || poly.length < 3) return;
+            console.log(`🔍 Маска ${idx}:`, typeof poly, Array.isArray(poly) ? poly.length : 'не массив');
+            if (!Array.isArray(poly) || poly.length < 3) {
+                console.log(`⏭️ Пропуск маски ${idx}: некорректный формат`);
+                return;
+            }
             const labelArr = (window.__lastLabels && Array.isArray(window.__lastLabels)) ? window.__lastLabels : null;
             const instId = labelArr ? (labelArr[idx] || (idx + 1)) : ((ids && ids[idx]) ? ids[idx] : (idx + 1));
             const fill = colorForInstance(instId);
