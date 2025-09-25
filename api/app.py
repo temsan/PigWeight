@@ -143,27 +143,9 @@ def cameras_from_env() -> Dict[str, str]:
       - If no CAM_CH* are present, fallback to CAM_URL or CAM_DEFAULT as cam101
     Returns mapping like {"cam101": "rtsp://...", ...} ordered by channel number.
     """
-    cams: Dict[str, str] = {}
-    items = []
-    for key, val in os.environ.items():
-        if not val:
-            continue
-        if key.startswith("CAM_CH"):
-            suf = key[6:]  # after CAM_CH
-            if suf.isdigit():
-                try:
-                    items.append((int(suf), val))
-                except Exception:
-                    continue
-    if items:
-        for num, url in sorted(items, key=lambda t: t[0]):
-            cams[f"cam{num}"] = url
-        return cams
-    # Fallback
-    url = config.CAM_URL or config.CAM_DEFAULT
-    if url:
-        cams["cam101"] = url
-    return cams
+    # ВРЕМЕННО: Отключаем все камеры для тестирования масок
+    logger.info("🚫 ВРЕМЕННО: Все камеры отключены для тестирования масок")
+    return {}
 
 def encode_jpeg(frame, quality: int = None) -> bytes:
     q = quality or config.JPEG_QUALITY
@@ -883,18 +865,22 @@ class WindowMaxEstimator:
 
 # NOTE: Глобальная реализация инференс-цикла; метод класса делегирует сюда
 async def _global_infer_loop(self):
+        logger.info(f"🔍 _global_infer_loop вызван для потока {self.stream_id}")
+        
         # Use the unified processor
         try:
+            logger.info(f"🔍 Получаем процессор для потока {self.stream_id}")
             processor = await get_processor(self.stream_id)
+            logger.info(f"🔍 Процессор получен: {processor}, активен: {processor.is_active if processor else 'None'}")
         except Exception as e:
-            logger.error(f"Failed to get processor for stream {self.stream_id}: {e}", exc_info=True)
+            logger.error(f"❌ Failed to get processor for stream {self.stream_id}: {e}", exc_info=True)
             return
 
         if not processor or not processor.is_active:
-            logger.error(f"Unified processor for stream {self.stream_id} is not active. Inference loop will not run.")
+            logger.error(f"❌ Unified processor for stream {self.stream_id} is not active. Inference loop will not run.")
             return
 
-        logger.info(f"Starting unified inference loop for stream {self.stream_id}")
+        logger.info(f"✅ Starting unified inference loop for stream {self.stream_id}")
 
         while self.running:
             try:
@@ -1429,7 +1415,10 @@ async def read_monitoring():
 @app.get("/api/cameras")
 async def api_cameras():
     """Return available cameras as defined in .env (env vars)."""
-    return cameras_from_env()
+    logger.info("🔍 API /api/cameras вызван")
+    result = cameras_from_env()
+    logger.info(f"📹 API возвращает камеры: {result}")
+    return result
 
 # Moved to api/endpoints/stream.py
 # @app.get("/api/stream/{stream_id}/info")
