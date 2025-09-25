@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PigWeight MVP</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
   <link rel="stylesheet" href="/static/css/events.css">
   <style>
@@ -3136,6 +3136,8 @@
     function loadChartJS() {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+      // Отключаем source maps для избежания CSP предупреждений
+      script.crossOrigin = 'anonymous';
       script.onload = function() {
         console.log('Chart.js загружен успешно');
       };

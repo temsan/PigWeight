@@ -934,9 +934,9 @@ async def _global_infer_loop(self):
                     self.last_masks = result.masks
                     
                     # Отладочная информация для масок (только при DEBUG)
-                    if result.masks and CONFIG.DEBUG:
+                    if result.masks and config.DEBUG:
                         logger.debug(f"[{self.stream_id}] Получены маски: {len(result.masks)} шт.")
-                    elif not result.masks and CONFIG.DEBUG:
+                    elif not result.masks and config.DEBUG:
                         logger.debug(f"[{self.stream_id}] Маски не найдены в результате")
 
                     # 3. Update statistics and broadcast (existing logic)
@@ -999,12 +999,12 @@ async def _global_infer_loop(self):
             except Exception as e:
                 logger.error(f"Infer loop error on {self.stream_id}: {e}", exc_info=True)
             
-            # Adaptive sleep
-            delay = 0.15
+            # Оптимизированная задержка для высокой производительности
+            delay = 0.033  # ~30 FPS базовый
             if self.last_count > 0:
-                delay = 0.08
+                delay = 0.025  # ~40 FPS при детекции
             if self._recent_crossings and any((time.time() - float(c.get("ts", 0))) < 0.8 for c in self._recent_crossings):
-                delay = 0.05
+                delay = 0.016  # ~60 FPS при активности
             await asyncio.sleep(delay)
 
     
@@ -1150,7 +1150,7 @@ class FileStream(VideoStream):
                         pass
                 else:
                     break # Assume EOF
-                await asyncio.sleep(1.0 / self.fps)
+                await asyncio.sleep(1.0 / self.fps)  # Оптимизировано: 1/30 = 0.033s
         except Exception as e:
             logger.error(f"File stream {self.stream_id} error: {e}")
         finally:

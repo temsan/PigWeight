@@ -23,9 +23,12 @@ def setup_security_headers(app: FastAPI):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         
-        # Content Security Policy (разрешаем CDN для Chart.js и HLS.js)
-        csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:;"
+        # Content Security Policy (разрешаем CDN для Chart.js и HLS.js, блокируем source maps)
+        csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:;"
         response.headers["Content-Security-Policy"] = csp
+        
+        # Отключаем source maps для предотвращения CSP предупреждений
+        response.headers["SourceMap"] = "none"
         
         # HTTPS-only в продакшене
         if os.getenv("ENVIRONMENT", "development") == "production":

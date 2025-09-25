@@ -60,13 +60,13 @@ class Config:
 
     # Inference
     IMG_SIZE: int = 960
-    BATCH_SIZE: int = 4
+    BATCH_SIZE: int = 8  # Увеличено для лучшей производительности
     MAX_WAIT_MS: int = 50
 
     # Video
-    FPS: int = 12
-    JPEG_QUALITY: int = 80
-    TARGET_FPS: int = 12
+    FPS: int = 30  # Увеличено для плавного видео
+    JPEG_QUALITY: int = 85  # Улучшено качество
+    TARGET_FPS: int = 30  # Увеличено для плавного видео
     CAM_DEFAULT: str = "rtsp://rtsp:Qwerty.12!@10.15.6.27:554/ISAPI/Streaming/Channels/101"
     CAM_URL: Optional[str] = None
 
