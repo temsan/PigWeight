@@ -886,7 +886,8 @@ async def _global_infer_loop(self):
             try:
                 frame_data = await self.get_frame_data()
                 if not frame_data or not frame_data.get('jpeg'):
-                    await asyncio.sleep(0.1)
+                    # Минимальная задержка для стабильности
+                    await asyncio.sleep(0.001)  # 1ms
                     continue
 
                 jpeg = frame_data['jpeg']
@@ -987,13 +988,8 @@ async def _global_infer_loop(self):
             except Exception as e:
                 logger.error(f"Infer loop error on {self.stream_id}: {e}", exc_info=True)
             
-            # Оптимизированная задержка для высокой производительности
-            delay = 0.033  # ~30 FPS базовый
-            if self.last_count > 0:
-                delay = 0.025  # ~40 FPS при детекции
-            if self._recent_crossings and any((time.time() - float(c.get("ts", 0))) < 0.8 for c in self._recent_crossings):
-                delay = 0.016  # ~60 FPS при активности
-            await asyncio.sleep(delay)
+            # Минимальная задержка для стабильности
+            await asyncio.sleep(0.001)  # 1ms для предотвращения перегрузки CPU
 
     
 
@@ -1007,20 +1003,8 @@ class RtspStream(VideoStream):
             self.running = True
             self._stream_task = asyncio.create_task(self._stream_loop())
             self._infer_task = asyncio.create_task(self._infer_loop())
-
-    async def start(self):
-        if not getattr(self, 'running', False):
-            self.running = True
-            self._stream_task = asyncio.create_task(self._stream_loop())
-            self._infer_task = asyncio.create_task(self._infer_loop())
         self.fps = 25.0  # Default RTSP framerate
         self.current_time = 0.0
-
-    async def start(self):
-        if not getattr(self, 'running', False):
-            self.running = True
-            self._stream_task = asyncio.create_task(self._stream_loop())
-            self._infer_task = asyncio.create_task(self._infer_loop())
 
     async def _stream_loop(self):
         try:
@@ -1049,11 +1033,11 @@ class RtspStream(VideoStream):
                     except Exception:
                         pass
                     
-                    # Adaptive sleep based on FPS
-                    await asyncio.sleep(1.0 / self.fps)
+                    # Убрана задержка для максимальной производительности
+                    # await asyncio.sleep(1.0 / self.fps)
                 else:
-                    # No frame received, wait a bit and retry
-                    await asyncio.sleep(0.1)
+                    # Минимальная задержка для стабильности
+                    await asyncio.sleep(0.001)  # 1ms
         except Exception as e:
             logger.error(f"RTSP stream {self.stream_id} error: {e}")
         finally:
@@ -1138,7 +1122,8 @@ class FileStream(VideoStream):
                         pass
                 else:
                     break # Assume EOF
-                await asyncio.sleep(1.0 / self.fps)  # Оптимизировано: 1/30 = 0.033s
+                # Минимальная задержка для стабильности
+                await asyncio.sleep(0.001)  # 1ms
         except Exception as e:
             logger.error(f"File stream {self.stream_id} error: {e}")
         finally:

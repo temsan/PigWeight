@@ -60,13 +60,13 @@ class Config:
 
     # Inference
     IMG_SIZE: int = 960
-    BATCH_SIZE: int = 8  # Увеличено для лучшей производительности
+    BATCH_SIZE: int = 4  # Оптимизировано для стабильности
     MAX_WAIT_MS: int = 50
 
     # Video
-    FPS: int = 30  # Увеличено для плавного видео
-    JPEG_QUALITY: int = 85  # Улучшено качество
-    TARGET_FPS: int = 30  # Увеличено для плавного видео
+    FPS: int = 25  # Оптимизировано для качества и производительности
+    JPEG_QUALITY: int = 90  # Высокое качество
+    TARGET_FPS: int = 25  # Оптимизировано для качества и производительности
     CAM_DEFAULT: str = ""  # Отключено - камера недоступна
     CAM_URL: Optional[str] = None
 

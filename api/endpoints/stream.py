@@ -26,7 +26,8 @@ async def mjpeg_generator(stream):
         if jpeg:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
-        await asyncio.sleep(1.0 / TARGET_FPS)
+        # Убрана задержка для максимальной производительности
+        # await asyncio.sleep(1.0 / TARGET_FPS)
 
 @router.post("/stream/start")
 async def api_stream_start(stream_id: str, source_uri: str):
