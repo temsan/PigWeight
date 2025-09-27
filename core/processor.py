@@ -228,25 +228,32 @@ class UnifiedVideoProcessor:
                     # Маппинг масок
                     mapped_masks = []
                     raw_masks = result_data.get('masks')
+                    transform_meta = p_data.get('transform_meta')
                     logger.info(f"[{self.stream_id}] 🔍 Raw masks from model: {type(raw_masks)}, count: {len(raw_masks) if raw_masks else 0}")
                     
-                    if raw_masks and p_data.get('transform_meta'):
+                    if raw_masks and transform_meta:
                         logger.info(f"[{self.stream_id}] 📊 Processing {len(raw_masks)} raw masks")
                         mapped_masks = map_polys_from_center_crop(
                             raw_masks,
-                            p_data['transform_meta']
+                            transform_meta
                         )
                         logger.info(f"[{self.stream_id}] ✅ Mapped {len(mapped_masks)} masks")
                     else:
-                        logger.info(f"[{self.stream_id}] ❌ No masks to map - raw_masks: {bool(raw_masks)}, transform_meta: {bool(p_data.get('transform_meta'))}")
-                    
+                        logger.info(f"[{self.stream_id}] ❌ No masks to map - raw_masks: {bool(raw_masks)}, transform_meta: {bool(transform_meta)}")
+                    if transform_meta and 'original_size' in transform_meta:
+                        ow, oh = transform_meta['original_size']
+                        original_shape = (int(round(oh)), int(round(ow)))
+                    else:
+                        img_h, img_w = p_data['img'].shape[:2]
+                        original_shape = (int(img_h), int(img_w))
+
                     frame_result = FrameResult(
                         detections=result_data.get("detections", 0),
                         confidence=result_data.get("confidence", 0.0),
                         masks=mapped_masks,
                         bboxes=result_data.get("bboxes", []),
                         centroids=result_data.get("centroids", []),
-                        original_shape=p_data['transform_meta']['original_size'],
+                        original_shape=original_shape,
                         preprocessed_shape=p_data['img'].shape[:2],
                         timestamp=timestamp
                     )

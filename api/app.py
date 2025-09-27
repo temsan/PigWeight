@@ -918,16 +918,33 @@ async def _global_infer_loop(self):
                     await self._update_line_counters(ids, centroids_x_norm, centroids_y_norm)
                     
                     self.last_count = result.detections
-                    self.last_masks = result.masks
-                    
-                    # Отладочная информация для масок (временно включено для диагностики)
-                    if result.masks:
-                        logger.info(f"[{self.stream_id}] ✅ Получены маски: {len(result.masks)} шт.")
-                        if len(result.masks) > 0:
-                            logger.info(f"[{self.stream_id}] 📊 Первая маска: {type(result.masks[0])}, размер: {len(result.masks[0]) if hasattr(result.masks[0], '__len__') else 'N/A'}")
-                    else:
-                        logger.info(f"[{self.stream_id}] ❌ Маски не найдены в результате инференса")
+                    try:
+                        height = max(1.0, float(H0))
+                        width = max(1.0, float(W0))
+                    except Exception:
+                        height = width = 1.0
+                    normalized_masks = []
+                    for poly in (result.masks or []):
+                        try:
+                            norm_poly = []
+                            for point in poly:
+                                x = float(point[0]) / width
+                                y = float(point[1]) / height
+                                x = max(0.0, min(1.0, x))
+                                y = max(0.0, min(1.0, y))
+                                norm_poly.append([x, y])
+                            if norm_poly:
+                                normalized_masks.append(norm_poly)
+                        except Exception:
+                            continue
+                    self.last_masks = normalized_masks
 
+                    # Экспорт полученных масок для диагностики
+                    if self.last_masks:
+                        logger.info(f"[{self.stream_id}] ⚠ Получено масок: {len(self.last_masks)} шт.")
+                        logger.info(f"[{self.stream_id}] ❓ Первая маска: {type(self.last_masks[0])}, точек: {len(self.last_masks[0]) if hasattr(self.last_masks[0], '__len__') else 'N/A'}")
+                    else:
+                        logger.info(f"[{self.stream_id}] ⚠ Маски не поступили в этом результате")
                     # 3. Update statistics and broadcast (existing logic)
                     wnd_max = self.window_max.update(result.timestamp, int(self.last_count))
                     est = max(self.reported_count, wnd_max)
@@ -1330,7 +1347,7 @@ app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_r
 
 # Initialize shared dependencies
 from api.dependencies import init_dependencies
-init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta)
+init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta, RECORDS_DIR)
 
 # Setup middleware
 from api.middleware import setup_cors, setup_error_handling, setup_request_logging, setup_security_headers
@@ -1340,13 +1357,15 @@ setup_request_logging(app)
 setup_security_headers(app)
 
 # Подключаем эндпоинты из модулей
-from api.endpoints import video, stream, health, files, diagnostics, events
+from api.endpoints import video, stream, health, files, diagnostics, events, records, verification
 app.include_router(health.router, tags=["health"])
 app.include_router(video.router, tags=["video"])
 app.include_router(stream.router, tags=["stream"])
 app.include_router(files.router, tags=["files"])
 app.include_router(diagnostics.router, tags=["diagnostics"])
 app.include_router(events.router, tags=["events"])
+app.include_router(records.router, tags=["records"])
+app.include_router(verification.router, tags=["verification"])
 
 # Include WebRTC routes
 from api import webrtc
@@ -1407,152 +1426,6 @@ async def api_cameras():
 
 # Moved to api/endpoints/stream.py
 # @app.get("/api/stream/{stream_id}/info")
-
-# --- Records API for dashboard ---
-@app.get("/api/records")
-async def api_records_list():
-    try:
-        items = []
-        for p in sorted(RECORDS_DIR.glob("act_*.json")):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    js = json.load(f)
-                items.append({
-                    "act_file": p.name,
-                    **js
-                })
-            except Exception:
-                continue
-        return sorted(items, key=lambda x: x.get("finished_at", 0), reverse=True)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.get("/api/records/{act_name}")
-async def api_record_details(act_name: str):
-    try:
-        # Sanitize filename
-        if ".." in act_name or "/" in act_name or "\\" in act_name:
-            raise HTTPException(status_code=400, detail="Invalid act name")
-        p = RECORDS_DIR / act_name
-        if not p.exists() or not p.is_file():
-            raise HTTPException(status_code=404, detail="Record not found")
-        
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        # Check for SVG and encode if exists
-        svg_path = p.with_suffix(".svg")
-        if svg_path.exists():
-            import base64
-            svg_content = svg_path.read_text(encoding="utf-8")
-            data["svg"] = "data:image/svg+xml;base64," + base64.b64encode(svg_content.encode('utf-8')).decode('utf-8')
-            
-        return data
-    except HTTPException:
-        raise
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-# --- Verification API ---
-@app.get("/api/verification/grouped")
-async def api_verification_grouped():
-    """Группирует все акты по датам и отдает сводную статистику."""
-    try:
-        all_acts = await api_records_list()
-        if isinstance(all_acts, JSONResponse):
-            return all_acts # Propagate errors
-
-        grouped = {}
-        summary = {"total_acts": 0, "verified_acts": 0, "discrepancy_acts": 0}
-
-        for act in all_acts:
-            if act.get("status") != "success": continue
-            
-            # Определяем дату
-            ts = act.get("finished_at")
-            if not ts:
-                date_key = "unknown"
-            else:
-                date_key = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
-
-            if date_key not in grouped:
-                grouped[date_key] = {
-                    "acts": [], "total_acts": 0, "verified_acts": 0, 
-                    "discrepancy_acts": 0, "total_pigs": 0, "total_duration": 0
-                }
-            
-            # Проверяем верификацию
-            verified = act.get("verification", {}).get("verified", False)
-            act["verification"] = {"verified": verified} # Упрощаем для фронтенда
-            
-            # Обновляем счетчики
-            summary["total_acts"] += 1
-            grouped[date_key]["total_acts"] += 1
-            grouped[date_key]["total_pigs"] += act.get("seen_total", 0)
-            grouped[date_key]["total_duration"] += act.get("duration_sec", 0)
-            
-            if verified:
-                summary["verified_acts"] += 1
-                grouped[date_key]["verified_acts"] += 1
-            else:
-                summary["discrepancy_acts"] += 1
-                grouped[date_key]["discrepancy_acts"] += 1
-                
-            grouped[date_key]["acts"].append(act)
-
-        # Сортируем даты
-        sorted_dates = sorted(grouped.keys(), reverse=True)
-        sorted_grouped = {d: grouped[d] for d in sorted_dates}
-
-        # Считаем среднюю длительность
-        for date_key, group_data in sorted_grouped.items():
-            if group_data["total_acts"] > 0:
-                group_data["avg_duration"] = group_data["total_duration"] / group_data["total_acts"]
-            else:
-                group_data["avg_duration"] = 0
-
-        return {"summary": summary, "grouped_by_date": sorted_grouped}
-
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.get("/api/verification/report")
-async def api_generate_verification_report():
-    """Генерирует текстовый отчет по верификации."""
-    try:
-        data = await api_verification_grouped()
-        if isinstance(data, JSONResponse):
-            return data
-
-        report = {
-            "generated_at": datetime.now().isoformat(),
-            "summary": {
-                "total_acts": data["summary"]["total_acts"],
-                "verified_acts": data["summary"]["verified_acts"],
-                "discrepancy_acts": data["summary"]["discrepancy_acts"],
-                "total_pigs_counted": sum(g["total_pigs"] for g in data["grouped_by_date"].values()),
-                "verification_rate": (data["summary"]["verified_acts"] / data["summary"]["total_acts"] * 100) if data["summary"]["total_acts"] > 0 else 0
-            },
-            "issues": []
-        }
-
-        for date_key, group in data["grouped_by_date"].items():
-            for act in group["acts"]:
-                if not act.get("verification", {}).get("verified"):
-                    report["issues"].append({
-                        "act_file": act["act_file"],
-                        "date": date_key,
-                        "left_count": act.get("flow", {}).get("left_in", 0),
-                        "right_count": act.get("flow", {}).get("right_in", 0),
-                        "difference": abs(act.get("flow", {}).get("left_in", 0) - act.get("flow", {}).get("right_in", 0)),
-                        "status": "Расхождение"
-                    })
-        
-        return report
-
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
 
 @app.post("/api/lines")
 async def api_set_lines(data: Dict[str, float]):

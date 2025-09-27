@@ -27,6 +27,8 @@ class EventData:
     pig_count: int
     confidence: float
     frame_path: Optional[str] = None
+    side: Optional[str] = None
+    movement: Optional[str] = None
     metadata: Dict[str, Any] = None
     
     def to_dict(self) -> Dict[str, Any]:
@@ -148,36 +150,58 @@ class EventLogger:
                                confidence: float,
                                frame: Optional[np.ndarray] = None,
                                metadata: Optional[Dict[str, Any]] = None):
-        """Логирует событие пересечения линии"""
-        
+        """Фиксация события пересечения контрольной линии."""
+
         event_id = self._generate_event_id()
         frame_path = None
-        
+
         if frame is not None:
             frame_path = self._save_frame(frame, event_id)
-        
+
+        meta = dict(metadata or {})
+        side = meta.get("side")
+        direction = meta.get("direction")
+        movement = None
+        if side and direction:
+            if side == "left" and direction == "enter":
+                movement = "left_to_right"
+            elif side == "left" and direction == "exit":
+                movement = "right_to_left"
+            elif side == "right" and direction == "enter":
+                movement = "right_to_left"
+            elif side == "right" and direction == "exit":
+                movement = "left_to_right"
+        if movement:
+            meta.setdefault("movement", movement)
+            meta.setdefault("direction_label", movement)
+
         event = EventData(
             event_id=event_id,
             stream_id=stream_id,
-            event_type='line_crossing',
+            event_type="line_crossing",
             timestamp=time.time(),
             pig_count=pig_count,
             confidence=confidence,
             frame_path=frame_path,
-            metadata=metadata or {}
+            side=side,
+            movement=movement,
+            metadata=meta
         )
-        
-        # Добавляем в память
+
+        # Буферизуем в памяти
         if stream_id not in self.stream_events:
             self.stream_events[stream_id] = deque(maxlen=self.max_events_per_stream)
-        
+
         self.stream_events[stream_id].append(event)
-        
-        # Сохраняем на диск
-        self._save_event_to_file(stream_id, event)
-        
-        logger.info(f"Line crossing logged: stream={stream_id}, count={pig_count}, confidence={confidence:.2f}")
-    
+
+        # Сохраняем на диск в потоке ввода-вывода
+        await asyncio.to_thread(self._save_event_to_file, stream_id, event)
+
+        if movement:
+            logger.info(f"Line crossing logged: stream={stream_id}, movement={movement}, count={pig_count}")
+        else:
+            logger.info(f"Line crossing logged: stream={stream_id}, count={pig_count}, confidence={confidence:.2f}")
+
     async def log_peak_count(self, 
                             stream_id: str, 
                             pig_count: int, 
@@ -217,8 +241,8 @@ class EventLogger:
         
         self.stream_events[stream_id].append(event)
         
-        # Сохраняем на диск
-        self._save_event_to_file(stream_id, event)
+        # Сохраняем на диск в фоне
+        await asyncio.to_thread(self._save_event_to_file, stream_id, event)
         
         logger.info(f"Peak count logged: stream={stream_id}, new_peak={pig_count}, previous={current_peak}")
     
@@ -257,8 +281,8 @@ class EventLogger:
         
         self.stream_events[stream_id].append(event)
         
-        # Сохраняем на диск
-        self._save_event_to_file(stream_id, event)
+        # Сохраняем на диск в фоне
+        await asyncio.to_thread(self._save_event_to_file, stream_id, event)
         
         logger.info(f"Activity spike logged: stream={stream_id}, count={pig_count}")
     
