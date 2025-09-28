@@ -390,8 +390,8 @@ class ModelAdapter:
         else:
             # Для CPU: предпочитаем ONNX, потом PyTorch
             candidates = [
+                f"{base_path}.pt",
                 f"{base_path}.onnx",
-                f"{base_path}.pt", 
                 model_path  # Исходный путь как fallback
             ]
         
