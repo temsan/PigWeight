@@ -3,7 +3,7 @@
 ## ✅ Что было внедрено
 
 ### 1. **Новая оптимизированная предобработка**
-- 📁 `core/optimized_preprocess.py` - новые алгоритмы предобработки
+- 📁 `core/preprocess.py` - новые алгоритмы предобработки
 - 🎯 **Center crop с черными полосами** - соответствует датасету
 - 🔄 **Adaptive preprocessing** - автоматический выбор метода
 - 📏 **Letterbox fallback** - для совместимости
@@ -22,7 +22,6 @@
 
 ```env
 # Оптимизированная предобработка
-USE_OPTIMIZED_PREPROCESSING=true   # Включить новую предобработку
 PREPROCESSING_METHOD=adaptive      # Метод: adaptive, center_crop, letterbox
 ANTI_LETTERBOX=false              # Отключить для избежания конфликтов
 ```
@@ -43,14 +42,12 @@ ANTI_LETTERBOX=false              # Отключить для избежания
 cp config.env.example .env
 
 # Или добавьте в существующий .env:
-echo "USE_OPTIMIZED_PREPROCESSING=true" >> .env
 echo "PREPROCESSING_METHOD=adaptive" >> .env  
 echo "ANTI_LETTERBOX=false" >> .env
 ```
 
 ### Вариант 2: Через переменные окружения
 ```bash
-export USE_OPTIMIZED_PREPROCESSING=true
 export PREPROCESSING_METHOD=adaptive
 export ANTI_LETTERBOX=false
 ```
@@ -58,10 +55,9 @@ export ANTI_LETTERBOX=false
 ### Вариант 3: Временное тестирование
 ```bash
 # Запуск с оптимизированной предобработкой
-USE_OPTIMIZED_PREPROCESSING=true python main.py
+PREPROCESSING_METHOD=adaptive python main.py
 
 # Запуск со старой предобработкой
-USE_OPTIMIZED_PREPROCESSING=false python main.py
 ```
 
 ## 📊 Ожидаемые результаты
@@ -104,12 +100,11 @@ python test_inference_integration.py
 ### ⚠️ Конфликт настроек
 Система автоматически предупредит о конфликте:
 ```
-⚠️  ANTI_LETTERBOX=true конфликтует с USE_OPTIMIZED_PREPROCESSING=true
+⚠️  ANTI_LETTERBOX=true конфликтует с PREPROCESSING_METHOD=adaptive
    Рекомендуется установить ANTI_LETTERBOX=false для оптимальной работы
 ```
 
 ### 🔄 Обратная совместимость
-- При `USE_OPTIMIZED_PREPROCESSING=false` используется старая логика
 - Все существующие настройки продолжают работать
 - Постепенный переход без разрыва работы
 
@@ -142,7 +137,6 @@ ANTI_LETTERBOX=false
 ## 📋 Чеклист внедрения
 
 - [ ] Скопировать `config.env.example` в `.env`
-- [ ] Установить `USE_OPTIMIZED_PREPROCESSING=true`
 - [ ] Установить `ANTI_LETTERBOX=false`
 - [ ] Запустить тесты: `python test_preprocessing.py`
 - [ ] Запустить систему и проверить логи
@@ -154,3 +148,4 @@ ANTI_LETTERBOX=false
 **Оптимизированная предобработка устраняет критическое несоответствие между обучением и инференсом, что приводит к значительному улучшению качества детекции при снижении вычислительных затрат.**
 
 **Рекомендуется активировать немедленно для получения максимальной пользы от системы PigWeight.**
+

@@ -41,7 +41,6 @@ BATCH_SIZE=8   # Увеличен для лучшей производитель
 MAX_WAIT_MS=50
 
 # Оптимизированная предобработка (НОВОЕ!)
-USE_OPTIMIZED_PREPROCESSING=true   # Включить оптимизированную предобработку
 PREPROCESSING_METHOD=adaptive      # adaptive, center_crop, letterbox
 ANTI_LETTERBOX=false              # Отключить для избежания конфликтов
 
@@ -74,7 +73,6 @@ USE_HALF=true
 BATCH_SIZE=16
 MODEL_PATH=models/pig_yolo11-seg.v4.pt
 # Оптимизированная предобработка
-USE_OPTIMIZED_PREPROCESSING=true
 PREPROCESSING_METHOD=center_crop
 ANTI_LETTERBOX=false
 ```
@@ -86,7 +84,6 @@ USE_HALF=false
 BATCH_SIZE=4
 MODEL_PATH=models/pig_yolo11-seg.onnx
 # Оптимизированная предобработка
-USE_OPTIMIZED_PREPROCESSING=true
 PREPROCESSING_METHOD=adaptive
 ANTI_LETTERBOX=false
 ```

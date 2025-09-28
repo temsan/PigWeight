@@ -1469,12 +1469,12 @@ async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
         if transport == "webrtc":
             # This is a hint to potentially adjust internal settings
             # Could be extended to modify batch sizes, polling rates, etc.
-            logger.info(f"Optimizing stream {stream_id} for WebRTC transport")
-            return {"status": "optimized", "transport": "webrtc"}
+            logger.info(f"Настройка потока {stream_id} под транспорт WebRTC")
+            return {"status": "tuned", "transport": "webrtc"}
 
         return {"status": "no_change", "transport": transport}
     except Exception as e:
-        logger.error(f"Error optimizing stream {stream_id}: {e}")
+        logger.error(f"Error Tuning stream {stream_id}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -1865,12 +1865,12 @@ async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
         if transport == "webrtc":
             # This is a hint to potentially adjust internal settings
             # Could be extended to modify batch sizes, polling rates, etc.
-            logger.info(f"Optimizing stream {stream_id} for WebRTC transport")
-            return {"status": "optimized", "transport": "webrtc"}
+            logger.info(f"Настройка потока {stream_id} под транспорт WebRTC")
+            return {"status": "tuned", "transport": "webrtc"}
 
         return {"status": "no_change", "transport": transport}
     except Exception as e:
-        logger.error(f"Error optimizing stream {stream_id}: {e}")
+        logger.error(f"Error Tuning stream {stream_id}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -2616,3 +2616,6 @@ async def websocket_endpoint(ws: WebSocket, id: str = Query(...)):
             await ws.receive_text() 
     except WebSocketDisconnect:
         await STREAM_MANAGER.unregister_websocket(id, ws)
+
+
+

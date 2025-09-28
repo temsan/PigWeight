@@ -156,7 +156,7 @@ async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
         # WebRTC optimization logic would go here
         # For now, just return success
         return {
-            "status": "optimized",
+            "status": "tuned",
             "transport": transport,
             "stream_id": stream_id
         }
@@ -180,3 +180,4 @@ async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Bod
         }
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+

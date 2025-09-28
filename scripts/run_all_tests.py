@@ -74,7 +74,7 @@ class TestSuite:
             # Проверка оптимизированных endpoints
             response = requests.get(f"{self.base_url}/api/v2/status", timeout=10)
             if response.status_code != 200:
-                logger.error(f"Optimized API not ready: {response.status_code}")
+                logger.error(f"Stream API not ready: {response.status_code}")
                 return False
                 
             logger.info("✅ Система готова к тестированию")

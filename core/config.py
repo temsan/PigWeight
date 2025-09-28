@@ -81,10 +81,9 @@ class Config:
     CROSS_COOLDOWN_SEC: float = 1.0
 
     # Preprocessing
-    USE_OPTIMIZED_PREPROCESSING: bool = True
     PREPROCESSING_METHOD: str = "adaptive"
     ANTI_LETTERBOX: bool = False
-    
+
     def __post_init__(self):
         """Load values from environment variables after initialization."""
         for f in self.__dataclass_fields__:
@@ -178,7 +177,7 @@ def setup_logging(debug: bool = False) -> logging.Logger:
             "core.processor", "core.frame_broker", "core.dynamic_batcher",
             "core.performance_monitor", "core.priority_frame_queue",
             "core.demo_generator", "core.h264_direct_track",
-            "api.app_backup", "api.simple_endpoints", "api.optimized_endpoints",
+            "api.app_backup", "api.simple_endpoints",
             "api.webrtc", "api.av_worker", "api.app_modular",
             "perf.api", "perf.webrtc", "perf.results_store", "perf.frame_broker"
         ]

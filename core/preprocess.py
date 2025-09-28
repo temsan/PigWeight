@@ -125,3 +125,114 @@ def map_polys_from_center_crop(polys, transform_meta: Dict[str, Any]) -> list:
             mapped_polys.append(new_poly)
 
     return mapped_polys
+
+
+def center_crop_resize(frame: np.ndarray, target_size: int = 960) -> Dict[str, Any]:
+    """Центрирует кадр, приводит его к квадрату target_size и возвращает метаданные."""
+    h, w = frame.shape[:2]
+    crop_size = min(h, w)
+    start_x = max(0, (w - crop_size) // 2)
+    start_y = max(0, (h - crop_size) // 2)
+    cropped = frame[start_y:start_y + crop_size, start_x:start_x + crop_size]
+
+    if cropped.shape[0] != target_size:
+        resized = cv2.resize(cropped, (target_size, target_size))
+    else:
+        resized = cropped
+
+    padding_height = int(round(target_size * 0.075))
+    if padding_height > 0:
+        final_img = np.zeros((target_size, target_size, 3), dtype=np.uint8)
+        content_start = padding_height
+        content_end = target_size - padding_height
+        content_height = max(1, content_end - content_start)
+        content_resized = cv2.resize(resized, (target_size, content_height))
+        final_img[content_start:content_end, :, :] = content_resized
+    else:
+        final_img = resized
+
+    transform_meta = {
+        'original_size': (w, h),
+        'crop_box': (start_x, start_y, crop_size, crop_size),
+        'resize_target': target_size,
+        'final_content_box': (0, padding_height, target_size, target_size - 2 * padding_height),
+    }
+
+    return {
+        'img': final_img,
+        'method': 'center_crop_with_padding',
+        'transform_meta': transform_meta,
+    }
+
+
+def letterbox_resize(frame: np.ndarray, target_size: int = 960) -> Dict[str, Any]:
+    """Выполняет letterbox-ресайз с сохранением пропорций и полями."""
+    h, w = frame.shape[:2]
+    scale = float(target_size) / max(h, w)
+    new_w = int(round(w * scale))
+    new_h = int(round(h * scale))
+    resized = cv2.resize(frame, (new_w, new_h))
+
+    pad_w = target_size - new_w
+    pad_h = target_size - new_h
+    top = pad_h // 2
+    bottom = pad_h - top
+    left = pad_w // 2
+    right = pad_w - left
+
+    img = cv2.copyMakeBorder(
+        resized,
+        top,
+        bottom,
+        left,
+        right,
+        cv2.BORDER_CONSTANT,
+        value=[0, 0, 0],
+    )
+
+    return {
+        'img': img,
+        'method': 'letterbox',
+        'scale': scale,
+        'pad': (top, bottom, left, right),
+        'original_size': (w, h),
+    }
+
+
+def adaptive_preprocess(
+    frame: np.ndarray,
+    target_size: int = 960,
+    force_method: str | None = None,
+) -> Dict[str, Any]:
+    """Подбирает стратегию предобработки: центр-кроп или letterbox."""
+    if force_method == 'center_crop':
+        return center_crop_resize(frame, target_size)
+    if force_method == 'letterbox':
+        return letterbox_resize(frame, target_size)
+
+    h, _w = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    row_mean = gray.mean(axis=1)
+
+    top_black_rows = 0
+    for value in row_mean:
+        if value < 15:
+            top_black_rows += 1
+        else:
+            break
+
+    bottom_black_rows = 0
+    for value in reversed(row_mean):
+        if value < 15:
+            bottom_black_rows += 1
+        else:
+            break
+
+    total_black = top_black_rows + bottom_black_rows
+    if total_black > h * 0.05:
+        y0 = top_black_rows
+        y1 = h - bottom_black_rows
+        cropped_frame = frame[y0:y1, :, :]
+        return center_crop_resize(cropped_frame, target_size)
+
+    return letterbox_resize(frame, target_size)

@@ -118,8 +118,8 @@ class PerformanceValidator:
                 
             # Проверка оптимизированных компонентов
             system_info = requests.get(f"{self.base_url}/api/v2/system/info", timeout=10)
-            if not system_info.json().get('optimized_components', False):
-                raise RuntimeError("Оптимизированные компоненты недоступны")
+            if not system_info.json().get('components_ready', False):
+                raise RuntimeError("Система не подтвердила готовность компонентов")
                 
             logger.info("✅ Система готова к тестированию")
             
@@ -568,3 +568,4 @@ async def main():
 if __name__ == "__main__":
     exit_code = asyncio.run(main())
     exit(exit_code)
+

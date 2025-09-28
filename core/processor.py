@@ -13,7 +13,7 @@ import numpy as np
 
 from core.config import CONFIG
 from services.model_adapter import ModelAdapter
-from core.optimized_preprocess import center_crop_resize
+from core.preprocess import center_crop_resize
 from core.preprocess import map_polys_from_center_crop
 from core.dynamic_batcher import DynamicBatcher, BatcherConfig
 
@@ -306,3 +306,4 @@ async def reset_processors():
         for stream_id in list(_PROCESSORS.keys()):
             processor = _PROCESSORS.pop(stream_id)
             await processor.stop()
+
