@@ -57,6 +57,11 @@ class PigWeightApp {
         this.websocket.on('count_update', (data) => {
             this.ui.updateCounters(data);
             this.chart.updateChart(data);
+            
+            // Передаем данные масок в VideoManager для overlay
+            if (data.debug && (data.debug.masks || data.debug.ids)) {
+                this.video.scheduleOverlay(data.debug.masks, data.debug.ids);
+            }
         });
         
         // UI -> Video управление
@@ -64,9 +69,20 @@ class PigWeightApp {
             this.video.handleControl(action, data);
         });
         
+        // UI -> Video передача пересечений для всплывающих счетчиков
+        this.ui.on('crossings_update', (crossings) => {
+            this.video.handleCrossings(crossings);
+        });
+        
         // Video -> WebSocket стрим
         this.video.on('stream_change', (streamId) => {
             this.websocket.switchStream(streamId);
+        });
+        
+        // WebSocket подключение при запуске стрима
+        this.video.on('stream_start', (streamId) => {
+            console.log(`🔔 Подключаем WebSocket к стриму: ${streamId}`);
+            this.websocket.connect(streamId);
         });
         
         // UI -> Journal операции

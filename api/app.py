@@ -499,6 +499,19 @@ class VideoStream(abc.ABC):
         self._display_label_map = {}
         self._next_display_label = 1
 
+    def _get_current_line_positions(self) -> Dict[str, float]:
+        """Возвращает текущие позиции линий (локальные или глобальные)"""
+        if hasattr(self, 'line_positions') and self.line_positions:
+            return {
+                "left_x": float(self.line_positions.get('left_x', config.LINE_LEFT_X)),
+                "right_x": float(self.line_positions.get('right_x', config.LINE_RIGHT_X))
+            }
+        else:
+            return {
+                "left_x": float(config.LINE_LEFT_X),
+                "right_x": float(config.LINE_RIGHT_X)
+            }
+    
     def _finalize_act_to_files(self):
         try:
             if not self._act_timeline:
@@ -609,8 +622,16 @@ class VideoStream(abc.ABC):
         """
         async with self.lock:
             now = time.time()
-            L = config.LINE_LEFT_X
-            R = config.LINE_RIGHT_X
+            
+            # Используем локальные позиции линий, если они есть, иначе глобальные
+            if hasattr(self, 'line_positions') and self.line_positions:
+                L = float(self.line_positions.get('left_x', config.LINE_LEFT_X))
+                R = float(self.line_positions.get('right_x', config.LINE_RIGHT_X))
+                logger.debug(f"[{self.stream_id}] Используем локальные позиции линий: L={L:.3f}, R={R:.3f}")
+            else:
+                L = config.LINE_LEFT_X
+                R = config.LINE_RIGHT_X
+                logger.debug(f"[{self.stream_id}] Используем глобальные позиции линий: L={L:.3f}, R={R:.3f}")
             cy_iter: List[float] = centers_y if centers_y is not None else [0.5] * len(centers_x)
             
             for tid, cx, cy in zip(ids, centers_x, cy_iter):
@@ -996,7 +1017,8 @@ async def _global_infer_loop(self):
                                 "peak_concurrent": int(self._act_peak),
                                 "duration_sec": float(max(0.0, time.time() - self._act_start_ts))
                             },
-                            "lines": {"left_x": float(config.LINE_LEFT_X), "right_x": float(config.LINE_RIGHT_X)},
+                            # Отправляем актуальные позиции линий (локальные или глобальные)
+                            "lines": self._get_current_line_positions(),
                             "crossings": list(self._recent_crossings)
                         }
                     }
@@ -1866,6 +1888,18 @@ async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Bod
 
         # Также обновляем в текущем стриме
         stream.line_positions = positions
+        
+        # Обновляем позиции линий в процессоре для корректной детекции пересечений
+        try:
+            from core.processor import get_processor
+            processor = await get_processor(stream_id)
+            if processor and processor.is_active:
+                left_x = float(positions.get('left_x', config.LINE_LEFT_X))
+                right_x = float(positions.get('right_x', config.LINE_RIGHT_X))
+                processor.update_line_positions(left_x, right_x)
+                logger.info(f"[успешно] Позиции линий обновлены в процессоре: L={left_x:.3f}, R={right_x:.3f}")
+        except Exception as e:
+            logger.warning(f"[предупреждение] Не удалось обновить позиции линий в процессоре: {e}")
         
         return {"status": "success", "message": f"Line positions saved for {file_key}"}
     except Exception as e:

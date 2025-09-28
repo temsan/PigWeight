@@ -15,7 +15,7 @@ function colorForInstance(instId) {
   return `hsla(${hue}, 65%, 70%, 0.22)`;
 }
 
-function drawOverlay(masks, ids, rect) {
+function drawOverlay(masks, ids, rect, popupCounters) {
   if (!ctx) return;
   const cw = size.w || (canvas && canvas.width) || 0;
   const ch = size.h || (canvas && canvas.height) || 0;
@@ -80,6 +80,43 @@ function drawOverlay(masks, ids, rect) {
     ctx.fillText(label, bx + bw / 2, by + bh / 2);
     ctx.restore();
   }
+  
+  // Отрисовка всплывающих счетчиков
+  if (popupCounters && popupCounters.length > 0) {
+    const now = performance.now();
+    ctx.save();
+    popupCounters.forEach(popup => {
+      const elapsed = now - popup.startTime;
+      const progress = Math.min(1, elapsed / popup.duration);
+      const alpha = 1 - progress;
+      const ease = progress * (2 - progress);
+      
+      const x = popup.x * r.w;
+      const y = popup.y * r.h - ease * popup.riseDistance;
+      const radius = 16;
+      
+      ctx.globalAlpha = Math.max(0, alpha);
+      
+      // Круг фона
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = popup.color;
+      ctx.fill();
+      
+      // Обводка
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.stroke();
+      
+      // Текст
+      ctx.font = '700 14px system-ui, Segoe UI, Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(popup.text, x, y + 1);
+    });
+    ctx.restore();
+  }
 }
 
 onmessage = (e) => {
@@ -93,7 +130,7 @@ onmessage = (e) => {
     if (canvas) { canvas.width = w; canvas.height = h; }
     size = { w, h };
   } else if (data.type === 'overlay') {
-    drawOverlay(data.masks, data.ids, data.rect);
+    drawOverlay(data.masks, data.ids, data.rect, data.popupCounters);
   }
 };
 

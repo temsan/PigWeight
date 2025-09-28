@@ -120,6 +120,11 @@ export class WebSocketManager extends EventEmitter {
         try {
             const data = JSON.parse(event.data);
             
+            // Логируем получение масок для отладки
+            if (data.debug && data.debug.masks && data.debug.masks.length > 0) {
+                console.log(`🎭 Получены маски: ${data.debug.masks.length} шт.`);
+            }
+            
             if (data.type === 'count_update') {
                 this.emit('count_update', data);
             } else {

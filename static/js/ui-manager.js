@@ -165,6 +165,11 @@ export class UIManager extends EventEmitter {
             this.updateActData(data.debug.act);
         }
         
+        // Обрабатываем пересечения линий для всплывающих счетчиков
+        if (data.debug && data.debug.crossings) {
+            this.handleCrossings(data.debug.crossings);
+        }
+        
         // Обновляем форму
         if (data.count !== undefined) {
             this.updateManualForm(data.count);
@@ -260,6 +265,21 @@ export class UIManager extends EventEmitter {
         this.updateCounterElement(this.elements.leftIn, 0);
         this.updateCounterElement(this.elements.rightIn, 0);
         this.updateCounterElement(this.elements.totalCrossings, 0);
+    }
+    
+    // Обработка пересечений линий для всплывающих счетчиков
+    handleCrossings(crossings) {
+        if (!Array.isArray(crossings) || crossings.length === 0) return;
+        
+        // Передам данные о пересечениях в VideoManager для отображения всплывающих счетчиков
+        this.emit('crossings_update', crossings);
+        
+        // Логируем пересечения для отладки
+        crossings.forEach(crossing => {
+            const side = crossing.side || 'unknown';
+            const mode = crossing.mode || 'unknown';
+            console.log(`🚶 Пересечение: ${side} ${mode} на (${crossing.x}, ${crossing.y})`);
+        });
     }
     
     destroy() {

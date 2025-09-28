@@ -181,6 +181,12 @@ class UnifiedVideoProcessor:
         except Exception as e:
             logger.error(f"[{self.stream_id}] Ошибка при обработке событий: {e}")
     
+    def update_line_positions(self, left_x: float, right_x: float):
+        """Обновляет позиции линий для детекции пересечений"""
+        self.line_left_x = float(left_x)
+        self.line_right_x = float(right_x)
+        logger.debug(f"[{self.stream_id}] Обновлены позиции линий: L={self.line_left_x:.3f}, R={self.line_right_x:.3f}")
+    
     def _detect_line_crossing(self, centroids: List[Tuple[float, float]]) -> bool:
         """
         Упрощенная детекция пересечения линий.

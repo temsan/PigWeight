@@ -18,6 +18,7 @@
     }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" crossorigin="anonymous"></script>
+  <script type="module" src="/static/js/app.js"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
   <link rel="stylesheet" href="/static/css/events.css">
   <style>
@@ -27,7 +28,7 @@
     html, body { margin: 0; padding: 0; }
     #main-container { padding-top: 64px; }
     .video-wrapper { position: relative; }
-    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:auto; z-index: 10; background-color: transparent; cursor: crosshair; }
+    #overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:auto; z-index: 15; background-color: transparent; cursor: crosshair; display: block; }
     #videoStream { display: block; width: 100%; height: auto; object-fit: contain; z-index: 1; opacity: 1 !important; }
     /* Align numeric inputs on the weights panel to the right */
     .panel-body input[type="number"] { text-align: right; }
@@ -251,12 +252,12 @@
                   <div class="journal-stat-label">Слева (вход)</div>
                 </div>
                 <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="totalCrossings" style="transition: color 0.3s ease;">0</div>
-                  <div class="journal-stat-label">Всего пересечений</div>
-                </div>
-                <div class="journal-stat-card">
                   <div class="journal-stat-value" id="rightIn" style="transition: color 0.3s ease;">0</div>
                   <div class="journal-stat-label">Справа (вход)</div>
+                </div>
+                <div class="journal-stat-card">
+                  <div class="journal-stat-value" id="totalCrossings" style="transition: color 0.3s ease;">0</div>
+                  <div class="journal-stat-label">Всего пересечений</div>
                 </div>
               </div>
 
@@ -804,7 +805,8 @@
         connectWebSocket(streamId);
         initChart();
         // start overlay loop if not running
-        if (!overlayRaf) overlayRaf = requestAnimationFrame(overlayTick);
+        // Отключаем старую overlay систему - теперь ею управляет модульная система
+        // if (!overlayRaf) overlayRaf = requestAnimationFrame(overlayTick);
         idAliases = loadAliases(streamId);
 
         // Configure seek UI (robust): drive state from /info on every poll
@@ -1040,39 +1042,18 @@
                             console.log("🔍 Маски отладка:", data.debug.masks_debug);
                         }
                     
-                    try {
-                        window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
-                        const now = performance.now();
-                        window.__popups = window.__popups || [];
-                        const prevTs = window.__lastPopupTs || 0;
-                        const cr = window.__lastCrossings;
-                        let maxTs = prevTs;
-                        let enterCounter = 0;
-                        let exitCounter = 0;
-                        // Восстановлено создание всплывающих уведомлений при пересечениях
-                        cr.forEach(c => {
-                            const tsMs = Number(c.ts || 0) * 1000;
-                            if (tsMs > prevTs) {
-                                const side = String(c.side || 'left');
-                                const mode = String(c.mode || 'enter');
-                                const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
-                                if (isPositive) {
-                                    enterCounter++;
-                                } else {
-                                    exitCounter++;
-                                }
-                                const text = isPositive ? `+${enterCounter}` : `-${exitCounter}`;
-                                const color = isPositive ? '#51cf66' : '#ff6b6b';
-                                window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
-                            }
-                            if (tsMs > maxTs) maxTs = tsMs;
-                        });
-                        window.__lastPopupTs = maxTs;
-                    } catch (e) {}
-                    
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
                     
                     if (lastMasks && lastMasks.length) {
+                        // Отправляем пересечения в модульную систему
+                        if (window.appInstance && window.appInstance.videoManager && Array.isArray(data.debug.crossings)) {
+                            try {
+                                window.appInstance.videoManager.handleCrossings(data.debug.crossings);
+                            } catch (error) {
+                                console.warn('Ошибка обработки пересечений:', error);
+                            }
+                        }
+                        
                         scheduleOverlay(lastMasks, lastIds);
                         streamStatus.textContent = 'Live + overlay';
                     }
@@ -1515,6 +1496,15 @@
     function scheduleOverlay(masks, ids) {
         if (performance.now() < overlayBlockUntil) return;
         overlayPending = { masks, ids };
+        
+        // Передаем в модульную систему
+        if (window.appInstance && window.appInstance.videoManager) {
+            try {
+                window.appInstance.videoManager.scheduleOverlay(masks, ids);
+            } catch (error) {
+                console.warn('Ошибка передачи overlay в модульную систему:', error);
+            }
+        }
     }
     function overlayTick() {
         const now = performance.now();
@@ -1921,8 +1911,21 @@
         window.addEventListener('resize', () => { syncOverlaySize(); updateVideoLayout(); });
         setPlaceholder();
         
-        // Initialize overlay system
-        overlayTick(); // Start the overlay rendering loop
+        // Инициализируем модульную систему
+        if (typeof initModularSystem === 'function') {
+            console.log('🚀 Инициализация модульной системы...');
+            initModularSystem();
+        } else {
+            console.warn('⚠️ Модульная система не найдена');
+        }
+        
+        // Инициализируем модульную систему
+        if (typeof initModularSystem === 'function') {
+            console.log('🚀 Инициализация модульной системы...');
+            initModularSystem();
+        } else {
+            console.warn('⚠️ Модульная система не найдена');
+        }
         
         // Initialize fullscreen button icon
         try { setFsState(false); } catch (e) {}
@@ -3127,6 +3130,9 @@
     // Автоматическая диагностика при загрузке страницы
     window.addEventListener('load', () => {
       setTimeout(runQuickDiagnostics, 2000);
+      
+      // Отключаем старую overlay систему в пользу новой модульной
+      console.log('🔄 Используется новая модульная overlay система');
     });
 
   </script>

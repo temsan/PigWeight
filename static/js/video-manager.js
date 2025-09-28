@@ -31,6 +31,7 @@ export class VideoManager extends EventEmitter {
         // Worker для overlay
         this.maskWorker = null;
         this.offscreenCanvas = null;
+        this.overlayRaf = null;
     }
     
     async init() {
@@ -44,6 +45,9 @@ export class VideoManager extends EventEmitter {
         
         // Настраиваем обработчики
         this.setupEventHandlers();
+        
+        // Запускаем overlay луп
+        this.startOverlayLoop();
         
         console.log('✅ Video Manager инициализирован');
     }
@@ -129,6 +133,10 @@ export class VideoManager extends EventEmitter {
     scheduleOverlay(masks, ids) {
         if (performance.now() < this.overlayBlockUntil) return;
         
+        // Сохраняем последние маски для перерисовки
+        this.lastMasks = masks;
+        this.lastIds = ids;
+        
         this.overlayPending = { masks, ids };
         
         if (performance.now() - this.overlayLastDraw > 1000 / this.overlayMaxFps) {
@@ -150,6 +158,7 @@ export class VideoManager extends EventEmitter {
                 type: 'overlay',
                 masks: masks,
                 ids: ids,
+                popupCounters: this.popupCounters || [],
                 rect: { x: 0, y: 0, w: rect.width, h: rect.height }
             });
         } else {
@@ -159,40 +168,44 @@ export class VideoManager extends EventEmitter {
     }
     
     drawOverlayDirect(masks, ids) {
-        if (!this.overlayContext || !masks) return;
+        if (!this.overlayContext) return;
         
         const canvas = this.overlayCanvas;
         const ctx = this.overlayContext;
         
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        if (!Array.isArray(masks) || masks.length === 0) return;
-        
-        masks.forEach((mask, idx) => {
-            if (!Array.isArray(mask) || mask.length < 3) return;
-            
-            const instId = (ids && ids[idx]) ? ids[idx] : (idx + 1);
-            const color = this.getColorForInstance(instId);
-            
-            // Рисуем маску
-            ctx.beginPath();
-            mask.forEach((point, i) => {
-                const x = point[0] * canvas.width;
-                const y = point[1] * canvas.height;
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
+        // Отрисовка масок свиней
+        if (Array.isArray(masks) && masks.length > 0) {
+            masks.forEach((mask, idx) => {
+                if (!Array.isArray(mask) || mask.length < 3) return;
+                
+                const instId = (ids && ids[idx]) ? ids[idx] : (idx + 1);
+                const color = this.getColorForInstance(instId);
+                
+                // Рисуем маску
+                ctx.beginPath();
+                mask.forEach((point, i) => {
+                    const x = point[0] * canvas.width;
+                    const y = point[1] * canvas.height;
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                ctx.closePath();
+                
+                ctx.fillStyle = color;
+                ctx.fill();
+                
+                // Рисуем label
+                this.drawInstanceLabel(ctx, mask, instId, canvas.width, canvas.height);
             });
-            ctx.closePath();
-            
-            ctx.fillStyle = color;
-            ctx.fill();
-            
-            // Рисуем label
-            this.drawInstanceLabel(ctx, mask, instId, canvas.width, canvas.height);
-        });
+        }
+        
+        // Отрисовка всплывающих счетчиков
+        this.drawPopupCounters(ctx, canvas.width, canvas.height);
     }
     
     getColorForInstance(instId) {
@@ -237,6 +250,46 @@ export class VideoManager extends EventEmitter {
         ctx.restore();
     }
     
+    drawPopupCounters(ctx, canvasWidth, canvasHeight) {
+        if (!this.popupCounters || this.popupCounters.length === 0) return;
+        
+        const now = performance.now();
+        
+        ctx.save();
+        this.popupCounters.forEach(popup => {
+            const elapsed = now - popup.startTime;
+            const progress = Math.min(1, elapsed / popup.duration);
+            const alpha = 1 - progress;
+            const ease = progress * (2 - progress); // Плавная анимация
+            
+            const x = popup.x * canvasWidth;
+            const y = popup.y * canvasHeight - ease * popup.riseDistance;
+            const radius = 16;
+            
+            // Применяем прозрачность
+            ctx.globalAlpha = Math.max(0, alpha);
+            
+            // Рисуем круг фона
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = popup.color;
+            ctx.fill();
+            
+            // Рисуем обводку
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx.stroke();
+            
+            // Рисуем текст
+            ctx.font = '700 14px system-ui, Segoe UI, Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#fff';
+            ctx.fillText(popup.text, x, y + 1);
+        });
+        ctx.restore();
+    }
+    
     handleControl(action, data) {
         switch (action) {
             case 'play':
@@ -276,6 +329,7 @@ export class VideoManager extends EventEmitter {
         this.activeStreamId = streamId;
         this.hasFirstFrame = false;
         this.emit('stream_change', streamId);
+        this.emit('stream_start', streamId);
     }
     
     clearOverlay() {
@@ -293,7 +347,98 @@ export class VideoManager extends EventEmitter {
         }
     }
     
+    startOverlayLoop() {
+        // Инициализируем основной луп overlay рендеринга
+        if (!this.overlayRaf) {
+            console.log('🎆 Запуск overlay лупа');
+            this.overlayTick();
+        }
+    }
+    
+    overlayTick() {
+        const now = performance.now();
+        const minDt = 1000 / this.overlayMaxFps;
+        
+        // Обрабатываем очередь overlay, если есть отложенные задачи
+        if (this.overlayPending && (now - this.overlayLastDraw >= minDt)) {
+            this.drawOverlay();
+        }
+        // Перерисовываем последние маски, если нет отложенных задач
+        else if (!this.overlayPending && this.lastMasks && (now - this.overlayLastDraw >= minDt)) {
+            this.drawOverlayDirect(this.lastMasks, this.lastIds);
+            this.overlayLastDraw = now;
+        }
+        
+        // Обрабатываем всплывающие счетчики
+        this.updatePopupCounters(now);
+        
+        this.overlayRaf = requestAnimationFrame(() => this.overlayTick());
+    }
+    
+    handleCrossings(crossings) {
+        // Обрабатываем пересечения линий для создания всплывающих счетчиков
+        if (!Array.isArray(crossings) || crossings.length === 0) return;
+        
+        const now = performance.now();
+        
+        // Инициализируем массив всплывающих счетчиков
+        if (!this.popupCounters) {
+            this.popupCounters = [];
+        }
+        
+        // Отслеживаем последний timestamp для избежания дубликатов
+        const prevTs = this.lastPopupTimestamp || 0;
+        let maxTs = prevTs;
+        
+        crossings.forEach(crossing => {
+            const tsMs = Number(crossing.ts || 0) * 1000;
+            if (tsMs > prevTs) {
+                const side = String(crossing.side || 'left');
+                const mode = String(crossing.mode || 'enter');
+                const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
+                
+                const text = isPositive ? '+1' : '-1';
+                const color = isPositive ? '#51cf66' : '#ff6b6b';
+                
+                this.popupCounters.push({
+                    x: Number(crossing.x || 0.5),
+                    y: Number(crossing.y || 0.5),
+                    text: text,
+                    color: color,
+                    startTime: now,
+                    duration: 1200,
+                    riseDistance: 40
+                });
+                
+                console.log(`🎆 Создан всплывающий счетчик: ${text} на (${crossing.x}, ${crossing.y})`);
+            }
+            if (tsMs > maxTs) maxTs = tsMs;
+        });
+        
+        this.lastPopupTimestamp = maxTs;
+    }
+    
+    updatePopupCounters(now) {
+        if (!this.popupCounters || this.popupCounters.length === 0) return;
+        
+        // Фильтруем активные счетчики (не истекшие)
+        this.popupCounters = this.popupCounters.filter(popup => {
+            return (now - popup.startTime) < popup.duration;
+        });
+        
+        // Если есть активные счетчики, перерисовываем overlay
+        if (this.popupCounters.length > 0) {
+            // Принудительно перерисовываем для обновления всплывающих счетчиков
+            this.scheduleOverlay(this.lastMasks, this.lastIds);
+        }
+    }
+    
     destroy() {
+        if (this.overlayRaf) {
+            cancelAnimationFrame(this.overlayRaf);
+            this.overlayRaf = null;
+        }
+        
         if (this.maskWorker) {
             this.maskWorker.terminate();
             this.maskWorker = null;
