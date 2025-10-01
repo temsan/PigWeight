@@ -812,11 +812,7 @@
         } catch (e) {}
         connectWebSocket(streamId);
         initChart();
-        // start overlay loop if not running
-        if (!overlayRaf) {
-            overlayRaf = requestAnimationFrame(overlayTick);
-            console.log('✅ Overlay система запущена');
-        }
+        // Модульная overlay система запускается автоматически в VideoManager
         idAliases = loadAliases(streamId);
 
         // Configure seek UI (robust): drive state from /info on every poll
@@ -1100,15 +1096,17 @@
                         console.log('🎨 Вызываю scheduleOverlay с', lastMasks.length, 'масками');
                         
                         // Отправляем пересечения в модульную систему
-                        if (window.appInstance && window.appInstance.videoManager && Array.isArray(data.debug.crossings)) {
+                        if (window.appInstance && window.appInstance.videoManager) {
                             try {
-                                window.appInstance.videoManager.handleCrossings(data.debug.crossings);
+                                if (Array.isArray(data.debug.crossings)) {
+                                    window.appInstance.videoManager.handleCrossings(data.debug.crossings);
+                                }
+                                window.appInstance.videoManager.scheduleOverlay(lastMasks, lastIds);
                             } catch (error) {
-                                console.warn('Ошибка обработки пересечений:', error);
+                                console.warn('⚠️ Ошибка модульной overlay системы:', error);
                             }
                         }
                         
-                        scheduleOverlay(lastMasks, lastIds);
                         streamStatus.textContent = 'Live + overlay';
                     } else {
                         console.warn('⚠️ Нет масок для отрисовки');
@@ -1301,293 +1299,10 @@
         return `hsl(${hue}, 65%, 32%)`;
     }
 
-            function drawOverlay(masks, ids = null) {
-                if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) {
-                    console.log('⏭️ Пропуск drawOverlay: нет первого кадра и масок');
-                    return;
-                }
-        
-        console.log('🎨 drawOverlay вызван:', {
-            masks_count: masks ? masks.length : 0,
-            has_ids: !!ids,
-            hasFirstFrame: hasFirstFrame
-        });
-        
-        syncOverlaySize();
-        const ctx = overlayCanvas.getContext('2d');
-        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const cw = overlayCanvas.width;
-        const ch = overlayCanvas.height;
-        ctx.clearRect(0, 0, cw, ch);
-
-        const rect = getRenderedImageRect();
-
-        try {
-            ctx.save();
-            const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
-            const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
-            const x1 = rect.x + rect.w * leftX;
-            const x2 = rect.x + rect.w * rightX;
-            ctx.fillStyle = 'rgba(44,123,229,0.12)';
-            ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
-            ctx.fillStyle = 'rgba(81,207,102,0.12)';
-            ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
-            ctx.setLineDash([]);
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = 'rgba(44,123,229,0.9)';
-            ctx.beginPath();
-            ctx.moveTo(x1, rect.y);
-            ctx.lineTo(x1, rect.y + rect.h);
-            ctx.stroke();
-            ctx.strokeStyle = 'rgba(81,207,102,0.9)';
-            ctx.beginPath();
-            ctx.moveTo(x2, rect.y);
-            ctx.lineTo(x2, rect.y + rect.h);
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(44,123,229,0.95)';
-            ctx.beginPath();
-            ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = 'rgba(81,207,102,0.95)';
-            ctx.beginPath();
-            ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
-            ctx.fill();
-            try {
-                if (!window.__linesDragInit) {
-                    window.__linesDragInit = true;
-                    const onPos = (e) => {
-                        const r = overlayCanvas.getBoundingClientRect();
-                        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                        const x = clientX - r.left;
-                        return Math.max(0, Math.min(1, (x - rect.x) / rect.w));
-                    };
-                    let dragging = null;
-                    const onDown = (e) => {
-                        if (!overlayEnabled) return;
-                        const nx = onPos(e);
-                        const lx = (window.__lines && typeof window.__lines.left_x==='number') ? window.__lines.left_x : 0.25;
-                        const rx = (window.__lines && typeof window.__lines.right_x==='number') ? window.__lines.right_x : 0.75;
-                        const distL = Math.abs(nx - lx);
-                        const distR = Math.abs(nx - rx);
-                        if (distL < 0.02 || distR < 0.02) {
-                            dragging = (distL < distR) ? 'left' : 'right';
-                            window.__isDraggingLines = true;
-                            e.preventDefault();
-                        }
-                    };
-                    const onMove = (e) => {
-                        const nx = onPos(e);
-                        let lx = (window.__lines && typeof window.__lines.left_x==='number') ? window.__lines.left_x : 0.25;
-                        let rx = (window.__lines && typeof window.__lines.right_x==='number') ? window.__lines.right_x : 0.75;
-                        const nearLine = (Math.abs(nx - lx) < 0.02) || (Math.abs(nx - rx) < 0.02);
-                        if (!dragging) {
-                            overlayCanvas.style.cursor = nearLine ? 'ew-resize' : 'crosshair';
-                            return;
-                        }
-                        if (dragging === 'left') lx = nx; else rx = nx;
-                        if (lx > rx) { const t = lx; lx = rx; rx = t; }
-                        const minGap = 0.05;
-                        if ((rx - lx) < minGap) {
-                            const mid = (lx + rx) / 2;
-                            lx = Math.max(0, mid - minGap/2);
-                            rx = Math.min(1, mid + minGap/2);
-                        }
-                        window.__lines = { left_x: lx, right_x: rx };
-                        overlayCanvas.style.cursor = 'ew-resize';
-                        scheduleOverlay(lastMasks, lastIds);
-                        e.preventDefault();
-                    };
-                    const onUp = async () => {
-                        if (!dragging) return;
-                        dragging = null;
-                        try {
-                            const { left_x, right_x } = window.__lines || {};
-                            await fetch('/api/lines', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ left_x, right_x }) });
-                            const activeStreamId = document.querySelector('#streamRadios .toggle-btn.active')?.dataset?.streamId;
-                            if (activeStreamId) {
-                                await fetch(`/api/stream/${activeStreamId}/line_positions`, {
-                                    method: 'POST', 
-                                    headers: {'Content-Type':'application/json'}, 
-                                    body: JSON.stringify({ left_x, right_x })
-                                });
-                            }
-                            const currentFileName = fileInputLabel.title;
-                            if (currentFileName && currentFileName !== 'Открыть видеофайл') {
-                                saveLinePositions(currentFileName, left_x, right_x);
-                            }
-                        } catch(_) {}
-                        overlayCanvas.style.cursor = 'crosshair';
-                        window.__isDraggingLines = false;
-                    };
-                    overlayCanvas.addEventListener('mousedown', onDown);
-                    overlayCanvas.addEventListener('mousemove', onMove);
-                    overlayCanvas.addEventListener('mouseup', onUp);
-                    overlayCanvas.addEventListener('mouseleave', () => { dragging = null; overlayCanvas.style.cursor = 'crosshair'; });
-                    overlayCanvas.addEventListener('touchstart', onDown, {passive:false});
-                    overlayCanvas.addEventListener('touchmove', onMove, {passive:false});
-                    overlayCanvas.addEventListener('touchend', onUp);
-                }
-            } catch(_) {}
-            ctx.restore();
-        } catch (e) {}
-
-        try {
-            const cr = window.__lastCrossings || [];
-            if (Array.isArray(cr) && cr.length) {
-                ctx.save();
-                cr.forEach(c => {
-                    const cx = rect.x + (Number(c.x) || 0) * rect.w;
-                    const cy = rect.y + (Number(c.y) || 0.5) * rect.h;
-                    ctx.beginPath();
-                    ctx.fillStyle = c.side === 'left' ? 'rgba(44,123,229,0.9)' : 'rgba(80,200,120,0.9)';
-                    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-                    ctx.fill();
-                });
-                ctx.restore();
-            }
-        } catch (e) {}
-
-        // Всплывающие кругляши "+1/-1" над точкой пересечения (восстановлены)
-        try {
-            if (Array.isArray(window.__popups) && window.__popups.length) {
-                const now = performance.now();
-                ctx.save();
-                const keep = [];
-                window.__popups.forEach(p => {
-                    const k = Math.min(1, Math.max(0, (now - p.t0) / (p.dur || 900)));
-                    const alpha = 1 - k;
-                    const ease = k * (2 - k);
-                    const px = rect.x + (Number(p.x) || 0.5) * rect.w;
-                    const py = rect.y + (Number(p.y) || 0.5) * rect.h - ease * (p.rise || 28);
-                    const r = 13;
-                    ctx.globalAlpha = Math.max(0, alpha);
-                    ctx.beginPath();
-                    ctx.fillStyle = (p.color || '#2c7be5').replace('0.9', '1');
-                    ctx.arc(px, py, r, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.lineWidth = 2;
-                    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-                    ctx.stroke();
-                    ctx.font = '700 14px system-ui, Segoe UI, Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillStyle = '#fff';
-                    ctx.fillText(String(p.text || '+1'), px, py + 0.5);
-                    if (k < 1) keep.push(p);
-                });
-                ctx.restore();
-                window.__popups = keep;
-                if (keep.length) {
-                    try { scheduleOverlay(lastMasks, lastIds); } catch (_) {}
-                }
-            }
-        } catch (e) {}
-
-                if (!masks || !masks.length) {
-                    return;
-                }
-
-                masks.forEach((poly, idx) => {
-                    if (!Array.isArray(poly) || poly.length < 3) {
-                        return;
-                    }
-            const labelArr = (window.__lastLabels && Array.isArray(window.__lastLabels)) ? window.__lastLabels : null;
-            const instId = labelArr ? (labelArr[idx] || (idx + 1)) : ((ids && ids[idx]) ? ids[idx] : (idx + 1));
-            const fill = colorForInstance(instId);
-            ctx.beginPath();
-            const plen = poly.length;
-            const step = Math.max(1, Math.floor(plen / 200));
-            for (let i = 0; i < plen; i += step) {
-                const nx = poly[i][0], ny = poly[i][1];
-                const x = rect.x + nx * rect.w;
-                const y = rect.y + ny * rect.h;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            }
-            ctx.closePath();
-            ctx.save();
-            ctx.fillStyle = fill;
-            ctx.globalAlpha = 0.60;
-            ctx.fill();
-            ctx.globalAlpha = 0.50;
-            ctx.lineWidth = 1.0;
-            ctx.strokeStyle = 'rgba(30,50,80,0.20)';
-            ctx.stroke();
-            ctx.restore();
-
-            let sx = 0, sy = 0, pc = 0;
-            poly.forEach(([nx, ny]) => { sx += nx; sy += ny; pc++; });
-            if (pc > 0) {
-                const cx = rect.x + (sx / pc) * rect.w;
-                const cy = rect.y + (sy / pc) * rect.h;
-                let displayLabel = (labelArr && labelArr[idx]) ? labelArr[idx] : null;
-                if (!displayLabel) {
-                    const ranks = (window.__lastLabelsOrder || []);
-                    if (ranks.length === 0) {
-                        try {
-                            const arr = (lastMasks || []).map((m, i) => {
-                                let sx2 = 0, pc2 = 0;
-                                m.forEach(([nx2, ny2]) => { sx2 += nx2; pc2++; });
-                                return { i, cx: pc2? (sx2/pc2) : 0 };
-                            });
-                            arr.sort((a,b) => b.cx - a.cx);
-                            window.__lastLabelsOrder = arr.map(a=>a.i);
-                        } catch(e) { window.__lastLabelsOrder = []; }
-                    }
-                    const pos = (window.__lastLabelsOrder || []).indexOf(idx);
-                    displayLabel = (pos >= 0) ? (pos + 1) : (idx + 1);
-                }
-                const label = String(idAliases[displayLabel] ?? displayLabel);
-                ctx.save();
-                ctx.font = '700 14px system-ui, Segoe UI, Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.lineWidth = 3.5;
-                ctx.strokeStyle = 'rgba(0,0,0,0.65)';
-                ctx.strokeText(label, cx, cy);
-                ctx.fillStyle = '#ffffff';
-                ctx.fillText(label, cx, cy);
-                ctx.restore();
-            }
-        });
-    }
-
-    // Overlay draw: decoupled loop with max FPS to avoid blocking video decode
-    let overlayPending = null;
-    let overlayRaf = 0;
-    let overlayLastDraw = 0;
-    const overlayMaxFps = 12; // cap overlay to 12 fps for smoothness
-    function scheduleOverlay(masks, ids) {
-        if (performance.now() < overlayBlockUntil) {
-            console.log('🚫 scheduleOverlay заблокирован до', new Date(overlayBlockUntil));
-            return;
-        }
-        
-        console.log('📝 scheduleOverlay: ставлю в очередь', masks ? masks.length : 0, 'масок');
-        overlayPending = { masks, ids };
-        
-        // НЕ передаем в модульную систему - используем только старую overlay систему
-        // Модульная система конфликтует с Canvas context
-    }
-    function overlayTick() {
-        const now = performance.now();
-        const minDt = 1000 / overlayMaxFps;
-        
-        if (overlayPending && (now - overlayLastDraw >= minDt)) {
-            const job = overlayPending; 
-            overlayPending = null;
-            console.log('⏰ overlayTick: рисую pending маски', job.masks ? job.masks.length : 0);
-            drawOverlay(job.masks, job.ids);
-            overlayLastDraw = now;
-        } else if (!overlayPending && lastMasks && lastMasks.length && (now - overlayLastDraw >= minDt)) {
-            // Перерисовываем последние маски для сохранения overlay
-            console.log('⏰ overlayTick: перерисовываю последние маски', lastMasks.length);
-            drawOverlay(lastMasks, lastIds);
-            overlayLastDraw = now;
-        }
-        
-        overlayRaf = requestAnimationFrame(overlayTick);
-    }
+    // ========================================
+    // СТАРЫЕ OVERLAY ФУНКЦИИ УДАЛЕНЫ
+    // Теперь используется модульная система из video-manager.js
+    // ========================================
 
     function pointInPoly(px, py, poly, rect) {
         let inside = false;

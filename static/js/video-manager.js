@@ -175,6 +175,50 @@ export class VideoManager extends EventEmitter {
         
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
+        // Получаем реальные размеры изображения (с учетом object-fit: contain)
+        const rect = this.getRenderedImageRect();
+        
+        // Отрисовка вертикальных линий
+        try {
+            const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
+            const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
+            const x1 = rect.x + rect.w * leftX;
+            const x2 = rect.x + rect.w * rightX;
+            
+            // Фон линий
+            ctx.fillStyle = 'rgba(44,123,229,0.12)';
+            ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
+            ctx.fillStyle = 'rgba(81,207,102,0.12)';
+            ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
+            
+            // Сами линии
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(44,123,229,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x1, rect.y);
+            ctx.lineTo(x1, rect.y + rect.h);
+            ctx.stroke();
+            
+            ctx.strokeStyle = 'rgba(81,207,102,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x2, rect.y);
+            ctx.lineTo(x2, rect.y + rect.h);
+            ctx.stroke();
+            
+            // Кружочки на линиях
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.beginPath();
+            ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.beginPath();
+            ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+        } catch (e) {
+            console.warn('Ошибка отрисовки линий:', e);
+        }
+        
         // Отрисовка масок свиней
         if (Array.isArray(masks) && masks.length > 0) {
             masks.forEach((mask, idx) => {
@@ -186,8 +230,8 @@ export class VideoManager extends EventEmitter {
                 // Рисуем маску
                 ctx.beginPath();
                 mask.forEach((point, i) => {
-                    const x = point[0] * canvas.width;
-                    const y = point[1] * canvas.height;
+                    const x = rect.x + point[0] * rect.w;
+                    const y = rect.y + point[1] * rect.h;
                     if (i === 0) {
                         ctx.moveTo(x, y);
                     } else {
@@ -197,15 +241,51 @@ export class VideoManager extends EventEmitter {
                 ctx.closePath();
                 
                 ctx.fillStyle = color;
+                ctx.globalAlpha = 0.60;
                 ctx.fill();
+                ctx.globalAlpha = 1.0;
                 
-                // Рисуем label
-                this.drawInstanceLabel(ctx, mask, instId, canvas.width, canvas.height);
+                // Обводка маски
+                ctx.lineWidth = 1.0;
+                ctx.strokeStyle = 'rgba(30,50,80,0.20)';
+                ctx.stroke();
+                
+                // Рисуем label с учетом алиасов
+                this.drawInstanceLabel(ctx, mask, instId, rect);
             });
         }
         
         // Отрисовка всплывающих счетчиков
-        this.drawPopupCounters(ctx, canvas.width, canvas.height);
+        this.drawPopupCounters(ctx, rect);
+    }
+    
+    getRenderedImageRect() {
+        // Возвращает реальную область отображения кадра внутри wrapper с учётом object-fit: contain
+        const wrapper = document.getElementById('videoWrapper');
+        const cw = wrapper ? wrapper.clientWidth : this.overlayCanvas.width;
+        const ch = wrapper ? wrapper.clientHeight : this.overlayCanvas.height;
+        
+        const webrtcEl = document.getElementById('webrtcVideo');
+        const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none';
+        
+        let iw = 0, ih = 0;
+        if (webrtcVisible) {
+            iw = webrtcEl.videoWidth || 0;
+            ih = webrtcEl.videoHeight || 0;
+        } else if (this.videoStream) {
+            iw = this.videoStream.naturalWidth || 0;
+            ih = this.videoStream.naturalHeight || 0;
+        }
+        
+        if (!iw || !ih) return { x: 0, y: 0, w: cw, h: ch };
+        
+        const scale = Math.min(cw / iw, ch / ih);
+        const w = Math.round(iw * scale);
+        const h = Math.round(ih * scale);
+        const x = Math.floor((cw - w) / 2);
+        const y = Math.floor((ch - h) / 2);
+        
+        return { x, y, w, h };
     }
     
     getColorForInstance(instId) {
@@ -213,44 +293,38 @@ export class VideoManager extends EventEmitter {
         return `hsla(${hue}, 65%, 70%, 0.22)`;
     }
     
-    drawInstanceLabel(ctx, mask, instId, canvasWidth, canvasHeight) {
-        // Находим минимальные координаты для размещения label
-        let minX = Infinity, minY = Infinity;
-        mask.forEach(point => {
-            const x = point[0] * canvasWidth;
-            const y = point[1] * canvasHeight;
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
+    drawInstanceLabel(ctx, mask, instId, rect) {
+        // Вычисляем центр маски для размещения label
+        let sx = 0, sy = 0, pc = 0;
+        mask.forEach(([nx, ny]) => {
+            sx += nx;
+            sy += ny;
+            pc++;
         });
         
-        const label = String(instId);
-        const padding = 6;
-        const radius = 6;
+        if (pc === 0) return;
         
-        ctx.font = '600 13px system-ui, Segoe UI, Arial';
-        const textWidth = ctx.measureText(label).width;
-        const badgeWidth = Math.ceil(textWidth + padding * 2);
-        const badgeHeight = 20;
+        const cx = rect.x + (sx / pc) * rect.w;
+        const cy = rect.y + (sy / pc) * rect.h;
         
-        const badgeX = Math.max(0, Math.min(minX - 8, canvasWidth - badgeWidth));
-        const badgeY = Math.max(0, Math.min(minY - 8, canvasHeight - badgeHeight));
+        // Получаем алиас для инстанса, если есть
+        const idAliases = window.idAliases || {};
+        const label = String(idAliases[instId] ?? instId);
         
-        // Рисуем фон badge
+        // Рисуем label с обводкой для читаемости
         ctx.save();
-        ctx.beginPath();
-        ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, radius);
-        ctx.fillStyle = 'rgba(30,50,80,0.85)';
-        ctx.fill();
-        
-        // Рисуем текст
-        ctx.fillStyle = '#fff';
+        ctx.font = '700 14px system-ui, Segoe UI, Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(label, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+        ctx.strokeText(label, cx, cy);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, cx, cy);
         ctx.restore();
     }
     
-    drawPopupCounters(ctx, canvasWidth, canvasHeight) {
+    drawPopupCounters(ctx, rect) {
         if (!this.popupCounters || this.popupCounters.length === 0) return;
         
         const now = performance.now();
@@ -262,8 +336,8 @@ export class VideoManager extends EventEmitter {
             const alpha = 1 - progress;
             const ease = progress * (2 - progress); // Плавная анимация
             
-            const x = popup.x * canvasWidth;
-            const y = popup.y * canvasHeight - ease * popup.riseDistance;
+            const x = rect.x + popup.x * rect.w;
+            const y = rect.y + popup.y * rect.h - ease * popup.riseDistance;
             const radius = 16;
             
             // Применяем прозрачность
@@ -287,6 +361,7 @@ export class VideoManager extends EventEmitter {
             ctx.fillStyle = '#fff';
             ctx.fillText(popup.text, x, y + 1);
         });
+        ctx.globalAlpha = 1.0; // Сброс прозрачности
         ctx.restore();
     }
     
