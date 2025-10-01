@@ -2,6 +2,7 @@
 
 import os
 import logging
+import platform
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
@@ -11,29 +12,40 @@ logger = logging.getLogger(__name__)
 # Performance Profiles
 PERFORMANCE_PROFILES = {
     'ULTRA_PERFORMANCE': {
-        'TARGET_FPS': '120',
-        'BATCH_MAX_SIZE': '32',
-        'BATCH_TARGET_LATENCY_MS': '25',
+        'TARGET_FPS': '50',  # Оптимально для мощных GPU
+        'BATCH_MAX_SIZE': '12',  # Баланс производительности и стабильности
+        'BATCH_TARGET_LATENCY_MS': '30',
         'USE_HALF': 'true',
+        'IMG_SIZE': '960',  # Максимальное качество
+    },
+    'RTX_OPTIMIZED': {
+        'TARGET_FPS': '35',  # Оптимально для RTX среднего класса
+        'BATCH_MAX_SIZE': '8',  # Универсально для разных RTX
+        'BATCH_TARGET_LATENCY_MS': '40',
+        'USE_HALF': 'true',
+        'IMG_SIZE': '832',  # Оптимально для 4-8GB VRAM
     },
     'BALANCED': {
-        'TARGET_FPS': '60',
-        'BATCH_MAX_SIZE': '16',
-        'BATCH_TARGET_LATENCY_MS': '50',
+        'TARGET_FPS': '25',  # Стабильно для большинства GPU
+        'BATCH_MAX_SIZE': '6', 
+        'BATCH_TARGET_LATENCY_MS': '60',
         'USE_HALF': 'true',
+        'IMG_SIZE': '768',  # Компромисс между качеством и производительностью
     },
     'POWER_SAVING': {
-        'TARGET_FPS': '30',
-        'BATCH_MAX_SIZE': '8',
-        'BATCH_TARGET_LATENCY_MS': '100',
-        'USE_HALF': 'false',
-    },
-    'CPU_ONLY': {
         'TARGET_FPS': '20',
         'BATCH_MAX_SIZE': '4',
-        'BATCH_TARGET_LATENCY_MS': '150',
+        'BATCH_TARGET_LATENCY_MS': '100',
+        'USE_HALF': 'true',  # Даже слабые современные GPU поддерживают FP16
+        'IMG_SIZE': '640',
+    },
+    'CPU_ONLY': {
+        'TARGET_FPS': '15',
+        'BATCH_MAX_SIZE': '2',
+        'BATCH_TARGET_LATENCY_MS': '200',
         'DEVICE': 'cpu',
         'USE_HALF': 'false',
+        'IMG_SIZE': '640',
     }
 }
 
@@ -114,7 +126,155 @@ class Config:
         if self.DEVICE == "cpu":
             self.USE_HALF = False
 
+def detect_optimal_runtime() -> Dict[str, Any]:
+    """Определяет оптимальный рантайм на основе доступного оборудования и библиотек."""
+    runtime_info = {
+        'runtime': 'cpu',
+        'device': 'cpu',
+        'provider': 'CPUExecutionProvider',
+        'use_half': False,
+        'profile': 'CPU_ONLY',
+        'reasons': []
+    }
+    
+    # Проверяем доступность CUDA/PyTorch
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_count = torch.cuda.device_count()
+            gpu_name = torch.cuda.get_device_name(0) if gpu_count > 0 else 'Unknown'
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory // (1024**3) if gpu_count > 0 else 0
+            
+            runtime_info.update({
+                'runtime': 'pytorch',
+                'device': 'cuda:0',
+                'use_half': True,
+                'reasons': [f'CUDA GPU доступен: {gpu_name} ({gpu_memory}GB VRAM)']
+            })
+            
+            # Умная логика выбора профиля на основе архитектуры и памяти
+            gpu_lower = gpu_name.lower()
+            
+            # Топовые современные GPU (RTX 4080+, RTX 3080+)
+            if any(arch in gpu_lower for arch in ['rtx 4080', 'rtx 4090', 'rtx 3080', 'rtx 3090']) or gpu_memory >= 10:
+                runtime_info['profile'] = 'ULTRA_PERFORMANCE'
+                runtime_info['reasons'].append('Высокопроизводительная GPU с большим объемом VRAM')
+            
+            # Современные RTX среднего класса с достаточной памятью
+            elif any(arch in gpu_lower for arch in ['rtx 40', 'rtx 30', 'rtx 20']) and gpu_memory >= 6:
+                runtime_info['profile'] = 'ULTRA_PERFORMANCE' 
+                runtime_info['reasons'].append('Современная RTX архитектура с достаточной памятью')
+            
+            # RTX бюджетного сегмента и средний класс (RTX x050, RTX x060, средние RTX)
+            elif any(arch in gpu_lower for arch in ['rtx']) and gpu_memory >= 3:
+                runtime_info['profile'] = 'RTX_OPTIMIZED'
+                runtime_info['reasons'].append('RTX архитектура, оптимизированная для эффективной работы')
+            
+            # Старшие GTX и профессиональные карты
+            elif any(name in gpu_lower for name in ['gtx 1070', 'gtx 1080', 'gtx 1660', 'tesla', 'quadro']) or gpu_memory >= 6:
+                runtime_info['profile'] = 'BALANCED'
+                runtime_info['reasons'].append('Производительная GPU, сбалансированные настройки')
+            
+            # Средние GPU с достаточной памятью
+            elif gpu_memory >= 4:
+                runtime_info['profile'] = 'BALANCED'
+                runtime_info['reasons'].append('Достаточно VRAM для сбалансированной работы')
+            
+            # Слабые или старые GPU
+            else:
+                runtime_info['profile'] = 'POWER_SAVING'
+                runtime_info['reasons'].append('Ограниченные ресурсы, энергосберегающий режим')
+                    
+        else:
+            runtime_info['reasons'].append('CUDA недоступен, проверяем ONNX Runtime')
+    except ImportError:
+        runtime_info['reasons'].append('PyTorch не установлен, проверяем ONNX Runtime')
+    
+    # Проверяем ONNX Runtime для GPU
+    if runtime_info['runtime'] == 'cpu':
+        try:
+            import onnxruntime as ort
+            available_providers = ort.get_available_providers()
+            
+            if 'CUDAExecutionProvider' in available_providers:
+                runtime_info.update({
+                    'runtime': 'onnx-gpu',
+                    'device': 'cuda:0',
+                    'provider': 'CUDAExecutionProvider',
+                    'use_half': True,
+                    'profile': 'BALANCED'
+                })
+                runtime_info['reasons'].append('ONNX Runtime с CUDA поддержкой')
+            elif 'DirectMLExecutionProvider' in available_providers and platform.system() == 'Windows':
+                runtime_info.update({
+                    'runtime': 'onnx-directml',
+                    'device': 'dml',
+                    'provider': 'DirectMLExecutionProvider',
+                    'use_half': False,
+                    'profile': 'BALANCED'
+                })
+                runtime_info['reasons'].append('DirectML поддержка для Windows')
+            else:
+                runtime_info.update({
+                    'runtime': 'onnx-cpu',
+                    'provider': 'CPUExecutionProvider',
+                    'profile': 'CPU_ONLY'
+                })
+                runtime_info['reasons'].append(f'ONNX Runtime только с CPU: {available_providers}')
+                
+        except ImportError:
+            runtime_info['reasons'].append('ONNX Runtime недоступен, используем CPU')
+    
+    # Оптимизация для CPU
+    if runtime_info['device'] == 'cpu':
+        try:
+            import psutil
+            cpu_count = psutil.cpu_count(logical=False)  # Физические ядра
+            memory_gb = psutil.virtual_memory().total // (1024**3)
+            
+            if cpu_count >= 8 and memory_gb >= 16:
+                runtime_info['profile'] = 'BALANCED'
+                runtime_info['reasons'].append(f'Мощный CPU: {cpu_count} ядер, {memory_gb}GB RAM')
+            elif cpu_count >= 4 and memory_gb >= 8:
+                runtime_info['profile'] = 'POWER_SAVING'
+                runtime_info['reasons'].append(f'Средний CPU: {cpu_count} ядер, {memory_gb}GB RAM')
+            else:
+                runtime_info['reasons'].append(f'Слабый CPU: {cpu_count} ядер, {memory_gb}GB RAM')
+        except ImportError:
+            runtime_info['reasons'].append('psutil недоступен, используем базовые настройки')
+    
+    return runtime_info
+
+def apply_runtime_optimizations(runtime_info: Dict[str, Any]):
+    """Применяет оптимизации на основе выбранного рантайма."""
+    # Применяем профиль производительности
+    apply_performance_profile(runtime_info['profile'])
+    
+    # Устанавливаем специфичные настройки рантайма
+    os.environ['DEVICE'] = runtime_info['device']
+    os.environ['USE_HALF'] = str(runtime_info['use_half']).lower()
+    
+    if runtime_info['runtime'].startswith('onnx'):
+        os.environ['ONNX_PROVIDER'] = runtime_info['provider']
+        os.environ['PREFER_ONNX'] = 'true'
+    
+    logger.info(f"🚀 Выбран оптимальный рантайм: {runtime_info['runtime']}")
+    logger.info(f"📱 Устройство: {runtime_info['device']}")
+    logger.info(f"⚡ Профиль: {runtime_info['profile']}")
+    for reason in runtime_info['reasons']:
+        logger.info(f"💡 {reason}")
+
 def apply_performance_profile(profile_name: str):
+    """Применяет профиль производительности, устанавливая переменные окружения."""
+    profile = PERFORMANCE_PROFILES.get(profile_name.upper())
+    if not profile:
+        raise ValueError(f"Unknown performance profile: {profile_name}")
+    
+    for key, value in profile.items():
+        os.environ[key] = value
+    
+    logger.info(f"Applied performance profile: {profile_name.upper()}")
+    # The config will be re-read on next instantiation.
     """Applies a performance profile by setting environment variables."""
     profile = PERFORMANCE_PROFILES.get(profile_name.upper())
     if not profile:

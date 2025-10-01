@@ -9,13 +9,46 @@ from pathlib import Path
 # --- Argument Parsing ---
 # This needs to be done before config is imported and instantiated
 parser = argparse.ArgumentParser(description='PigWeight - Video Processing Server')
-parser.add_argument('--profile', choices=['ULTRA_PERFORMANCE', 'BALANCED', 'POWER_SAVING', 'CPU_ONLY'], help='Performance profile')
+parser.add_argument('--runtime', choices=['auto', 'pytorch', 'onnx-gpu', 'onnx-cpu', 'cpu'], default='auto', help='Выбор рантайма (по умолчанию: auto)')
 parser.add_argument('--install', action='store_true', help='Установить все зависимости')
 args, unknown = parser.parse_known_args()
 
-if args.profile:
-    from core.config import apply_performance_profile
-    apply_performance_profile(args.profile)
+# Автоматический выбор оптимального рантайма и профиля
+if args.runtime == 'auto':
+    from core.config import detect_optimal_runtime, apply_runtime_optimizations
+    runtime_info = detect_optimal_runtime()
+    apply_runtime_optimizations(runtime_info)
+elif args.runtime != 'auto':
+    # Ручной выбор рантайма (профиль всё равно выбирается автоматически)
+    from core.config import detect_optimal_runtime, apply_runtime_optimizations
+    runtime_info = detect_optimal_runtime()
+    
+    if args.runtime == 'pytorch':
+        runtime_info['runtime'] = 'pytorch'
+        runtime_info['device'] = 'auto'
+        os.environ['PREFER_ONNX'] = 'false'
+    elif args.runtime == 'onnx-gpu':
+        runtime_info['runtime'] = 'onnx-gpu'
+        runtime_info['device'] = 'cuda:0'
+        runtime_info['provider'] = 'CUDAExecutionProvider'
+        os.environ['PREFER_ONNX'] = 'true'
+        os.environ['ONNX_PROVIDER'] = 'CUDAExecutionProvider'
+    elif args.runtime == 'onnx-cpu':
+        runtime_info['runtime'] = 'onnx-cpu'
+        runtime_info['device'] = 'cpu'
+        runtime_info['provider'] = 'CPUExecutionProvider'
+        runtime_info['profile'] = 'CPU_ONLY'  # Принудительно CPU профиль
+        os.environ['PREFER_ONNX'] = 'true'
+        os.environ['ONNX_PROVIDER'] = 'CPUExecutionProvider'
+    elif args.runtime == 'cpu':
+        runtime_info['runtime'] = 'cpu'
+        runtime_info['device'] = 'cpu'
+        runtime_info['profile'] = 'CPU_ONLY'
+        runtime_info['use_half'] = False
+        os.environ['DEVICE'] = 'cpu'
+        os.environ['USE_HALF'] = 'false'
+    
+    apply_runtime_optimizations(runtime_info)
 
 # --- Config and Logging --- 
 # Now that the profile is potentially set via env vars, we can import the config
@@ -35,7 +68,34 @@ def download_model():
     else:
         print(f"Model already exists at {CONFIG.MODEL_PATH}")
 
+def display_runtime_info():
+    """Отображает информацию о выбранном рантайме."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory // (1024**3)
+            print(f"🔥 GPU: {gpu_name} ({gpu_memory}GB VRAM)")
+        else:
+            print("💻 CPU: CUDA недоступен")
+    except ImportError:
+        print("⚠️ PyTorch не установлен")
+
+    try:
+        import onnxruntime as ort
+        providers = ort.get_available_providers()
+        print(f"🧠 ONNX Runtime: {', '.join(providers)}")
+    except ImportError:
+        print("⚠️ ONNX Runtime недоступен")
+    
+    # Отображаем текущие настройки
+    device = os.getenv('DEVICE', 'auto')
+    use_half = os.getenv('USE_HALF', 'auto')
+    profile = os.getenv('TARGET_FPS', 'не установлен')
+    print(f"⚙️ Настройки: device={device}, half_precision={use_half}, target_fps={profile}")
+
 def install_requirements():
+    """Установка минимальных зависимостей"""
     """Установка минимальных зависимостей"""
     print("📦 Installing minimal dependencies...")
     try:
@@ -89,6 +149,13 @@ def convert_to_onnx():
 def main():
     try:
         logger = setup_logging(debug=CONFIG.DEBUG)
+        
+        # Отображаем информацию о рантайме
+        if not CONFIG.DEBUG:
+            print("🚀 PigWeight - Система видеоаналитики")
+            print("=" * 50)
+            display_runtime_info()
+            print("=" * 50)
         
         ensure_dir('models')
         ensure_dir('stream')
