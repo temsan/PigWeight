@@ -1000,11 +1000,13 @@
         if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
         // disable overlay so it doesn't intercept interactions
         overlayEnabled = false;
-        if (overlayRaf) { cancelAnimationFrame(overlayRaf); overlayRaf = 0; }
-        overlayPending = null;
+        
+        // Очистка overlay через модульную систему
+        if (window.appInstance && window.appInstance.videoManager) {
+            window.appInstance.videoManager.clearOverlay();
+        }
+        
         try {
-            const ctx = overlayCanvas.getContext('2d');
-            ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             overlayCanvas.style.pointerEvents = 'none';
             overlayCanvas.style.cursor = 'default';
             overlayCanvas.style.opacity = '0';
@@ -1409,6 +1411,12 @@
         
         // Ensure previous chart instance is gone before reusing the canvas
         destroyChart();
+        
+        if (!liveCountChart) {
+            console.error('❌ liveCountChart element not found');
+            return;
+        }
+        
         const ctx = liveCountChart.getContext('2d');
         const gradient = ctx.createLinearGradient(0, 0, 0, 160);
         gradient.addColorStop(0, 'rgba(44, 123, 229, 0.35)');
