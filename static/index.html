@@ -1397,8 +1397,28 @@
 
     function destroyChart() {
         if (chart) {
-            try { chart.destroy(); } catch (e) {}
+            try { 
+                chart.destroy(); 
+                console.log('✅ Chart destroyed');
+            } catch (e) {
+                console.warn('⚠️ Chart destroy error:', e);
+            }
             chart = null;
+        }
+        
+        // Дополнительная очистка Canvas
+        try {
+            const canvas = document.getElementById('liveCountChart');
+            if (canvas) {
+                // Удаляем все Chart.js метаданные
+                const chartInstance = Chart.getChart(canvas);
+                if (chartInstance) {
+                    chartInstance.destroy();
+                    console.log('✅ Chart instance from canvas destroyed');
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ Canvas cleanup error:', e);
         }
     }
 
