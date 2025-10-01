@@ -1558,30 +1558,34 @@
     let overlayLastDraw = 0;
     const overlayMaxFps = 12; // cap overlay to 12 fps for smoothness
     function scheduleOverlay(masks, ids) {
-        if (performance.now() < overlayBlockUntil) return;
+        if (performance.now() < overlayBlockUntil) {
+            console.log('🚫 scheduleOverlay заблокирован до', new Date(overlayBlockUntil));
+            return;
+        }
+        
+        console.log('📝 scheduleOverlay: ставлю в очередь', masks ? masks.length : 0, 'масок');
         overlayPending = { masks, ids };
         
-        // Передаем в модульную систему
-        if (window.appInstance && window.appInstance.videoManager) {
-            try {
-                window.appInstance.videoManager.scheduleOverlay(masks, ids);
-            } catch (error) {
-                console.warn('Ошибка передачи overlay в модульную систему:', error);
-            }
-        }
+        // НЕ передаем в модульную систему - используем только старую overlay систему
+        // Модульная система конфликтует с Canvas context
     }
     function overlayTick() {
         const now = performance.now();
         const minDt = 1000 / overlayMaxFps;
+        
         if (overlayPending && (now - overlayLastDraw >= minDt)) {
-            const job = overlayPending; overlayPending = null;
+            const job = overlayPending; 
+            overlayPending = null;
+            console.log('⏰ overlayTick: рисую pending маски', job.masks ? job.masks.length : 0);
             drawOverlay(job.masks, job.ids);
             overlayLastDraw = now;
         } else if (!overlayPending && lastMasks && lastMasks.length && (now - overlayLastDraw >= minDt)) {
             // Перерисовываем последние маски для сохранения overlay
+            console.log('⏰ overlayTick: перерисовываю последние маски', lastMasks.length);
             drawOverlay(lastMasks, lastIds);
             overlayLastDraw = now;
         }
+        
         overlayRaf = requestAnimationFrame(overlayTick);
     }
 
