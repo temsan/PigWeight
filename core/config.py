@@ -343,5 +343,10 @@ def setup_logging(debug: bool = False) -> logging.Logger:
         ]
         for logger_name in our_loggers:
             logging.getLogger(logger_name).setLevel(logging.WARNING)
+        
+        # Для отладки оставляем INFO логи в критичных модулях
+        critical_loggers = ["services.model_adapter", "api.app"]
+        for logger_name in critical_loggers:
+            logging.getLogger(logger_name).setLevel(logging.INFO)
     
     return logging.getLogger("pigweight")
