@@ -98,13 +98,21 @@
     }
     .journal-tab-btn:not(.active):hover {
       background: var(--accent-color);
-      color: #fff;
+      color: #ffffff !important;
+      border-color: var(--accent-color);
     }
     .journal-tab-btn.active {
       background: var(--liquid-glass-active);
       border-color: rgba(124, 199, 255, 0.35);
       box-shadow: 0 4px 12px rgba(31, 38, 135, 0.15);
-      color: var(--text-primary);
+      color: var(--text-primary) !important;
+      font-weight: 600;
+    }
+    .journal-tab-btn.active .journal-tab-text {
+      color: var(--text-primary) !important;
+    }
+    .journal-tab-btn:not(.active):hover .journal-tab-text {
+      color: #ffffff !important;
     }
     .right-col{ padding:8px !important; }
     .right-col .journal-tabs{ margin:0 0 4px 0 !important; }
@@ -805,8 +813,10 @@
         connectWebSocket(streamId);
         initChart();
         // start overlay loop if not running
-        // Отключаем старую overlay систему - теперь ею управляет модульная система
-        // if (!overlayRaf) overlayRaf = requestAnimationFrame(overlayTick);
+        if (!overlayRaf) {
+            overlayRaf = requestAnimationFrame(overlayTick);
+            console.log('✅ Overlay система запущена');
+        }
         idAliases = loadAliases(streamId);
 
         // Configure seek UI (robust): drive state from /info on every poll
@@ -1534,10 +1544,10 @@
         const minDt = 1000 / overlayMaxFps;
         if (overlayPending && (now - overlayLastDraw >= minDt)) {
             const job = overlayPending; overlayPending = null;
-            console.log("Drawing overlay from pending job");
             drawOverlay(job.masks, job.ids);
             overlayLastDraw = now;
-        } else if (!overlayPending && lastMasks && (now - overlayLastDraw >= minDt)) {
+        } else if (!overlayPending && lastMasks && lastMasks.length && (now - overlayLastDraw >= minDt)) {
+            // Перерисовываем последние маски для сохранения overlay
             drawOverlay(lastMasks, lastIds);
             overlayLastDraw = now;
         }
