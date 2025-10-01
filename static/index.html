@@ -1036,8 +1036,25 @@
         }
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/count?id=${streamId}`);
+        ws.onopen = () => {
+            console.log('✅ WebSocket подключен к потоку:', streamId);
+        };
+        ws.onerror = (error) => {
+            console.error('❌ WebSocket ошибка:', error);
+        };
+        ws.onclose = () => {
+            console.warn('⚠️ WebSocket закрыт');
+        };
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            console.log('📦 WebSocket данные:', {
+                type: data.type,
+                count: data.count,
+                has_debug: !!data.debug,
+                has_masks: !!(data.debug && data.debug.masks),
+                masks_count: (data.debug && data.debug.masks) ? data.debug.masks.length : 0
+            });
+            
             if (data.type === 'count_update') {
                 document.getElementById('manualCount').value = data.count;
                 if (typeof recalcAvgWeight === 'function') {
@@ -1047,10 +1064,12 @@
                     lastMasks = data.debug.masks || [];
                     lastIds = data.debug.ids || null;
                     
-                        // Отладочная информация для масок (только при необходимости)
-                        if (data.debug.masks_debug && data.debug.masks_debug.count > 0) {
-                            console.log("🔍 Маски отладка:", data.debug.masks_debug);
-                        }
+                    console.log('🎨 Маски получены:', lastMasks ? lastMasks.length : 0);
+                    
+                    // Отладочная информация для масок (только при необходимости)
+                    if (data.debug.masks_debug && data.debug.masks_debug.count > 0) {
+                        console.log("🔍 Маски отладка:", data.debug.masks_debug);
+                    }
                     
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
                     
@@ -1078,6 +1097,8 @@
                     } catch (e) {}
                     
                     if (lastMasks && lastMasks.length) {
+                        console.log('🎨 Вызываю scheduleOverlay с', lastMasks.length, 'масками');
+                        
                         // Отправляем пересечения в модульную систему
                         if (window.appInstance && window.appInstance.videoManager && Array.isArray(data.debug.crossings)) {
                             try {
@@ -1089,6 +1110,8 @@
                         
                         scheduleOverlay(lastMasks, lastIds);
                         streamStatus.textContent = 'Live + overlay';
+                    } else {
+                        console.warn('⚠️ Нет масок для отрисовки');
                     }
                 }
                 if (data.debug && data.debug.flow) {
@@ -1280,8 +1303,16 @@
 
             function drawOverlay(masks, ids = null) {
                 if (!hasFirstFrame && !(masks && masks.length) && !(lastMasks && lastMasks.length)) {
+                    console.log('⏭️ Пропуск drawOverlay: нет первого кадра и масок');
                     return;
                 }
+        
+        console.log('🎨 drawOverlay вызван:', {
+            masks_count: masks ? masks.length : 0,
+            has_ids: !!ids,
+            hasFirstFrame: hasFirstFrame
+        });
+        
         syncOverlaySize();
         const ctx = overlayCanvas.getContext('2d');
         const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
