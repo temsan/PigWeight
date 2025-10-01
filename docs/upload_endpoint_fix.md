@@ -12,7 +12,6 @@
 2. **Конфликт модульных router'ов**: 
    - `api/endpoints/video.py` - `/api/upload` 
    - `api/endpoints/files.py` - `/api/upload`
-   - `api/simple_endpoints.py` - `/api/video/upload`
 3. **Middleware конфликты**: Неправильная обработка ошибок из-за множественных обработчиков
 
 ## Решение
@@ -33,7 +32,6 @@
 **Изменены пути endpoints:**
 - `api/endpoints/files.py` - `/api/upload` (основной для фронтенда)
 - `api/endpoints/video.py` - `/api/video/upload` (альтернативный)
-- `api/simple_endpoints.py` - отключен
 
 ### 3. Улучшение middleware
 

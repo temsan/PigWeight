@@ -1044,6 +1044,29 @@
                     
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
                     
+                    // Обработка пересечений линий для всплывающих счетчиков
+                    try {
+                        window.__lastCrossings = Array.isArray(data.debug.crossings) ? data.debug.crossings : [];
+                        const now = performance.now();
+                        window.__popups = window.__popups || [];
+                        const prevTs = window.__lastPopupTs || 0;
+                        const cr = window.__lastCrossings;
+                        let maxTs = prevTs;
+                        cr.forEach(c => {
+                            const tsMs = Number(c.ts || 0) * 1000;
+                            if (tsMs > prevTs) {
+                                const side = String(c.side || 'left');
+                                const mode = String(c.mode || 'enter');
+                                const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
+                                const text = isPositive ? '+1' : '-1';
+                                const color = isPositive ? '#51cf66' : '#ff6b6b';
+                                window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
+                            }
+                            if (tsMs > maxTs) maxTs = tsMs;
+                        });
+                        window.__lastPopupTs = maxTs;
+                    } catch (e) {}
+                    
                     if (lastMasks && lastMasks.length) {
                         // Отправляем пересечения в модульную систему
                         if (window.appInstance && window.appInstance.videoManager && Array.isArray(data.debug.crossings)) {

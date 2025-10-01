@@ -54,6 +54,13 @@ def test_system_status(server_url: str = "http://localhost:8000"):
             print(f"   - Статус: {status.get('status')}")
             print(f"   - Модель: {status.get('model_path')}")
             print(f"   - Устройство: {status.get('device')}")
+            active = status.get('active_streams') or []
+            if active:
+                print(f"   - Активные потоки: {', '.join(active)}")
+            available = status.get('available_videos') or []
+            if available:
+                sample = ', '.join(video['filename'] for video in available[:3])
+                print(f"   - Локальные файлы: {sample}")
             return True
         else:
             print(f"❌ Ошибка получения статуса: {response.status_code}")

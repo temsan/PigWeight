@@ -231,7 +231,9 @@ def main():
         print("✅ Конвертация завершена успешно!")
         print("=" * 60)
         print(f"📄 ONNX модель: {args.output_path}")
-        print("\n💡 Использование в коде:"        print("   from services.model_adapter import ModelAdapter"        print(f"   adapter = ModelAdapter('{args.output_path}')")
+        print("\n💡 Использование в коде:")
+        print("   from services.model_adapter import ModelAdapter")
+        print(f"   adapter = ModelAdapter('{args.output_path}')")
         print("   results = adapter.infer([image])")
     else:
         print("\n❌ Конвертация завершилась с ошибкой")

@@ -337,7 +337,7 @@ def setup_logging(debug: bool = False) -> logging.Logger:
             "core.processor", "core.frame_broker", "core.dynamic_batcher",
             "core.performance_monitor", "core.priority_frame_queue",
             "core.demo_generator", "core.h264_direct_track",
-            "api.app_backup", "api.simple_endpoints",
+            "api.app_backup", "api.endpoints.system",
             "api.webrtc", "api.av_worker", "api.app_modular",
             "perf.api", "perf.webrtc", "perf.results_store", "perf.frame_broker"
         ]

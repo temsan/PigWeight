@@ -1122,12 +1122,6 @@ from api import webrtc
 webrtc.init_webrtc(app, STREAM_MANAGER, FRAME_BROKER, config)
 
 # Подключаем упрощенные endpoints
-try:
-    from api.simple_endpoints import setup_endpoints
-    setup_endpoints(app)
-    logging.info("[OK] Simplified endpoints loaded")
-except Exception as e:
-    logging.error(f"[ERROR] Failed to load simplified endpoints: {e}")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

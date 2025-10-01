@@ -1379,7 +1379,7 @@ setup_request_logging(app)
 setup_security_headers(app)
 
 # Подключаем эндпоинты из модулей
-from api.endpoints import video, stream, health, files, diagnostics, events, records, verification
+from api.endpoints import video, stream, health, files, diagnostics, events, records, verification, system
 app.include_router(health.router, tags=["health"])
 app.include_router(video.router, tags=["video"])
 app.include_router(stream.router, tags=["stream"])
@@ -1387,6 +1387,7 @@ app.include_router(files.router, tags=["files"])
 app.include_router(diagnostics.router, tags=["diagnostics"])
 app.include_router(events.router, tags=["events"])
 app.include_router(records.router, tags=["records"])
+app.include_router(system.router, tags=["system"])
 app.include_router(verification.router, tags=["verification"])
 
 # Include WebRTC routes
@@ -1394,12 +1395,6 @@ from api import webrtc
 webrtc.init_webrtc(app, STREAM_MANAGER, FRAME_BROKER, config)
 
 # Подключаем упрощенные endpoints
-try:
-    from api.simple_endpoints import setup_endpoints
-    setup_endpoints(app)
-    logging.info("[OK] Simplified endpoints loaded")
-except Exception as e:
-    logging.error(f"[ERROR] Failed to load simplified endpoints: {e}")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -1448,6 +1443,7 @@ async def api_cameras():
 
 # Moved to api/endpoints/stream.py
 # @app.get("/api/stream/{stream_id}/info")
+# @app.get("/api/stream/{stream_id}/seek") - moved to api/endpoints/stream.py
 
 @app.post("/api/lines")
 async def api_set_lines(data: Dict[str, float]):
@@ -1459,16 +1455,6 @@ async def api_set_lines(data: Dict[str, float]):
     if right_x is not None:
         LINE_RIGHT_X = _clamp01(right_x)
     return {"status": "ok", "left_x": LINE_LEFT_X, "right_x": LINE_RIGHT_X}
-
-@app.get("/api/stream/{stream_id}/seek")
-async def api_stream_seek(stream_id: str, t: float):
-    stream = STREAM_MANAGER.streams.get(stream_id)
-    if not stream:
-        return JSONResponse({"error": "stream not found"}, status_code=404)
-    if not isinstance(stream, FileStream):
-        return JSONResponse({"error": "seek supported only for file streams"}, status_code=400)
-    await stream.seek(max(0.0, float(t)))
-    return {"status": "ok", "current_time": float(stream.current_time)}
 
 @app.post("/api/stream/{stream_id}/line_positions")
 async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Body(...)):
@@ -3054,6 +3040,8 @@ async def websocket_endpoint(ws: WebSocket, id: str = Query(...)):
             await ws.receive_text() 
     except WebSocketDisconnect:
         await STREAM_MANAGER.unregister_websocket(id, ws)
+
+
 
 
 
