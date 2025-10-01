@@ -57,31 +57,17 @@ export class VideoManager extends EventEmitter {
         this.webrtcVideo = document.getElementById('webrtcVideo');
         this.overlayCanvas = document.getElementById('overlayCanvas');
         
-        if (this.overlayCanvas) {
-            this.overlayContext = this.overlayCanvas.getContext('2d');
-        }
+        // НЕ берем context здесь - оставляем для модульной системы
     }
     
     initializeOverlay() {
         if (!this.overlayCanvas) return;
         
-        try {
-            // Создаем OffscreenCanvas для worker
-            if (typeof OffscreenCanvas !== 'undefined') {
-                this.offscreenCanvas = this.overlayCanvas.transferControlToOffscreen();
-                this.maskWorker = new Worker('/static/js/mask-worker.js');
-                
-                this.maskWorker.postMessage({
-                    type: 'init',
-                    canvas: this.offscreenCanvas
-                }, [this.offscreenCanvas]);
-                
-                console.log('✅ Overlay worker инициализирован');
-            } else {
-                console.log('⚠️ OffscreenCanvas не поддерживается, используем основной поток');
-            }
-        } catch (error) {
-            console.warn('⚠️ Не удалось инициализировать overlay worker:', error);
+        // Отключаем OffscreenCanvas worker - используем только основной поток
+        // Это проще и надежнее для нашего случая
+        if (this.overlayCanvas) {
+            this.overlayContext = this.overlayCanvas.getContext('2d');
+            console.log('✅ Overlay context инициализирован в основном потоке');
         }
     }
     
