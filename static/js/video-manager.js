@@ -82,7 +82,15 @@ export class VideoManager extends EventEmitter {
     setupEventHandlers() {
         // Обработчики изменения размера
         window.addEventListener('resize', () => {
+            console.log('🔄 Изменение размера окна, обновляем overlay');
             this.updateOverlaySize();
+            // Принудительно перерисовываем overlay после изменения размера
+            if (this.lastMasks && this.lastIds) {
+                setTimeout(() => {
+                    console.log('🔄 Принудительная перерисовка overlay после resize');
+                    this.drawOverlayDirect(this.lastMasks, this.lastIds);
+                }, 100);
+            }
         });
         
         // Обработчики видео элементов
@@ -155,6 +163,9 @@ export class VideoManager extends EventEmitter {
             console.log('🚫 scheduleOverlay пропущен - overlay отключен');
             return;
         }
+        
+        // Принудительно обновляем размеры canvas при получении новых масок
+        this.updateOverlaySize();
         
         if (performance.now() < this.overlayBlockUntil) {
             console.log('🚫 scheduleOverlay заблокирован до:', this.overlayBlockUntil);
