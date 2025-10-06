@@ -646,132 +646,155 @@ class VideoStream(abc.ABC):
                 prev_inside = bool(self._track_is_inside.get(tid, (prev is not None and L <= prev <= R)))
                 cur_inside = bool(L <= cx <= R)
 
+                # Отладочная информация для понимания логики
+                if prev is not None and prev_y is not None:
+                    logger.debug(f"Track {tid}: prev=({prev:.3f}, {prev_y:.3f}) -> cur=({cx:.3f}, {cy:.3f}), "
+                               f"prev_inside={prev_inside}, cur_inside={cur_inside}, lines=({L:.3f}, {R:.3f})")
+
                 def _interp_y(px, py, qx, qy, lx):
+                    """Интерполяция Y-координаты в точке пересечения линии"""
                     try:
+                        # Проверяем, что линия не вертикальная
+                        if abs(float(qx) - float(px)) < 1e-6:
+                            return float(cy)
+                        
+                        # Линейная интерполяция
                         t = (float(lx) - float(px)) / (float(qx) - float(px))
-                        return max(0.0, min(1.0, float(py) + t * (float(qy) - float(py))))
-                    except Exception:
+                        interpolated_y = float(py) + t * (float(qy) - float(py))
+                        
+                        # Ограничиваем результат диапазоном [0, 1]
+                        return max(0.0, min(1.0, interpolated_y))
+                    except Exception as e:
+                        logger.warning(f"Ошибка интерполяции Y: {e}, используем текущую Y={cy}")
                         return float(cy)
 
                 if prev is not None and prev_y is not None:
+                    # Проверяем общий cooldown для трека
+                    track_cooldown_key = f"track_{tid}"
+                    if now - self._track_last_side_time.get(track_cooldown_key, 0.0) < config.CROSS_COOLDOWN_SEC:
+                        # Пропускаем событие из-за cooldown
+                        self._track_prev_x[tid] = cx
+                        self._track_prev_y[tid] = cy
+                        self._track_is_inside[tid] = cur_inside
+                        continue
+                    
                     # enter events
                     if (not prev_inside) and cur_inside:
-                        if prev < L <= cx:
+                        if prev < L <= cx:  # Вход слева (свинья идет вправо)
                             key = (tid, 'enter_left')
-                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
-                                self.left_in += 1
-                                self.total_crossings += 1
-                                self.left_flow += 1
-                                self._track_last_side_time[key] = now
-                                logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
-                                y_at = _interp_y(prev, prev_y, cx, cy, L)
-                                logger.debug(f"LEFT ENTER crossing: track={tid}, prev=({prev:.3f}, {prev_y:.3f}), cur=({cx:.3f}, {cy:.3f}), line_x={L:.3f}, y_at={y_at:.3f}")
-                                self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события пересечения линии (неблокирующее)
-                                if self.event_logger:
-                                    # Создаем задачу в фоне без ожидания
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'left', 'enter', int(tid), self.left_in, L, y_at
-                                        ))
-                                    except Exception:
-                                        pass  # Игнорируем ошибки журналирования
+                            self.left_in += 1
+                            self.total_crossings += 1
+                            self.left_flow += 1
+                            self._track_last_side_time[key] = now
+                            self._track_last_side_time[track_cooldown_key] = now
+                            logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}")
+                            y_at = _interp_y(prev, prev_y, cx, cy, L)
+                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события пересечения линии (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "left", "mode": "enter",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(L), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
-                                    if int(tid) not in self._left_cross_rank:
-                                        self._left_cross_rank[int(tid)] = self._left_cross_counter
-                                        self._left_cross_counter += 1
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'left', 'enter', int(tid), self.left_in, L, y_at
+                                    ))
                                 except Exception:
                                     pass
-                        elif cx > R >= prev:
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "left", "mode": "enter",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(L), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                                if int(tid) not in self._left_cross_rank:
+                                    self._left_cross_rank[int(tid)] = self._left_cross_counter
+                                    self._left_cross_counter += 1
+                            except Exception:
+                                pass
+                        elif prev <= R < cx:  # Вход справа (свинья идет влево)
                             key = (tid, 'enter_right')
-                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
-                                self.right_in += 1
-                                self.total_crossings += 1
-                                self.right_flow += 1
-                                self._track_last_side_time[key] = now
-                                logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
-                                y_at = _interp_y(prev, prev_y, cx, cy, R)
-                                logger.debug(f"RIGHT ENTER crossing: track={tid}, prev=({prev:.3f}, {prev_y:.3f}), cur=({cx:.3f}, {cy:.3f}), line_x={R:.3f}, y_at={y_at:.3f}")
-                                self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события пересечения линии (неблокирующее)
-                                if self.event_logger:
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'right', 'enter', int(tid), self.right_in, R, y_at
-                                        ))
-                                    except Exception:
-                                        pass
+                            self.right_in += 1
+                            self.total_crossings += 1
+                            self.right_flow += 1
+                            self._track_last_side_time[key] = now
+                            self._track_last_side_time[track_cooldown_key] = now
+                            logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}")
+                            y_at = _interp_y(prev, prev_y, cx, cy, R)
+                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события пересечения линии (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "right", "mode": "enter",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(R), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'right', 'enter', int(tid), self.right_in, R, y_at
+                                    ))
                                 except Exception:
                                     pass
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "right", "mode": "enter",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(R), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
                     # exit events
                     if prev_inside and (not cur_inside):
-                        if cx < L <= prev:
+                        if cx < L <= prev:  # Выход слева (свинья идет влево)
                             key = (tid, 'exit_left')
-                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
-                                self.left_in = max(0, self.left_in - 1)
-                                self.left_flow -= 1
-                                self._track_last_side_time[key] = now
-                                y_at = _interp_y(prev, prev_y, cx, cy, L)
-                                self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события выхода (неблокирующее)
-                                if self.event_logger:
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'left', 'exit', int(tid), self.left_in, L, y_at
-                                        ))
-                                    except Exception:
-                                        pass
+                            self.left_in = max(0, self.left_in - 1)
+                            self.left_flow -= 1
+                            self._track_last_side_time[key] = now
+                            self._track_last_side_time[track_cooldown_key] = now
+                            y_at = _interp_y(prev, prev_y, cx, cy, L)
+                            logger.info(f"LEFT EXIT: track {tid}, left_in={self.left_in}")
+                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события выхода (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "left", "mode": "exit",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(L), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'left', 'exit', int(tid), self.left_in, L, y_at
+                                    ))
                                 except Exception:
                                     pass
-                        elif prev > R >= cx:
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "left", "mode": "exit",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(L), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
+                        elif prev >= R > cx:  # Выход справа (свинья идет вправо)
                             key = (tid, 'exit_right')
-                            if now - self._track_last_side_time.get(key, 0.0) >= (config.CROSS_COOLDOWN_SEC * 0.3):
-                                self.right_in = max(0, self.right_in - 1)
-                                self.right_flow -= 1
-                                self._track_last_side_time[key] = now
-                                y_at = _interp_y(prev, prev_y, cx, cy, R)
-                                self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события выхода (неблокирующее)
-                                if self.event_logger:
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'right', 'exit', int(tid), self.right_in, R, y_at
-                                        ))
-                                    except Exception:
-                                        pass
+                            self.right_in = max(0, self.right_in - 1)
+                            self.right_flow -= 1
+                            self._track_last_side_time[key] = now
+                            self._track_last_side_time[track_cooldown_key] = now
+                            y_at = _interp_y(prev, prev_y, cx, cy, R)
+                            logger.info(f"RIGHT EXIT: track {tid}, right_in={self.right_in}")
+                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события выхода (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "right", "mode": "exit",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(R), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'right', 'exit', int(tid), self.right_in, R, y_at
+                                    ))
                                 except Exception:
                                     pass
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "right", "mode": "exit",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(R), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
 
                 self._track_prev_x[tid] = cx
                 self._track_prev_y[tid] = cy
@@ -2565,7 +2588,7 @@ async def get_weighing_stats(
 
 @app.get("/api/export/weighing")
 async def export_weighing_data(
-    format: str = Query("excel", regex="^(excel|csv)$"),
+    format: str = Query("excel", pattern="^(excel|csv)$"),
     date_from: str = Query(None),
     date_to: str = Query(None)
 ):
@@ -2829,92 +2852,6 @@ async def get_weighing_stats(
         logger.error(f"Error getting weighing stats: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-# === API для экспорта данных ===
-
-@app.get("/api/export/weighing")
-async def export_weighing_data(
-    format: str = Query("excel", regex="^(excel|csv)$"),
-    date_from: str = Query(None),
-    date_to: str = Query(None)
-):
-    """Экспорт данных актов взвешивания в Excel или CSV"""
-    try:
-        acts_file = RECORDS_DIR / "weighing_acts.json"
-        if not acts_file.exists():
-            return JSONResponse({"error": "Нет данных для экспорта"}, status_code=404)
-        
-        with open(acts_file, 'r', encoding='utf-8') as f:
-            acts = json.load(f)
-        
-        # Фильтрация по датам
-        if date_from or date_to:
-            filtered_acts = []
-            for act in acts:
-                act_date = act.get('date', '')
-                if date_from and act_date < date_from:
-                    continue
-                if date_to and act_date > date_to:
-                    continue
-                filtered_acts.append(act)
-            acts = filtered_acts
-        
-        if not acts:
-            return JSONResponse({"error": "Нет данных в указанном диапазоне дат"}, status_code=404)
-        
-        # Подготовка данных для экспорта
-        export_data = []
-        for act in acts:
-            export_data.append({
-                'Дата': act.get('date', ''),
-                'Время': act.get('time', ''),
-                'Группа': act.get('group', ''),
-                'Количество голов': act.get('total', 0),
-                'Общий вес (кг)': act.get('weight', 0),
-                'Средний вес (кг)': act.get('avg_weight', 0),
-                'Источник': act.get('source', ''),
-                'ID потока': act.get('stream_id', '')
-            })
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        if format == "excel":
-            try:
-                import pandas as pd
-                df = pd.DataFrame(export_data)
-                filename = f"weighing_export_{timestamp}.xlsx"
-                filepath = RECORDS_DIR / filename
-                df.to_excel(filepath, index=False, engine='openpyxl')
-                
-                return FileResponse(
-                    filepath,
-                    filename=filename,
-                    media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                )
-            except ImportError:
-                # Fallback to CSV if pandas/openpyxl not available
-                format = "csv"
-        
-        if format == "csv":
-            filename = f"weighing_export_{timestamp}.csv"
-            filepath = RECORDS_DIR / filename
-            
-            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-                if export_data:
-                    fieldnames = export_data[0].keys()
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(export_data)
-            
-            return FileResponse(
-                filepath,
-                filename=filename,
-                media_type='text/csv'
-            )
-        
-    except Exception as e:
-        logger.error(f"Error exporting weighing data: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
 # === API для журнала актов взвешивания ===
 
 @app.get("/api/journal/list")
@@ -2982,7 +2919,7 @@ async def get_journal_acts(
 
 @app.get("/api/journal/export")
 async def export_journal_acts(
-    format: str = Query("csv", regex="^(csv|excel)$"),
+    format: str = Query("csv", pattern="^(csv|excel)$"),
     date_from: str = Query(None),
     date_to: str = Query(None)
 ):

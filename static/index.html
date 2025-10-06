@@ -1104,6 +1104,11 @@
                         const prevTs = window.__lastPopupTs || 0;
                         const cr = window.__lastCrossings;
                         let maxTs = prevTs;
+                        
+                        // Получаем актуальные позиции линий
+                        const linePositions = data.debug.lines || { left_x: 0.25, right_x: 0.75 };
+                        const leftLineX = Number(linePositions.left_x || 0.25);
+                        const rightLineX = Number(linePositions.right_x || 0.75);
                         cr.forEach(c => {
                             const tsMs = Number(c.ts || 0) * 1000;
                             if (tsMs > prevTs) {
@@ -1112,7 +1117,16 @@
                                 const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
                                 const text = isPositive ? '+1' : '-1';
                                 const color = isPositive ? '#51cf66' : '#ff6b6b';
-                                window.__popups.push({ x: Number(c.x)||0.5, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
+                                
+                                // Используем актуальные позиции линий для X-координаты
+                                let x = Number(c.x) || 0.5;
+                                if (side === 'left' && Math.abs(x - leftLineX) > 0.01) {
+                                    x = leftLineX;
+                                } else if (side === 'right' && Math.abs(x - rightLineX) > 0.01) {
+                                    x = rightLineX;
+                                }
+                                
+                                window.__popups.push({ x: x, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
                             }
                             if (tsMs > maxTs) maxTs = tsMs;
                         });
@@ -1120,27 +1134,16 @@
                     } catch (e) {}
                     
                     if (lastMasks && lastMasks.length) {
-                        console.log('🎨 Вызываю scheduleOverlay с', lastMasks.length, 'масками');
                         
                         // Отправляем пересечения в модульную систему
-                        console.log('🔍 Проверяю window.appInstance:', {
-                            hasAppInstance: !!window.appInstance,
-                            hasVideoManager: !!(window.appInstance && window.appInstance.videoManager),
-                            appInstance: window.appInstance
-                        });
-                        
-                        console.log('🔍 Проверяю window.appInstance:', {
-                            hasAppInstance: !!window.appInstance,
-                            hasVideoManager: !!(window.appInstance && window.appInstance.videoManager),
-                            appInstance: window.appInstance
-                        });
                         
                         if (window.appInstance && window.appInstance.videoManager) {
                             try {
                                 if (Array.isArray(data.debug.crossings)) {
-                                window.appInstance.videoManager.handleCrossings(data.debug.crossings);
+                                    // Передаем актуальные позиции линий для правильного позиционирования счетчиков
+                                    const linePositions = data.debug.lines || { left_x: 0.25, right_x: 0.75 };
+                                    window.appInstance.videoManager.handleCrossings(data.debug.crossings, linePositions);
                                 }
-                                console.log('🎯 Вызываю window.appInstance.videoManager.scheduleOverlay');
                                 window.appInstance.videoManager.scheduleOverlay(lastMasks, lastIds);
                             } catch (error) {
                                 console.warn('⚠️ Ошибка модульной overlay системы:', error);

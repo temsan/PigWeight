@@ -687,7 +687,7 @@ export class VideoManager extends EventEmitter {
         }
     }
     
-    handleCrossings(crossings) {
+    handleCrossings(crossings, linePositions = null) {
         // Обрабатываем пересечения линий для создания всплывающих счетчиков
         if (!Array.isArray(crossings) || crossings.length === 0) return;
         
@@ -698,6 +698,11 @@ export class VideoManager extends EventEmitter {
             this.popupCounters = [];
         }
         
+        // Получаем актуальные позиции линий
+        const lines = linePositions || { left_x: 0.25, right_x: 0.75 };
+        const leftLineX = Number(lines.left_x || 0.25);
+        const rightLineX = Number(lines.right_x || 0.75);
+        
         // Отслеживаем последний timestamp для избежания дубликатов
         const prevTs = this.lastPopupTimestamp || 0;
         let maxTs = prevTs;
@@ -707,14 +712,27 @@ export class VideoManager extends EventEmitter {
             if (tsMs > prevTs) {
                 const side = String(crossing.side || 'left');
                 const mode = String(crossing.mode || 'enter');
+                
+                // Правильная логика определения знака:
+                // Вход слева (свинья идет вправо) = +1
+                // Выход слева (свинья идет влево) = -1  
+                // Вход справа (свинья идет влево) = -1
+                // Выход справа (свинья идет вправо) = +1
                 const isPositive = (side === 'left' && mode === 'enter') || (side === 'right' && mode === 'exit');
                 
                 const text = isPositive ? '+1' : '-1';
                 const color = isPositive ? '#51cf66' : '#ff6b6b';
                 
-                // Координаты уже нормализованы (0-1) с сервера
-                const x = Number(crossing.x || 0.5);
+                // Используем актуальные позиции линий для X-координаты
+                let x = Number(crossing.x || 0.5);
                 const y = Number(crossing.y || 0.5);
+                
+                // Если координата X не соответствует актуальной позиции линии, корректируем её
+                if (side === 'left' && Math.abs(x - leftLineX) > 0.01) {
+                    x = leftLineX;
+                } else if (side === 'right' && Math.abs(x - rightLineX) > 0.01) {
+                    x = rightLineX;
+                }
                 
                 this.popupCounters.push({
                     x: x,
@@ -725,8 +743,6 @@ export class VideoManager extends EventEmitter {
                     duration: 1200,
                     riseDistance: 40
                 });
-                
-                console.log(`🎆 Создан всплывающий счетчик: ${text} на нормализованных координатах (${x.toFixed(3)}, ${y.toFixed(3)})`);
             }
             if (tsMs > maxTs) maxTs = tsMs;
         });
