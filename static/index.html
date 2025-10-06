@@ -957,6 +957,14 @@
                     lastIds = data.debug.ids || null;
                     
                     console.log('🎨 Маски получены:', lastMasks ? lastMasks.length : 0);
+                    console.log('🔍 Debug данные:', {
+                        hasMasks: !!data.debug.masks,
+                        masksCount: data.debug.masks ? data.debug.masks.length : 0,
+                        hasIds: !!data.debug.ids,
+                        idsCount: data.debug.ids ? data.debug.ids.length : 0,
+                        hasLines: !!data.debug.lines,
+                        lines: data.debug.lines
+                    });
                     
                         // Отладочная информация для масок (только при необходимости)
                         if (data.debug.masks_debug && data.debug.masks_debug.count > 0) {
@@ -998,6 +1006,12 @@
                             appInstance: window.appInstance
                         });
                         
+                        console.log('🔍 Проверяю window.appInstance:', {
+                            hasAppInstance: !!window.appInstance,
+                            hasVideoManager: !!(window.appInstance && window.appInstance.videoManager),
+                            appInstance: window.appInstance
+                        });
+                        
                         if (window.appInstance && window.appInstance.videoManager) {
                             try {
                                 if (Array.isArray(data.debug.crossings)) {
@@ -1008,6 +1022,8 @@
                             } catch (error) {
                                 console.warn('⚠️ Ошибка модульной overlay системы:', error);
                             }
+                        } else {
+                            console.warn('⚠️ window.appInstance или videoManager недоступны');
                         }
                         
                         streamStatus.textContent = 'Live + overlay';
