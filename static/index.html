@@ -691,6 +691,8 @@
         initChart();
         // Модульная overlay система запускается автоматически в VideoManager
         idAliases = loadAliases(streamId);
+        // Синхронизируем с глобальной переменной для video-manager.js
+        window.idAliases = idAliases;
 
         // Configure seek UI (robust): drive state from /info on every poll
         if (seekTimer) { clearInterval(seekTimer); seekTimer = null; }
@@ -1255,6 +1257,8 @@
         const trimmed = String(val).trim();
         if (trimmed === '') { delete idAliases[instId]; } else { idAliases[instId] = trimmed; }
         if (activeStreamId) saveAliases(activeStreamId);
+        // Синхронизируем с глобальной переменной для video-manager.js
+        window.idAliases = idAliases;
         drawOverlay(lastMasks, lastIds);
     });
 
@@ -2682,30 +2686,30 @@
         const recordsHtml = dayRecords.map(record => {
           const count = record.total_count || 0;
           const weight = record.total_weight || 0;
-          const avgWeight = count > 0 ? (weight / count).toFixed(1) : '0.0';
+        const avgWeight = count > 0 ? (weight / count).toFixed(1) : '0.0';
           const group = record.group || 'Не указана';
           const time = record.time || '';
-          
-          return `
-            <div class="journal-item">
-              <div class="journal-item-info">
+        
+        return `
+          <div class="journal-item">
+            <div class="journal-item-info">
                 <div class="journal-item-time">${time}</div>
                 <div class="journal-item-group">${group}</div>
-                <div class="journal-item-metrics">
-                  <div class="journal-item-metric">
-                    <div class="journal-item-metric-value">${count}</div>
-                    <div class="journal-item-metric-label">голов</div>
-                  </div>
-                  <div class="journal-item-metric">
+              <div class="journal-item-metrics">
+                <div class="journal-item-metric">
+                  <div class="journal-item-metric-value">${count}</div>
+                  <div class="journal-item-metric-label">голов</div>
+                </div>
+                <div class="journal-item-metric">
                     <div class="journal-item-metric-value">${weight.toFixed(1)}</div>
-                    <div class="journal-item-metric-label">кг</div>
-                  </div>
-                  <div class="journal-item-metric">
-                    <div class="journal-item-metric-value">${avgWeight}</div>
-                    <div class="journal-item-metric-label">кг/гол</div>
-                  </div>
+                  <div class="journal-item-metric-label">кг</div>
+                </div>
+                <div class="journal-item-metric">
+                  <div class="journal-item-metric-value">${avgWeight}</div>
+                  <div class="journal-item-metric-label">кг/гол</div>
                 </div>
               </div>
+            </div>
               <div class="journal-item-camera">${record.name || 'unknown'}</div>
             </div>
           `;

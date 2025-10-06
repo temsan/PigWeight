@@ -114,13 +114,21 @@ export class VideoManager extends EventEmitter {
         const height = Math.floor(rect.height);
         
         if (this.overlayCanvas.width !== width || this.overlayCanvas.height !== height) {
+            console.log('🔄 Изменение размера overlay canvas:', {
+                old: { w: this.overlayCanvas.width, h: this.overlayCanvas.height },
+                new: { w: width, h: height }
+            });
+            
             this.overlayCanvas.width = width;
             this.overlayCanvas.height = height;
             
             // Принудительно перерисовываем overlay после изменения размера
             if (this.lastMasks && this.lastIds) {
                 console.log('🔄 Перерисовка overlay после изменения размера');
-                this.drawOverlayDirect(this.lastMasks, this.lastIds);
+                // Небольшая задержка для стабилизации размеров
+                setTimeout(() => {
+                    this.drawOverlayDirect(this.lastMasks, this.lastIds);
+                }, 50);
             }
             
             // Обновляем размер в worker
@@ -338,28 +346,50 @@ export class VideoManager extends EventEmitter {
     getRenderedImageRect() {
         // Возвращает реальную область отображения кадра внутри wrapper с учётом object-fit: contain
         const wrapper = document.getElementById('videoWrapper');
-        const cw = wrapper ? wrapper.clientWidth : this.overlayCanvas.width;
-        const ch = wrapper ? wrapper.clientHeight : this.overlayCanvas.height;
-        
-        const webrtcEl = document.getElementById('webrtcVideo');
-        const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none';
-        
-        let iw = 0, ih = 0;
-        if (webrtcVisible) {
-            iw = webrtcEl.videoWidth || 0;
-            ih = webrtcEl.videoHeight || 0;
-        } else if (this.videoStream) {
-            iw = this.videoStream.naturalWidth || 0;
-            ih = this.videoStream.naturalHeight || 0;
+        if (!wrapper) {
+            console.warn('⚠️ videoWrapper не найден, используем размеры canvas');
+            return { x: 0, y: 0, w: this.overlayCanvas.width, h: this.overlayCanvas.height };
         }
         
-        if (!iw || !ih) return { x: 0, y: 0, w: cw, h: ch };
+        const cw = wrapper.clientWidth;
+        const ch = wrapper.clientHeight;
         
+        const webrtcEl = document.getElementById('webrtcVideo');
+        const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none' && webrtcEl.style.display !== 'none';
+        
+        let videoEl = null;
+        if (webrtcVisible) {
+            videoEl = webrtcEl;
+        } else if (this.videoStream) {
+            videoEl = this.videoStream;
+        }
+        
+        if (!videoEl) {
+            console.warn('⚠️ Видео элемент не найден, используем размеры wrapper');
+            return { x: 0, y: 0, w: cw, h: ch };
+        }
+        
+        // Получаем реальные размеры видео
+        const iw = videoEl.videoWidth || videoEl.naturalWidth || 0;
+        const ih = videoEl.videoHeight || videoEl.naturalHeight || 0;
+        
+        if (!iw || !ih) {
+            console.warn('⚠️ Размеры видео не определены, используем размеры wrapper');
+            return { x: 0, y: 0, w: cw, h: ch };
+        }
+        
+        // Вычисляем масштаб для object-fit: contain
         const scale = Math.min(cw / iw, ch / ih);
         const w = Math.round(iw * scale);
         const h = Math.round(ih * scale);
         const x = Math.floor((cw - w) / 2);
         const y = Math.floor((ch - h) / 2);
+        
+        console.log('📐 getRenderedImageRect:', {
+            wrapper: { w: cw, h: ch },
+            video: { w: iw, h: ih },
+            rendered: { x, y, w, h, scale: scale.toFixed(3) }
+        });
         
         return { x, y, w, h };
     }
@@ -384,8 +414,14 @@ export class VideoManager extends EventEmitter {
         const cy = rect.y + (sy / pc) * rect.h;
         
         // Получаем алиас для инстанса, если есть
-        const idAliases = window.idAliases || {};
+        // Проверяем как window.idAliases, так и глобальную переменную idAliases
+        const idAliases = window.idAliases || (typeof idAliases !== 'undefined' ? idAliases : {});
         const label = String(idAliases[instId] ?? instId);
+        
+        // Отладочная информация для алиасов
+        if (idAliases[instId]) {
+            console.log(`🏷️ Отображаем алиас для ID ${instId}: "${label}"`);
+        }
         
         // Рисуем label с обводкой для читаемости
         ctx.save();
