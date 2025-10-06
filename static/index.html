@@ -142,6 +142,127 @@
       color: var(--text-primary);
       padding: 0 8px;
     }
+    
+    /* Стили для группировки журнала */
+    .journal-date-group {
+      margin-bottom: 16px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    
+    .journal-date-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .journal-date-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    
+    .journal-date-summary {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    
+    .journal-date-records {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .journal-section-group {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+    }
+    
+    .journal-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .journal-section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    
+    .journal-section-summary {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    
+    .journal-section-records {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    
+    .journal-item {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .journal-item-info {
+      flex: 1;
+    }
+    
+    .journal-item-time {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    
+    .journal-item-group {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    
+    .journal-item-metrics {
+      display: flex;
+      gap: 12px;
+    }
+    
+    .journal-item-metric {
+      text-align: center;
+    }
+    
+    .journal-item-metric-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    
+    .journal-item-metric-label {
+      font-size: 10px;
+      color: var(--muted);
+    }
+    
+    .journal-item-camera {
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-family: monospace;
+    }
 
     /* Responsive Adjustments */
     @media (max-width: 1024px) {
@@ -2660,14 +2781,19 @@
         return;
       }
       
-      // Группируем по дате
+      // Группируем по дате, а внутри даты - по участкам взвешивания
       const groupedByDate = {};
       records.forEach(record => {
         const date = record.date || 'Неизвестная дата';
+        const section = record.weighing_section || 'Неизвестный участок';
+        
         if (!groupedByDate[date]) {
-          groupedByDate[date] = [];
+          groupedByDate[date] = {};
         }
-        groupedByDate[date].push(record);
+        if (!groupedByDate[date][section]) {
+          groupedByDate[date][section] = [];
+        }
+        groupedByDate[date][section].push(record);
       });
       
       // Сортируем даты
@@ -2678,39 +2804,63 @@
       });
       
       journalList.innerHTML = sortedDates.map(date => {
-        const dayRecords = groupedByDate[date];
-        const dayTotalCount = dayRecords.reduce((sum, record) => sum + (record.total_count || 0), 0);
-        const dayTotalWeight = dayRecords.reduce((sum, record) => sum + (record.total_weight || 0), 0);
+        const daySections = groupedByDate[date];
+        const dayTotalCount = Object.values(daySections).flat().reduce((sum, record) => sum + (record.total_count || 0), 0);
+        const dayTotalWeight = Object.values(daySections).flat().reduce((sum, record) => sum + (record.total_weight || 0), 0);
         const dayAvgWeight = dayTotalCount > 0 ? (dayTotalWeight / dayTotalCount).toFixed(1) : '0.0';
         
-        const recordsHtml = dayRecords.map(record => {
+        // Сортируем участки внутри даты
+        const sortedSections = Object.keys(daySections).sort();
+        
+        const sectionsHtml = sortedSections.map(section => {
+          const sectionRecords = daySections[section];
+          const sectionTotalCount = sectionRecords.reduce((sum, record) => sum + (record.total_count || 0), 0);
+          const sectionTotalWeight = sectionRecords.reduce((sum, record) => sum + (record.total_weight || 0), 0);
+          const sectionAvgWeight = sectionTotalCount > 0 ? (sectionTotalWeight / sectionTotalCount).toFixed(1) : '0.0';
+          
+          const recordsHtml = sectionRecords.map(record => {
           const count = record.total_count || 0;
           const weight = record.total_weight || 0;
         const avgWeight = count > 0 ? (weight / count).toFixed(1) : '0.0';
           const group = record.group || 'Не указана';
           const time = record.time || '';
         
-        return `
-          <div class="journal-item">
-            <div class="journal-item-info">
-                <div class="journal-item-time">${time}</div>
-                <div class="journal-item-group">${group}</div>
-              <div class="journal-item-metrics">
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${count}</div>
-                  <div class="journal-item-metric-label">голов</div>
+            return `
+              <div class="journal-item">
+                <div class="journal-item-info">
+                  <div class="journal-item-time">${time}</div>
+                  <div class="journal-item-group">${group}</div>
+                  <div class="journal-item-metrics">
+                    <div class="journal-item-metric">
+                      <div class="journal-item-metric-value">${count}</div>
+                      <div class="journal-item-metric-label">голов</div>
+                    </div>
+                    <div class="journal-item-metric">
+                      <div class="journal-item-metric-value">${weight.toFixed(1)}</div>
+                      <div class="journal-item-metric-label">кг</div>
+                    </div>
+                    <div class="journal-item-metric">
+                      <div class="journal-item-metric-value">${avgWeight}</div>
+                      <div class="journal-item-metric-label">кг/гол</div>
+                    </div>
+                  </div>
                 </div>
-                <div class="journal-item-metric">
-                    <div class="journal-item-metric-value">${weight.toFixed(1)}</div>
-                  <div class="journal-item-metric-label">кг</div>
-                </div>
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${avgWeight}</div>
-                  <div class="journal-item-metric-label">кг/гол</div>
+                <div class="journal-item-camera">${record.name || 'unknown'}</div>
+              </div>
+            `;
+          }).join('');
+          
+          return `
+            <div class="journal-section-group">
+              <div class="journal-section-header">
+                <div class="journal-section-title">${section}</div>
+                <div class="journal-section-summary">
+                  Голов: ${sectionTotalCount} Вес: ${sectionTotalWeight.toFixed(1)} кг Средний: ${sectionAvgWeight} кг
                 </div>
               </div>
-            </div>
-              <div class="journal-item-camera">${record.name || 'unknown'}</div>
+              <div class="journal-section-records">
+                ${recordsHtml}
+              </div>
             </div>
           `;
         }).join('');
@@ -2724,7 +2874,7 @@
               </div>
             </div>
             <div class="journal-date-records">
-              ${recordsHtml}
+              ${sectionsHtml}
             </div>
           </div>
         `;

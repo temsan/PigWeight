@@ -3070,39 +3070,107 @@ async def api_records_list():
                     data = json.load(f)
                     # Извлекаем дату и время из имени файла
                     filename = p.stem
-                    date_time = ""
-                    if "_" in filename:
-                        parts = filename.split("_")
-                        if len(parts) >= 3:
-                            date_time = parts[-1]  # Последняя часть содержит дату-время
-                    
-                    # Парсим дату и время
                     parsed_date = ""
                     parsed_time = ""
-                    if date_time:
-                        try:
-                            # Пытаемся парсить как timestamp
-                            if date_time.isdigit():
-                                timestamp = int(date_time)
-                                dt = datetime.fromtimestamp(timestamp)
+                    
+                    # Парсим имя файла: act_file_1757326054497_20250908-131236
+                    if "_" in filename:
+                        parts = filename.split("_")
+                        if len(parts) >= 4:  # act, file, timestamp, date-time
+                            # Последняя часть содержит дату-время в формате YYYYMMDD-HHMMSS
+                            date_time_part = parts[-1]
+                            if "-" in date_time_part and len(date_time_part) == 15:  # YYYYMMDD-HHMMSS
+                                try:
+                                    date_part = date_time_part[:8]  # YYYYMMDD
+                                    time_part = date_time_part[9:]  # HHMMSS
+                                    
+                                    # Парсим дату
+                                    year = int(date_part[:4])
+                                    month = int(date_part[4:6])
+                                    day = int(date_part[6:8])
+                                    
+                                    # Парсим время
+                                    hour = int(time_part[:2])
+                                    minute = int(time_part[2:4])
+                                    second = int(time_part[4:6])
+                                    
+                                    dt = datetime(year, month, day, hour, minute, second)
+                                    parsed_date = dt.strftime("%Y-%m-%d")
+                                    parsed_time = dt.strftime("%H:%M:%S")
+                                except:
+                                    # Fallback: используем timestamp из данных
+                                    if 'started_at' in data:
+                                        try:
+                                            dt = datetime.fromtimestamp(data['started_at'])
+                                            parsed_date = dt.strftime("%Y-%m-%d")
+                                            parsed_time = dt.strftime("%H:%M:%S")
+                                        except:
+                                            parsed_date = "Неизвестная дата"
+                                            parsed_time = ""
+                                    else:
+                                        parsed_date = "Неизвестная дата"
+                                        parsed_time = ""
+                            else:
+                                # Fallback: используем timestamp из данных
+                                if 'started_at' in data:
+                                    try:
+                                        dt = datetime.fromtimestamp(data['started_at'])
+                                        parsed_date = dt.strftime("%Y-%m-%d")
+                                        parsed_time = dt.strftime("%H:%M:%S")
+                                    except:
+                                        parsed_date = "Неизвестная дата"
+                                        parsed_time = ""
+                                else:
+                                    parsed_date = "Неизвестная дата"
+                                    parsed_time = ""
+                        else:
+                            # Fallback: используем timestamp из данных
+                            if 'started_at' in data:
+                                try:
+                                    dt = datetime.fromtimestamp(data['started_at'])
+                                    parsed_date = dt.strftime("%Y-%m-%d")
+                                    parsed_time = dt.strftime("%H:%M:%S")
+                                except:
+                                    parsed_date = "Неизвестная дата"
+                                    parsed_time = ""
+                            else:
+                                parsed_date = "Неизвестная дата"
+                                parsed_time = ""
+                    else:
+                        # Fallback: используем timestamp из данных
+                        if 'started_at' in data:
+                            try:
+                                dt = datetime.fromtimestamp(data['started_at'])
                                 parsed_date = dt.strftime("%Y-%m-%d")
                                 parsed_time = dt.strftime("%H:%M:%S")
-                            else:
-                                # Пытаемся парсить как дату-время
-                                if "-" in date_time:
-                                    date_part, time_part = date_time.split("-", 1)
-                                    parsed_date = date_part
-                                    parsed_time = time_part
-                        except:
-                            # Если не удалось парсить, используем как есть
-                            parsed_date = date_time
+                            except:
+                                parsed_date = "Неизвестная дата"
+                                parsed_time = ""
+                        else:
+                            parsed_date = "Неизвестная дата"
                             parsed_time = ""
+                    
+                    # Определяем участок взвешивания из stream_id
+                    stream_id = data.get("stream_id", "")
+                    weighing_section = "Неизвестный участок"
+                    if stream_id.startswith("file_"):
+                        # Для файлов используем имя файла как участок
+                        weighing_section = stream_id.replace("file_", "Файл ")
+                    elif stream_id.startswith("rtsp_"):
+                        # Для RTSP используем ID камеры
+                        weighing_section = f"Камера {stream_id.replace('rtsp_', '')}"
+                    elif stream_id.startswith("demo_"):
+                        # Для демо потока
+                        weighing_section = "Демо поток"
+                    else:
+                        weighing_section = stream_id
                     
                     items.append({
                         "name": p.stem,
                         "date": parsed_date,
                         "time": parsed_time,
                         "group": data.get("stream_id", ""),
+                        "weighing_section": weighing_section,
                         "total_count": data.get("seen_total", 0),
                         "total_weight": 0,  # В текущем формате нет веса
                         "avg_weight": 0,    # В текущем формате нет веса
