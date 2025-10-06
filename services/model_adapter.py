@@ -70,8 +70,11 @@ class ModelAdapter:
         
         perf_logger = logging.getLogger("perf.model_adapter")
 
-        # Priority: ONNX (CPU) > Ultralytics (GPU/CPU) > TorchScript
-        if self.model_path and self.model_path.endswith('.onnx') and _HAVE_ONNX:
+        # Priority: PyTorch (GPU) > ONNX (CPU) > TorchScript
+        # Проверяем предпочтения пользователя
+        prefer_onnx = os.getenv('PREFER_ONNX', 'false').lower() == 'true'
+        
+        if prefer_onnx and self.model_path and self.model_path.endswith('.onnx') and _HAVE_ONNX:
             # ONNX model - optimized for CPU inference
             perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Loading ONNX model from {self.model_path} for CPU inference")
             try:
@@ -89,7 +92,7 @@ class ModelAdapter:
                 logger.warning(f"Failed to load ONNX model {self.model_path}: {e}")
                 self._sess = None
 
-        elif self.model_path and self.model_path.endswith('.pt') and _HAVE_ULTRALYTICS:
+        if self.model_path and self.model_path.endswith('.pt') and _HAVE_ULTRALYTICS:
             perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Loading Ultralytics model from {self.model_path} on device={self.device}")
             try:
                 logger.info(f"Loading ultralytics model from {self.model_path} on device={self.device}")
@@ -131,7 +134,8 @@ class ModelAdapter:
             except Exception:
                 pass
 
-        if not self._yolo and _HAVE_ONNX and self.model_path.endswith('.onnx'):
+        # Fallback: если PyTorch не загрузился, пробуем ONNX
+        if not self._yolo and prefer_onnx and _HAVE_ONNX and self.model_path.endswith('.onnx'):
             try:
                 logger.info(f"Loading ONNX model from {self.model_path}")
                 self._sess = ort.InferenceSession(self.model_path, providers=['CPUExecutionProvider'])
