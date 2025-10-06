@@ -127,7 +127,7 @@ def map_polys_from_center_crop(polys, transform_meta: Dict[str, Any]) -> list:
     return mapped_polys
 
 
-def center_crop_resize(frame: np.ndarray, target_size: int = 960) -> Dict[str, Any]:
+def center_crop_resize(frame: np.ndarray, target_size: int = 640) -> Dict[str, Any]:
     """Центрирует кадр, приводит его к квадрату target_size и возвращает метаданные."""
     h, w = frame.shape[:2]
     crop_size = min(h, w)
@@ -135,21 +135,12 @@ def center_crop_resize(frame: np.ndarray, target_size: int = 960) -> Dict[str, A
     start_y = max(0, (h - crop_size) // 2)
     cropped = frame[start_y:start_y + crop_size, start_x:start_x + crop_size]
 
+    # Упрощенная версия без дополнительного padding для ускорения
     if cropped.shape[0] != target_size:
-        resized = cv2.resize(cropped, (target_size, target_size))
-    else:
-        resized = cropped
-
-    padding_height = int(round(target_size * 0.075))
-    if padding_height > 0:
-        final_img = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-        content_start = padding_height
-        content_end = target_size - padding_height
-        content_height = max(1, content_end - content_start)
-        content_resized = cv2.resize(resized, (target_size, content_height))
-        final_img[content_start:content_end, :, :] = content_resized
-    else:
+        resized = cv2.resize(cropped, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
         final_img = resized
+    else:
+        final_img = cropped
 
     transform_meta = {
         'original_size': (w, h),

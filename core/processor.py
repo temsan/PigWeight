@@ -16,6 +16,7 @@ from services.model_adapter import ModelAdapter
 from core.preprocess import center_crop_resize
 from core.preprocess import map_polys_from_center_crop
 from core.dynamic_batcher import DynamicBatcher, BatcherConfig
+from core.priority_frame_queue import PriorityFrameQueue
 
 # Импорт системы событий
 try:
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 class ProcessingOptions:
     """Опции для обработки кадра."""
     conf_threshold: float = 0.3
-    img_size: int = 960
+    img_size: int = 640  # Уменьшено для ускорения обработки
 
 @dataclass
 class FrameResult:
@@ -74,6 +75,13 @@ class UnifiedVideoProcessor:
         self.peak_count = 0
         self.last_event_time = 0.0
         self.event_cooldown = 2.0  # Минимальный интервал между событиями одного типа
+        
+        # Приоритетная очередь для кадров
+        self.priority_queue = PriorityFrameQueue(
+            max_size_mb=100,  # Максимум 100MB в очереди
+            max_age_seconds=5.0,  # Максимум 5 секунд в очереди
+            cleanup_interval=1.0  # Очистка каждую секунду
+        )
         
         # Настройки для детекции линий (можно вынести в конфиг)
         self.line_left_x = getattr(CONFIG, "LINE_LEFT_X", 0.25)

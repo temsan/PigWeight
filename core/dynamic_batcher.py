@@ -21,14 +21,14 @@ T = TypeVar('T')  # Тип элементов батча
 class BatcherConfig:
     """Конфигурация батчера"""
     min_batch_size: int = 1
-    max_batch_size: int = 16
-    initial_batch_size: int = 4
-    target_latency_ms: float = 50.0
-    max_wait_time_ms: float = 100.0
-    adaptation_interval: float = 2.0  # Интервал адаптации в секундах
-    latency_tolerance: float = 0.2  # 20% толерантность для латентности
-    throughput_weight: float = 0.7  # Вес throughput vs latency (0.0 - только латентность, 1.0 - только throughput)
-    warmup_batches: int = 10  # Количество батчей для прогрева
+    max_batch_size: int = 8  # Уменьшено для снижения латентности
+    initial_batch_size: int = 2  # Уменьшено для быстрого старта
+    target_latency_ms: float = 30.0  # Уменьшено для плавного видео
+    max_wait_time_ms: float = 50.0  # Уменьшено для снижения задержки
+    adaptation_interval: float = 1.0  # Уменьшено для быстрой адаптации
+    latency_tolerance: float = 0.15  # Уменьшено для более строгого контроля
+    throughput_weight: float = 0.5  # Баланс между throughput и latency
+    warmup_batches: int = 5  # Уменьшено для быстрого прогрева
     
 @dataclass
 class BatchMetrics:
