@@ -112,6 +112,7 @@ class PigWeightApp {
 
 // Создаем глобальный экземпляр приложения
 window.pigWeightApp = new PigWeightApp();
+window.appInstance = window.pigWeightApp; // Алиас для совместимости
 
 // Автоинициализация при загрузке DOM
 document.addEventListener('DOMContentLoaded', async () => {
