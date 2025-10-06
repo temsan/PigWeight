@@ -1027,8 +1027,8 @@ async def _global_infer_loop(self):
             except Exception as e:
                 logger.error(f"Infer loop error on {self.stream_id}: {e}", exc_info=True)
             
-            # Минимальная задержка для стабильности
-            await asyncio.sleep(0.001)  # 1ms для предотвращения перегрузки CPU
+            # Адаптивная задержка для стабильности
+            await asyncio.sleep(0.005)  # 5ms для предотвращения перегрузки CPU
 
     
 
@@ -1302,8 +1302,21 @@ class StreamManager:
 
     async def broadcast(self, stream_id: str, data: dict):
         if stream_id in self.websockets:
+            # Отправляем данные асинхронно без блокировки
+            tasks = []
             for ws in self.websockets[stream_id]:
-                await ws.send_json(data)
+                try:
+                    task = asyncio.create_task(ws.send_json(data))
+                    tasks.append(task)
+                except Exception as e:
+                    logger.warning(f"Ошибка отправки WebSocket данных: {e}")
+            
+            # Ждем завершения всех отправок с таймаутом
+            if tasks:
+                try:
+                    await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=0.1)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Таймаут отправки WebSocket данных для {stream_id}")
 
 STREAM_MANAGER = StreamManager()
 # attach frame broker and start inference workers on-demand
