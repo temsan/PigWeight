@@ -118,6 +118,13 @@ export class VideoManager extends EventEmitter {
     }
     
     scheduleOverlay(masks, ids) {
+        console.log('🎯 scheduleOverlay вызван:', {
+            masksCount: masks ? masks.length : 0,
+            idsCount: ids ? ids.length : 0,
+            overlayBlockUntil: this.overlayBlockUntil,
+            currentTime: performance.now()
+        });
+        
         if (performance.now() < this.overlayBlockUntil) {
             console.log('🚫 scheduleOverlay заблокирован до:', this.overlayBlockUntil);
             return;
