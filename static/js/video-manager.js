@@ -33,6 +33,12 @@ export class VideoManager extends EventEmitter {
         this.maskWorker = null;
         this.offscreenCanvas = null;
         this.overlayRaf = null;
+        
+        // Инициализируем позиции линий по умолчанию
+        if (!window.__lines || typeof window.__lines.left_x !== 'number') {
+            window.__lines = { left_x: 0.25, right_x: 0.75 };
+            console.log('🔧 Инициализированы позиции линий по умолчанию:', window.__lines);
+        }
     }
     
     async init() {

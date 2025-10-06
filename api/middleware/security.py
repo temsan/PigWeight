@@ -27,9 +27,9 @@ def setup_security_headers(app: FastAPI):
         csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss: https://cdn.jsdelivr.net; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src 'none';"
         response.headers["Content-Security-Policy"] = csp
         
-        # Агрессивное отключение source maps
-        response.headers["SourceMap"] = "none"
-        response.headers["X-SourceMap"] = "none"
+        # Отключение source maps (без значения, чтобы избежать 404 ошибок)
+        # response.headers["SourceMap"] = "none"
+        # response.headers["X-SourceMap"] = "none"
         
         # Дополнительные заголовки для отключения source maps
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

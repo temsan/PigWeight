@@ -2594,7 +2594,7 @@
         if (dateTo) params.append('date_to', dateTo);
         if (camera) params.append('camera', camera);
         
-        const response = await fetch(`/api/journal/list?${params}`);
+        const response = await fetch(`/api/records?${params}`);
         const data = await response.json();
         
         if (data.error) {
@@ -2613,49 +2613,99 @@
 
     // Отображение актов в журнале
     function displayJournalActs(data) {
+      const records = data.records || [];
+      
+      // Вычисляем статистику
+      const totalActs = records.length;
+      const totalCount = records.reduce((sum, record) => sum + (record.total_count || 0), 0);
+      const totalWeight = records.reduce((sum, record) => sum + (record.total_weight || 0), 0);
+      const avgWeight = totalCount > 0 ? (totalWeight / totalCount).toFixed(1) : '0.0';
+      
       // Обновляем статистику
-      document.getElementById('journalTotalActs').textContent = data.summary.total_acts;
-      document.getElementById('journalTotalCount').textContent = data.summary.total_count;
-      document.getElementById('journalTotalWeight').textContent = data.summary.total_weight;
-      document.getElementById('journalAvgWeight').textContent = data.summary.avg_weight;
+      const journalTotalActsEl = document.getElementById('journalTotalActs');
+      const journalTotalCountEl = document.getElementById('journalTotalCount');
+      const journalTotalWeightEl = document.getElementById('journalTotalWeight');
+      const journalAvgWeightEl = document.getElementById('journalAvgWeight');
+      
+      if (journalTotalActsEl) journalTotalActsEl.textContent = totalActs;
+      if (journalTotalCountEl) journalTotalCountEl.textContent = totalCount;
+      if (journalTotalWeightEl) journalTotalWeightEl.textContent = totalWeight.toFixed(1);
+      if (journalAvgWeightEl) journalAvgWeightEl.textContent = avgWeight;
       
       // Отображаем список актов
       const journalList = document.getElementById('journalList');
       
-      if (data.acts.length === 0) {
+      if (records.length === 0) {
         journalList.innerHTML = '<div class="journal-empty">📝 Нет актов взвешивания</div>';
         return;
       }
       
-      journalList.innerHTML = data.acts.map(act => {
-        const count = act.total || act.count || 0;
-        const weight = act.weight || 0;
-        const avgWeight = count > 0 ? (weight / count).toFixed(1) : '0.0';
-        const source = act.source || 'система';
-        const group = act.group || 'Не указана';
+      // Группируем по дате
+      const groupedByDate = {};
+      records.forEach(record => {
+        const date = record.date || 'Неизвестная дата';
+        if (!groupedByDate[date]) {
+          groupedByDate[date] = [];
+        }
+        groupedByDate[date].push(record);
+      });
+      
+      // Сортируем даты
+      const sortedDates = Object.keys(groupedByDate).sort((a, b) => {
+        if (a === 'Неизвестная дата') return 1;
+        if (b === 'Неизвестная дата') return -1;
+        return new Date(b) - new Date(a); // Новые даты сверху
+      });
+      
+      journalList.innerHTML = sortedDates.map(date => {
+        const dayRecords = groupedByDate[date];
+        const dayTotalCount = dayRecords.reduce((sum, record) => sum + (record.total_count || 0), 0);
+        const dayTotalWeight = dayRecords.reduce((sum, record) => sum + (record.total_weight || 0), 0);
+        const dayAvgWeight = dayTotalCount > 0 ? (dayTotalWeight / dayTotalCount).toFixed(1) : '0.0';
         
-        return `
-          <div class="journal-item">
-            <div class="journal-item-info">
-              <div class="journal-item-date">${act.date}</div>
-              <div class="journal-item-time">${act.time}</div>
-              <div class="journal-item-group">${group} • ${source}</div>
-              <div class="journal-item-metrics">
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${count}</div>
-                  <div class="journal-item-metric-label">голов</div>
-                </div>
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${weight}</div>
-                  <div class="journal-item-metric-label">кг</div>
-                </div>
-                <div class="journal-item-metric">
-                  <div class="journal-item-metric-value">${avgWeight}</div>
-                  <div class="journal-item-metric-label">кг/гол</div>
+        const recordsHtml = dayRecords.map(record => {
+          const count = record.total_count || 0;
+          const weight = record.total_weight || 0;
+          const avgWeight = count > 0 ? (weight / count).toFixed(1) : '0.0';
+          const group = record.group || 'Не указана';
+          const time = record.time || '';
+          
+          return `
+            <div class="journal-item">
+              <div class="journal-item-info">
+                <div class="journal-item-time">${time}</div>
+                <div class="journal-item-group">${group}</div>
+                <div class="journal-item-metrics">
+                  <div class="journal-item-metric">
+                    <div class="journal-item-metric-value">${count}</div>
+                    <div class="journal-item-metric-label">голов</div>
+                  </div>
+                  <div class="journal-item-metric">
+                    <div class="journal-item-metric-value">${weight.toFixed(1)}</div>
+                    <div class="journal-item-metric-label">кг</div>
+                  </div>
+                  <div class="journal-item-metric">
+                    <div class="journal-item-metric-value">${avgWeight}</div>
+                    <div class="journal-item-metric-label">кг/гол</div>
+                  </div>
                 </div>
               </div>
+              <div class="journal-item-camera">${record.name || 'unknown'}</div>
             </div>
-            <div class="journal-item-camera">${act.stream_id || 'manual'}</div>
+          `;
+        }).join('');
+        
+        return `
+          <div class="journal-date-group">
+            <div class="journal-date-header">
+              <div class="journal-date-title">${date}</div>
+              <div class="journal-date-summary">
+                Голов: ${dayTotalCount} Вес: ${dayTotalWeight.toFixed(1)} кг Средний: ${dayAvgWeight} кг
+              </div>
+            </div>
+            <div class="journal-date-records">
+              ${recordsHtml}
+            </div>
           </div>
         `;
       }).join('');

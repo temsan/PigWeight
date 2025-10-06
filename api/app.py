@@ -3061,10 +3061,32 @@ async def api_records_list():
                         if len(parts) >= 3:
                             date_time = parts[-1]  # Последняя часть содержит дату-время
                     
+                    # Парсим дату и время
+                    parsed_date = ""
+                    parsed_time = ""
+                    if date_time:
+                        try:
+                            # Пытаемся парсить как timestamp
+                            if date_time.isdigit():
+                                timestamp = int(date_time)
+                                dt = datetime.fromtimestamp(timestamp)
+                                parsed_date = dt.strftime("%Y-%m-%d")
+                                parsed_time = dt.strftime("%H:%M:%S")
+                            else:
+                                # Пытаемся парсить как дату-время
+                                if "-" in date_time:
+                                    date_part, time_part = date_time.split("-", 1)
+                                    parsed_date = date_part
+                                    parsed_time = time_part
+                        except:
+                            # Если не удалось парсить, используем как есть
+                            parsed_date = date_time
+                            parsed_time = ""
+                    
                     items.append({
                         "name": p.stem,
-                        "date": date_time.split("-")[0] if "-" in date_time else "",
-                        "time": date_time.split("-")[1] if "-" in date_time and len(date_time.split("-")) > 1 else "",
+                        "date": parsed_date,
+                        "time": parsed_time,
                         "group": data.get("stream_id", ""),
                         "total_count": data.get("seen_total", 0),
                         "total_weight": 0,  # В текущем формате нет веса
