@@ -279,7 +279,7 @@
               <div class="journal-header">
                 <div class="journal-title">📡 Статус потока</div>
               </div>
-              
+
               <div style="padding: 12px; background: rgba(255,255,255,0.2); border-radius: 8px; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <span style="font-size: 13px; color: var(--muted);">Поток:</span>
@@ -944,7 +944,11 @@
             });
             
             if (data.type === 'count_update') {
-                document.getElementById('manualCount').value = data.count;
+                // Обновляем счетчики в UI
+                const manualCountEl = document.getElementById('manualCount');
+                if (manualCountEl) {
+                    manualCountEl.value = data.count;
+                }
                 if (typeof recalcAvgWeight === 'function') {
                     recalcAvgWeight();
                 }
@@ -1651,20 +1655,7 @@
         setPlaceholder();
         
         // Инициализируем модульную систему
-        if (typeof initModularSystem === 'function') {
-            console.log('🚀 Инициализация модульной системы...');
-            initModularSystem();
-        } else {
-            console.warn('⚠️ Модульная система не найдена');
-        }
-        
-        // Инициализируем модульную систему
-        if (typeof initModularSystem === 'function') {
-            console.log('🚀 Инициализация модульной системы...');
-            initModularSystem();
-        } else {
-            console.warn('⚠️ Модульная система не найдена');
-        }
+        console.log('🔄 Используется новая модульная overlay система');
         
         // Initialize fullscreen button icon
         try { setFsState(false); } catch (e) {}
@@ -2330,14 +2321,17 @@
 
     // === ОБРАБОТЧИКИ СОБЫТИЙ ===
 
-    // Обработчики для панели взвешивания
+    // Обработчики для панели взвешивания (если элементы существуют)
     document.addEventListener('DOMContentLoaded', () => {
       // Автоматический расчет среднего веса
-      document.getElementById('weighingTotal').addEventListener('input', calculateAvgWeight);
-      document.getElementById('weighingWeight').addEventListener('input', calculateAvgWeight);
+      const weighingTotalEl = document.getElementById('weighingTotal');
+      const weighingWeightEl = document.getElementById('weighingWeight');
+      if (weighingTotalEl) weighingTotalEl.addEventListener('input', calculateAvgWeight);
+      if (weighingWeightEl) weighingWeightEl.addEventListener('input', calculateAvgWeight);
       
       // Сохранение акта
-      document.getElementById('saveWeighingBtn').addEventListener('click', saveWeighingAct);
+      const saveWeighingBtnEl = document.getElementById('saveWeighingBtn');
+      if (saveWeighingBtnEl) saveWeighingBtnEl.addEventListener('click', saveWeighingAct);
       
       // Обработчики для панели журналов
       document.getElementById('refreshLogsBtn').addEventListener('click', refreshLogs);
@@ -2530,8 +2524,9 @@
 
       // === ИНИЦИАЛИЗАЦИЯ НОВОГО LIQUID GLASS ИНТЕРФЕЙСА ===
 
-      // Обработчик кнопки сохранения акта
-      document.getElementById('saveManualBtn').addEventListener('click', saveNewAct);
+      // Обработчик кнопки сохранения акта (если элемент существует)
+      const saveManualBtnEl = document.getElementById('saveManualBtn');
+      if (saveManualBtnEl) saveManualBtnEl.addEventListener('click', saveNewAct);
 
       // Обработчик изменения фильтров для журнала актов (используем loadJournalActs для актов взвешивания)
       // refreshLogsBtn уже привязан к refreshLogs выше
