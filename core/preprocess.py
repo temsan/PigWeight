@@ -90,28 +90,19 @@ def map_polys_from_center_crop(polys, transform_meta: Dict[str, Any]) -> list:
     orig_w, orig_h = transform_meta['original_size']
     crop_x, crop_y, crop_w, crop_h = transform_meta['crop_box']
     resize_target = transform_meta['resize_target']
-    content_x, content_y, content_w, content_h = transform_meta['final_content_box']
+    scale_factor = transform_meta['scale_factor']
 
     mapped_polys = []
 
     for poly in polys:
         new_poly = []
         for x_proc, y_proc in poly:
-            # 1. Reverse padding and internal resize
-            # Coordinates relative to the content box inside the padded image
-            y_in_content = y_proc - content_y
-            x_in_content = x_proc - content_x
+            # Упрощенная версия без padding:
+            # 1. Reverse resize from (resize_target, resize_target) to (crop_w, crop_h)
+            y_in_cropped = y_proc * (crop_h / resize_target)
+            x_in_cropped = x_proc * (crop_w / resize_target)
 
-            # Reverse the resize from (resize_target, resize_target) to (content_w, content_h)
-            y_in_resized_square = y_in_content * (resize_target / content_h)
-            x_in_resized_square = x_in_content * (resize_target / content_w)
-
-            # 2. Reverse resize from cropped to resized_square
-            # The crop was resized to (resize_target, resize_target)
-            y_in_cropped = y_in_resized_square * (crop_h / resize_target)
-            x_in_cropped = x_in_resized_square * (crop_w / resize_target)
-
-            # 3. Reverse crop
+            # 2. Reverse crop
             y_orig = y_in_cropped + crop_y
             x_orig = x_in_cropped + crop_x
 
