@@ -321,7 +321,13 @@ export class VideoManager extends EventEmitter {
                     color,
                     points: mask.length,
                     firstPoint: mask[0],
-                    rect: rect
+                    rect: rect,
+                    maskBounds: {
+                        minX: Math.min(...mask.map(p => p[0])),
+                        maxX: Math.max(...mask.map(p => p[0])),
+                        minY: Math.min(...mask.map(p => p[1])),
+                        maxY: Math.max(...mask.map(p => p[1]))
+                    }
                 });
                 
                 ctx.fillStyle = color;
@@ -355,13 +361,23 @@ export class VideoManager extends EventEmitter {
         const ch = wrapper.clientHeight;
         
         const webrtcEl = document.getElementById('webrtcVideo');
-        const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none' && webrtcEl.style.display !== 'none';
+        const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none';
+        
+        console.log('🔍 Поиск видео элемента:', {
+            hasWebrtcEl: !!webrtcEl,
+            webrtcDisplay: webrtcEl ? webrtcEl.style.display : 'N/A',
+            webrtcVisible: webrtcVisible,
+            hasVideoStream: !!this.videoStream,
+            videoStreamSrc: this.videoStream ? this.videoStream.src : 'N/A'
+        });
         
         let videoEl = null;
         if (webrtcVisible) {
             videoEl = webrtcEl;
+            console.log('📹 Используем WebRTC элемент');
         } else if (this.videoStream) {
             videoEl = this.videoStream;
+            console.log('📹 Используем videoStream элемент');
         }
         
         if (!videoEl) {
@@ -372,6 +388,15 @@ export class VideoManager extends EventEmitter {
         // Получаем реальные размеры видео
         const iw = videoEl.videoWidth || videoEl.naturalWidth || 0;
         const ih = videoEl.videoHeight || videoEl.naturalHeight || 0;
+        
+        console.log('📏 Размеры видео элемента:', {
+            videoWidth: videoEl.videoWidth,
+            videoHeight: videoEl.videoHeight,
+            naturalWidth: videoEl.naturalWidth,
+            naturalHeight: videoEl.naturalHeight,
+            finalWidth: iw,
+            finalHeight: ih
+        });
         
         if (!iw || !ih) {
             console.warn('⚠️ Размеры видео не определены, используем размеры wrapper');
