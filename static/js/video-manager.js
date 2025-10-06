@@ -224,6 +224,9 @@ export class VideoManager extends EventEmitter {
         const canvas = this.overlayCanvas;
         const ctx = this.overlayContext;
         
+        // Принудительно обновляем размеры canvas перед отрисовкой
+        this.updateOverlaySize();
+        
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
         // Получаем реальные размеры изображения (с учетом object-fit: contain)
@@ -240,7 +243,12 @@ export class VideoManager extends EventEmitter {
             masksCount: masks ? masks.length : 0,
             idsCount: ids ? ids.length : 0,
             rect: rect,
-            canvasSize: { width: canvas.width, height: canvas.height }
+            canvasSize: { width: canvas.width, height: canvas.height },
+            canvasRect: canvas.getBoundingClientRect(),
+            videoElement: {
+                webrtc: document.getElementById('webrtcVideo')?.getBoundingClientRect(),
+                stream: this.videoStream?.getBoundingClientRect()
+            }
         });
         
         // Отрисовка вертикальных линий
