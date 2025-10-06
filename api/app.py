@@ -665,6 +665,7 @@ class VideoStream(abc.ABC):
                                 self._track_last_side_time[key] = now
                                 logger.info(f"LEFT ENTER: track {tid}, left_in={self.left_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
                                 y_at = _interp_y(prev, prev_y, cx, cy, L)
+                                logger.debug(f"LEFT ENTER crossing: track={tid}, prev=({prev:.3f}, {prev_y:.3f}), cur=({cx:.3f}, {cy:.3f}), line_x={L:.3f}, y_at={y_at:.3f}")
                                 self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
                                 
                                 # Журналирование события пересечения линии (неблокирующее)
@@ -697,6 +698,7 @@ class VideoStream(abc.ABC):
                                 self._track_last_side_time[key] = now
                                 logger.info(f"RIGHT ENTER: track {tid}, right_in={self.right_in}, total_crossings={self.total_crossings}, cooldown={config.CROSS_COOLDOWN_SEC * 0.3:.1f}s")
                                 y_at = _interp_y(prev, prev_y, cx, cy, R)
+                                logger.debug(f"RIGHT ENTER crossing: track={tid}, prev=({prev:.3f}, {prev_y:.3f}), cur=({cx:.3f}, {cy:.3f}), line_x={R:.3f}, y_at={y_at:.3f}")
                                 self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
                                 
                                 # Журналирование события пересечения линии (неблокирующее)
