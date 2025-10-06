@@ -1093,11 +1093,18 @@
                         console.log('🎨 Вызываю scheduleOverlay с', lastMasks.length, 'масками');
                         
                         // Отправляем пересечения в модульную систему
+                        console.log('🔍 Проверяю window.appInstance:', {
+                            hasAppInstance: !!window.appInstance,
+                            hasVideoManager: !!(window.appInstance && window.appInstance.videoManager),
+                            appInstance: window.appInstance
+                        });
+                        
                         if (window.appInstance && window.appInstance.videoManager) {
                             try {
                                 if (Array.isArray(data.debug.crossings)) {
                                     window.appInstance.videoManager.handleCrossings(data.debug.crossings);
                                 }
+                                console.log('🎯 Вызываю window.appInstance.videoManager.scheduleOverlay');
                                 window.appInstance.videoManager.scheduleOverlay(lastMasks, lastIds);
                             } catch (error) {
                                 console.warn('⚠️ Ошибка модульной overlay системы:', error);
