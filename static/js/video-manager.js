@@ -485,6 +485,12 @@ export class VideoManager extends EventEmitter {
         
         const now = performance.now();
         
+        // Отладка rect для первого вызова
+        if (this.popupCounters.length > 0 && !this._popupDebugLogged) {
+            console.log('🎆 drawPopupCounters rect:', rect);
+            this._popupDebugLogged = true;
+        }
+        
         ctx.save();
         this.popupCounters.forEach(popup => {
             const elapsed = now - popup.startTime;
@@ -495,6 +501,17 @@ export class VideoManager extends EventEmitter {
             const x = rect.x + popup.x * rect.w;
             const y = rect.y + popup.y * rect.h - ease * popup.riseDistance;
             const radius = 16;
+            
+            // Отладка позиционирования
+            if (this.popupCounters.indexOf(popup) === 0) { // Только для первого счетчика
+                console.log(`🎆 Отрисовка счетчика "${popup.text}":`, {
+                    normalized: { x: popup.x, y: popup.y },
+                    rect: rect,
+                    screen: { x: x.toFixed(1), y: y.toFixed(1) },
+                    riseDistance: popup.riseDistance,
+                    ease: ease.toFixed(3)
+                });
+            }
             
             // Применяем прозрачность
             ctx.globalAlpha = Math.max(0, alpha);
@@ -695,9 +712,13 @@ export class VideoManager extends EventEmitter {
                 const text = isPositive ? '+1' : '-1';
                 const color = isPositive ? '#51cf66' : '#ff6b6b';
                 
+                // Координаты уже нормализованы (0-1) с сервера
+                const x = Number(crossing.x || 0.5);
+                const y = Number(crossing.y || 0.5);
+                
                 this.popupCounters.push({
-                    x: Number(crossing.x || 0.5),
-                    y: Number(crossing.y || 0.5),
+                    x: x,
+                    y: y,
                     text: text,
                     color: color,
                     startTime: now,
@@ -705,7 +726,7 @@ export class VideoManager extends EventEmitter {
                     riseDistance: 40
                 });
                 
-                console.log(`🎆 Создан всплывающий счетчик: ${text} на (${crossing.x}, ${crossing.y})`);
+                console.log(`🎆 Создан всплывающий счетчик: ${text} на нормализованных координатах (${x.toFixed(3)}, ${y.toFixed(3)})`);
             }
             if (tsMs > maxTs) maxTs = tsMs;
         });
