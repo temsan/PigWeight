@@ -118,7 +118,10 @@ export class VideoManager extends EventEmitter {
     }
     
     scheduleOverlay(masks, ids) {
-        if (performance.now() < this.overlayBlockUntil) return;
+        if (performance.now() < this.overlayBlockUntil) {
+            console.log('🚫 scheduleOverlay заблокирован до:', this.overlayBlockUntil);
+            return;
+        }
         
         // Сохраняем последние маски для перерисовки
         this.lastMasks = masks;
@@ -126,20 +129,42 @@ export class VideoManager extends EventEmitter {
         
         this.overlayPending = { masks, ids };
         
-        if (performance.now() - this.overlayLastDraw > 1000 / this.overlayMaxFps) {
+        const timeSinceLastDraw = performance.now() - this.overlayLastDraw;
+        const minInterval = 1000 / this.overlayMaxFps;
+        
+        console.log('⏰ scheduleOverlay:', {
+            timeSinceLastDraw: timeSinceLastDraw.toFixed(1),
+            minInterval: minInterval.toFixed(1),
+            shouldDraw: timeSinceLastDraw > minInterval
+        });
+        
+        if (timeSinceLastDraw > minInterval) {
+            console.log('🎨 Вызываю drawOverlay()');
             this.drawOverlay();
+        } else {
+            console.log('⏳ drawOverlay отложен, слишком рано');
         }
     }
     
     drawOverlay() {
-        if (!this.overlayPending) return;
+        if (!this.overlayPending) {
+            console.log('🚫 drawOverlay: нет отложенных задач');
+            return;
+        }
         
         const { masks, ids } = this.overlayPending;
         this.overlayPending = null;
         this.overlayLastDraw = performance.now();
         
+        console.log('🎨 drawOverlay:', {
+            masksCount: masks ? masks.length : 0,
+            idsCount: ids ? ids.length : 0,
+            hasWorker: !!this.maskWorker
+        });
+        
         if (this.maskWorker) {
             // Используем worker
+            console.log('👷 Используем worker для отрисовки');
             const rect = this.overlayCanvas.getBoundingClientRect();
             this.maskWorker.postMessage({
                 type: 'overlay',
@@ -150,6 +175,7 @@ export class VideoManager extends EventEmitter {
             });
         } else {
             // Fallback на основной поток
+            console.log('🎯 Используем drawOverlayDirect (основной поток)');
             this.drawOverlayDirect(masks, ids);
         }
     }
