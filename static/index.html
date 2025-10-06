@@ -1490,6 +1490,16 @@
             }
             showNotification(`✅ Файл загружен: ${file.name}`, 'success');
             await startStream(streamId, sourceUri);
+            
+            // Восстанавливаем позицию воспроизведения для этого файла
+            const lastPosition = loadLastPosition(streamId);
+            if (lastPosition && lastPosition.time > 0) {
+                setTimeout(async () => {
+                    await requestSeekTo(lastPosition.time);
+                    console.log(`Воспроизведение продолжено с ${lastPosition.time.toFixed(1)}с`);
+                }, 1000);
+            }
+            
             // Confirm once more from /info
             try {
                 const response = await fetch(`/api/stream/${streamId}/info`);

@@ -70,8 +70,9 @@ export class UIManager extends EventEmitter {
         
         // Обработчики вкладок (делегирование событий)
         document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('journal-tab-btn')) {
-                const panelName = this.extractPanelName(e.target);
+            if (e.target.classList.contains('journal-tab-btn') || e.target.closest('.journal-tab-btn')) {
+                const tabBtn = e.target.classList.contains('journal-tab-btn') ? e.target : e.target.closest('.journal-tab-btn');
+                const panelName = tabBtn.getAttribute('data-panel');
                 if (panelName) {
                     this.switchPanel(panelName);
                 }
@@ -107,7 +108,8 @@ export class UIManager extends EventEmitter {
         }
         
         // Активируем нужную вкладку
-        const activeTab = document.querySelector(`.journal-tab-btn[onclick*="${panelName}"]`);
+        const activeTab = document.querySelector(`.journal-tab-btn[data-panel="${panelName}"]`) || 
+                         document.querySelector(`.journal-tab-btn[onclick*="${panelName}"]`);
         if (activeTab) {
             activeTab.classList.add('active');
         }
@@ -248,6 +250,13 @@ export class UIManager extends EventEmitter {
     }
     
     extractPanelName(tabElement) {
+        // Сначала пробуем data-panel
+        const dataPanel = tabElement.getAttribute('data-panel');
+        if (dataPanel) {
+            return dataPanel;
+        }
+        
+        // Fallback для старого onclick
         const onclick = tabElement.getAttribute('onclick');
         if (onclick) {
             const match = onclick.match(/switchPanel\\('([^']+)'\\)/);

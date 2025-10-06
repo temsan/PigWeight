@@ -670,16 +670,16 @@ body[data-source="file"] .only-live{ display:none !important; }
 
 .journal-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
 .journal-stat-card {
   background: rgba(255,255,255,0.3);
   border: 1px solid var(--journal-border);
   border-radius: var(--radius-md);
-  padding: var(--space-lg);
+  padding: 12px 8px;
   text-align: center;
   backdrop-filter: blur(15px);
   transition: all 0.3s ease;
@@ -691,14 +691,14 @@ body[data-source="file"] .only-live{ display:none !important; }
 }
 
 .journal-stat-value {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--accent);
   margin-bottom: 4px;
 }
 
 .journal-stat-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   font-weight: 500;
 }

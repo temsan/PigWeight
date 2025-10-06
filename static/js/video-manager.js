@@ -19,6 +19,7 @@ export class VideoManager extends EventEmitter {
         this.activeStreamId = null;
         this.isVideoPlaying = false;
         this.hasFirstFrame = false;
+        this.overlayEnabled = true;
         
         // Overlay данные
         this.lastMasks = null;
@@ -94,6 +95,9 @@ export class VideoManager extends EventEmitter {
                 this.emit('first_frame');
             });
         }
+        
+        // Обработчики перетаскивания линий
+        this.setupLineDragging();
     }
     
     updateOverlaySize() {
@@ -106,6 +110,12 @@ export class VideoManager extends EventEmitter {
         if (this.overlayCanvas.width !== width || this.overlayCanvas.height !== height) {
             this.overlayCanvas.width = width;
             this.overlayCanvas.height = height;
+            
+            // Принудительно перерисовываем overlay после изменения размера
+            if (this.lastMasks && this.lastIds) {
+                console.log('🔄 Перерисовка overlay после изменения размера');
+                this.drawOverlayDirect(this.lastMasks, this.lastIds);
+            }
             
             // Обновляем размер в worker
             if (this.maskWorker) {
@@ -122,8 +132,15 @@ export class VideoManager extends EventEmitter {
             masksCount: masks ? masks.length : 0,
             idsCount: ids ? ids.length : 0,
             overlayBlockUntil: this.overlayBlockUntil,
-            currentTime: performance.now()
+            currentTime: performance.now(),
+            overlayEnabled: this.overlayEnabled
         });
+        
+        // Проверяем что overlay включен
+        if (!this.overlayEnabled) {
+            console.log('🚫 scheduleOverlay пропущен - overlay отключен');
+            return;
+        }
         
         if (performance.now() < this.overlayBlockUntil) {
             console.log('🚫 scheduleOverlay заблокирован до:', this.overlayBlockUntil);
@@ -198,6 +215,12 @@ export class VideoManager extends EventEmitter {
         // Получаем реальные размеры изображения (с учетом object-fit: contain)
         const rect = this.getRenderedImageRect();
         
+        // Проверяем что rect валидный
+        if (!rect || rect.w <= 0 || rect.h <= 0) {
+            console.warn('⚠️ Неверные размеры rect:', rect);
+            return;
+        }
+        
         // Отладочные логи
         console.log('🎨 drawOverlayDirect:', {
             masksCount: masks ? masks.length : 0,
@@ -212,6 +235,13 @@ export class VideoManager extends EventEmitter {
             const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
             const x1 = rect.x + rect.w * leftX;
             const x2 = rect.x + rect.w * rightX;
+            
+            console.log('📏 Рисую вертикальные линии:', {
+                leftX, rightX,
+                x1, x2,
+                rect: rect,
+                lines: window.__lines
+            });
             
             // Фон линий
             ctx.fillStyle = 'rgba(44,123,229,0.12)';
@@ -462,6 +492,59 @@ export class VideoManager extends EventEmitter {
         }
     }
     
+    drawLinesOnly() {
+        if (!this.overlayContext) return;
+        
+        const canvas = this.overlayCanvas;
+        const ctx = this.overlayContext;
+        
+        // Очищаем только область линий
+        const rect = this.getRenderedImageRect();
+        if (!rect || rect.w <= 0 || rect.h <= 0) return;
+        
+        // Отрисовка вертикальных линий
+        try {
+            const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
+            const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
+            const x1 = rect.x + rect.w * leftX;
+            const x2 = rect.x + rect.w * rightX;
+            
+            // Фон линий
+            ctx.fillStyle = 'rgba(44,123,229,0.12)';
+            ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
+            ctx.fillStyle = 'rgba(81,207,102,0.12)';
+            ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
+            
+            // Сами линии
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(44,123,229,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x1, rect.y);
+            ctx.lineTo(x1, rect.y + rect.h);
+            ctx.stroke();
+            
+            ctx.strokeStyle = 'rgba(81,207,102,0.9)';
+            ctx.beginPath();
+            ctx.moveTo(x2, rect.y);
+            ctx.lineTo(x2, rect.y + rect.h);
+            ctx.stroke();
+            
+            // Кружочки на линиях
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.beginPath();
+            ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.beginPath();
+            ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+        } catch (error) {
+            console.warn('⚠️ Ошибка отрисовки линий:', error);
+        }
+    }
+    
     startOverlayLoop() {
         // Инициализируем основной луп overlay рендеринга
         if (!this.overlayRaf) {
@@ -471,6 +554,12 @@ export class VideoManager extends EventEmitter {
     }
     
     overlayTick() {
+        // Проверяем что overlay включен
+        if (!this.overlayEnabled) {
+            console.log('🚫 overlayTick пропущен - overlay отключен');
+            return;
+        }
+        
         const now = performance.now();
         const minDt = 1000 / this.overlayMaxFps;
         
@@ -487,7 +576,12 @@ export class VideoManager extends EventEmitter {
         // Обрабатываем всплывающие счетчики
         this.updatePopupCounters(now);
         
-        this.overlayRaf = requestAnimationFrame(() => this.overlayTick());
+        // Продолжаем луп только если overlay включен
+        if (this.overlayEnabled) {
+            this.overlayRaf = requestAnimationFrame(() => this.overlayTick());
+        } else {
+            this.overlayRaf = null;
+        }
     }
     
     handleCrossings(crossings) {
@@ -548,6 +642,31 @@ export class VideoManager extends EventEmitter {
         }
     }
     
+    stopOverlay() {
+        console.log('🛑 Остановка overlay лупа');
+        
+        if (this.overlayRaf) {
+            cancelAnimationFrame(this.overlayRaf);
+            this.overlayRaf = null;
+        }
+        
+        // Очищаем overlay
+        this.clearOverlay();
+        
+        // Сбрасываем состояние
+        this.lastMasks = null;
+        this.lastIds = null;
+        this.overlayPending = null;
+        this.overlayEnabled = false;
+    }
+    
+    startOverlay() {
+        console.log('▶️ Запуск overlay лупа');
+        
+        this.overlayEnabled = true;
+        this.startOverlayLoop();
+    }
+    
     destroy() {
         if (this.overlayRaf) {
             cancelAnimationFrame(this.overlayRaf);
@@ -560,5 +679,170 @@ export class VideoManager extends EventEmitter {
         }
         
         this.removeAllListeners();
+    }
+    
+    setupLineDragging() {
+        console.log('🔧 setupLineDragging вызван:', {
+            hasOverlayCanvas: !!this.overlayCanvas,
+            lineDragInitialized: this.lineDragInitialized,
+            overlayEnabled: this.overlayEnabled
+        });
+        
+        if (!this.overlayCanvas || this.lineDragInitialized) {
+            console.warn('⚠️ setupLineDragging пропущен:', {
+                hasOverlayCanvas: !!this.overlayCanvas,
+                lineDragInitialized: this.lineDragInitialized
+            });
+            return;
+        }
+        
+        this.lineDragInitialized = true;
+        this.isDraggingLines = false;
+        this.draggingLine = null; // 'left' | 'right'
+        
+        const onPos = (e) => {
+            const r = this.overlayCanvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const x = clientX - r.left;
+            const rect = this.getRenderedImageRect();
+            return Math.max(0, Math.min(1, (x - rect.x) / rect.w));
+        };
+        
+        const onDown = (e) => {
+            console.log('🖱️ onDown вызван:', {
+                overlayEnabled: this.overlayEnabled,
+                eventType: e.type,
+                clientX: e.clientX || (e.touches ? e.touches[0].clientX : 'N/A')
+            });
+            
+            if (!this.overlayEnabled) {
+                console.warn('⚠️ overlayEnabled = false, пропускаем onDown');
+                return;
+            }
+            
+            const nx = onPos(e);
+            const lx = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
+            const rx = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
+            
+            const distL = Math.abs(nx - lx);
+            const distR = Math.abs(nx - rx);
+            
+            console.log('🎯 Проверка расстояний:', {
+                nx: nx.toFixed(3),
+                lx: lx.toFixed(3),
+                rx: rx.toFixed(3),
+                distL: distL.toFixed(3),
+                distR: distR.toFixed(3),
+                threshold: 0.02
+            });
+            
+            if (distL < 0.02 || distR < 0.02) {
+                this.draggingLine = (distL < distR) ? 'left' : 'right';
+                this.isDraggingLines = true;
+                this.overlayCanvas.style.cursor = 'ew-resize';
+                e.preventDefault();
+                console.log('🎯 Начато перетаскивание линии:', this.draggingLine);
+                
+                // Добавляем глобальные обработчики для корректного завершения перетаскивания
+                document.addEventListener('mouseup', onUp);
+                document.addEventListener('touchend', onUp);
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('touchmove', onMove);
+            } else {
+                console.log('❌ Слишком далеко от линий');
+            }
+        };
+        
+        const onMove = (e) => {
+            const nx = onPos(e);
+            let lx = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
+            let rx = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
+            
+            const nearLine = (Math.abs(nx - lx) < 0.02) || (Math.abs(nx - rx) < 0.02);
+            
+            if (!this.draggingLine) {
+                // Подсказка курсора при наведении
+                this.overlayCanvas.style.cursor = nearLine ? 'ew-resize' : 'crosshair';
+                return;
+            }
+            
+            // Перетаскивание
+            if (this.draggingLine === 'left') lx = nx; else rx = nx;
+            
+            // Предотвращаем пересечение линий
+            if (lx > rx) { const t = lx; lx = rx; rx = t; }
+            
+            const minGap = 0.05;
+            if ((rx - lx) < minGap) {
+                const mid = (lx + rx) / 2;
+                lx = Math.max(0, mid - minGap/2);
+                rx = Math.min(1, mid + minGap/2);
+            }
+            
+            window.__lines = { left_x: lx, right_x: rx };
+            this.overlayCanvas.style.cursor = 'ew-resize';
+            
+            // Перерисовываем только линии, не маски
+            this.drawLinesOnly();
+            
+            e.preventDefault();
+        };
+        
+        const onUp = async (e) => {
+            if (!this.draggingLine) return;
+            
+            console.log('🎯 Завершено перетаскивание линии:', this.draggingLine);
+            
+            try {
+                const { left_x, right_x } = window.__lines || {};
+                const response = await fetch('/api/lines', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ left_x, right_x })
+                });
+                
+                if (response.ok) {
+                    console.log('✅ Позиции линий сохранены:', { left_x, right_x });
+                } else {
+                    console.warn('⚠️ Ошибка сохранения позиций линий');
+                }
+            } catch (error) {
+                console.warn('⚠️ Ошибка отправки позиций линий:', error);
+            }
+            
+            this.draggingLine = null;
+            this.overlayCanvas.style.cursor = 'crosshair';
+            this.isDraggingLines = false;
+            
+            // Удаляем глобальные обработчики
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchend', onUp);
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('touchmove', onMove);
+        };
+        
+        // Добавляем только обработчики начала перетаскивания
+        this.overlayCanvas.addEventListener('mousedown', onDown);
+        this.overlayCanvas.addEventListener('touchstart', onDown, { passive: false });
+        
+        // Обработчик для показа курсора при наведении (только если не перетаскиваем)
+        this.overlayCanvas.addEventListener('mousemove', (e) => {
+            if (!this.draggingLine) {
+                const nx = onPos(e);
+                const lx = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
+                const rx = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
+                const nearLine = (Math.abs(nx - lx) < 0.02) || (Math.abs(nx - rx) < 0.02);
+                this.overlayCanvas.style.cursor = nearLine ? 'ew-resize' : 'crosshair';
+            }
+        });
+        
+        // Обработчик для сброса курсора при покидании canvas (только если не перетаскиваем)
+        this.overlayCanvas.addEventListener('mouseleave', () => {
+            if (!this.draggingLine) {
+                this.overlayCanvas.style.cursor = 'crosshair';
+            }
+        });
+        
+        console.log('✅ Обработчики перетаскивания линий настроены');
     }
 }

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # Конфигурация
 RECORDS_DIR = Path("records")
 DAYS_TO_KEEP = 30  # Количество дней для хранения записей
-DRY_RUN = True  # Если True, только показывает что будет удалено
+DRY_RUN = False  # Если True, только показывает что будет удалено
 
 def get_file_age_days(file_path):
     """Получить возраст файла в днях"""
