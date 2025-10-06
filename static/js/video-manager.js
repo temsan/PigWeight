@@ -164,6 +164,14 @@ export class VideoManager extends EventEmitter {
         // Получаем реальные размеры изображения (с учетом object-fit: contain)
         const rect = this.getRenderedImageRect();
         
+        // Отладочные логи
+        console.log('🎨 drawOverlayDirect:', {
+            masksCount: masks ? masks.length : 0,
+            idsCount: ids ? ids.length : 0,
+            rect: rect,
+            canvasSize: { width: canvas.width, height: canvas.height }
+        });
+        
         // Отрисовка вертикальных линий
         try {
             const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
@@ -207,8 +215,12 @@ export class VideoManager extends EventEmitter {
         
         // Отрисовка масок свиней
         if (Array.isArray(masks) && masks.length > 0) {
+            console.log('🎭 Начинаю отрисовку масок:', masks.length);
             masks.forEach((mask, idx) => {
-                if (!Array.isArray(mask) || mask.length < 3) return;
+                if (!Array.isArray(mask) || mask.length < 3) {
+                    console.warn('⚠️ Пропускаю маску', idx, 'неверный формат:', mask);
+                    return;
+                }
                 
                 const instId = (ids && ids[idx]) ? ids[idx] : (idx + 1);
                 const color = this.getColorForInstance(instId);
@@ -225,6 +237,14 @@ export class VideoManager extends EventEmitter {
                     }
                 });
                 ctx.closePath();
+                
+                console.log(`🎨 Рисую маску ${idx}:`, {
+                    instId,
+                    color,
+                    points: mask.length,
+                    firstPoint: mask[0],
+                    rect: rect
+                });
                 
                 ctx.fillStyle = color;
                 ctx.globalAlpha = 0.60;
