@@ -29,6 +29,7 @@ class PigWeightApp {
             // Инициализируем компоненты в правильном порядке
             this.ui = new UIManager();
             this.video = new VideoManager();
+            this.videoManager = this.video; // Алиас для совместимости
             this.websocket = new WebSocketManager();
             this.chart = new ChartManager();
             this.journal = new JournalManager();
