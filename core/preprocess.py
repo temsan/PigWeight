@@ -146,7 +146,8 @@ def center_crop_resize(frame: np.ndarray, target_size: int = 640) -> Dict[str, A
         'original_size': (w, h),
         'crop_box': (start_x, start_y, crop_size, crop_size),
         'resize_target': target_size,
-        'final_content_box': (0, padding_height, target_size, target_size - 2 * padding_height),
+        'scale_factor': float(target_size) / crop_size,
+        'pad_top': 0, 'pad_bottom': 0, 'pad_left': 0, 'pad_right': 0
     }
 
     return {
