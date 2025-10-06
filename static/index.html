@@ -18,7 +18,7 @@
     }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" crossorigin="anonymous"></script>
-  <script type="module" src="/static/js/app.js?v=2"></script>
+  <script type="module" src="/static/js/app.js?v=11"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
   <link rel="stylesheet" href="/static/css/events.css">
   <style>
@@ -55,7 +55,7 @@
 
     /* Compact right panel (recursive compacting to remove empty space) */
     :root{ 
-      --sidebar-width: 380px; 
+      --sidebar-width: 420px; 
       --liquid-glass-bg: rgba(255, 255, 255, 0.65);
       --liquid-glass-border: rgba(255, 255, 255, 0.18);
       --liquid-glass-shadow: rgba(31, 38, 135, 0.15);
@@ -75,7 +75,7 @@
     .journal-tabs {
       display: flex;
       flex-wrap: nowrap; /* Prevent wrapping */
-      gap: 8px;
+      gap: 4px;
       margin-bottom: 12px;
       overflow-x: auto; /* Allow horizontal scrolling */
       /* Hide scrollbar for a cleaner look */
@@ -90,11 +90,13 @@
       backdrop-filter: blur(var(--liquid-glass-blur));
       border: 1px solid var(--liquid-glass-border);
       border-radius: var(--radius-md);
-      padding: 10px 14px;
-      font-size: 14px;
+      padding: 8px 10px;
+      font-size: 12px;
       color: var(--text-primary);
       transition: all 0.2s ease;
       cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
     .journal-tab-btn:not(.active):hover {
       background: var(--accent-color);
@@ -228,25 +230,17 @@
         <div class="right-col rounded-xl" style="width:var(--sidebar-width, 380px); min-width:var(--sidebar-width, 380px); max-width:var(--sidebar-width, 380px); box-sizing:border-box; order:1; position:fixed; right:12px; top:68px; bottom:12px; overflow-y:auto; scrollbar-width: none; -ms-overflow-style: none; z-index: 1001; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">
           <!-- Навигационные вкладки (liquid glass стиль) -->
           <div class="journal-tabs">
-            <button class="journal-tab-btn active" onclick="switchPanel('live')">
+            <button class="journal-tab-btn active" data-panel="live">
               <span class="journal-tab-icon">📊</span>
-              <span class="journal-tab-text">Live</span>
+              <span class="journal-tab-text">Мониторинг</span>
             </button>
-            <button class="journal-tab-btn" onclick="switchPanel('weighing')">
-              <span class="journal-tab-icon">⚖️</span>
-              <span class="journal-tab-text">Взвешивания</span>
-            </button>
-            <button class="journal-tab-btn" onclick="switchPanel('logs')">
+            <button class="journal-tab-btn" data-panel="logs">
               <span class="journal-tab-icon">📋</span>
-              <span class="journal-tab-text">Журналы</span>
+              <span class="journal-tab-text">Журнал</span>
             </button>
-            <button class="journal-tab-btn" onclick="switchPanel('verification')">
+            <button class="journal-tab-btn" data-panel="verification">
               <span class="journal-tab-icon">🔍</span>
               <span class="journal-tab-text">Сверка</span>
-            </button>
-            <button class="journal-tab-btn" onclick="switchPanel('events')">
-              <span class="journal-tab-icon">🎯</span>
-              <span class="journal-tab-text">События</span>
             </button>
           </div>
 
@@ -281,25 +275,25 @@
                 </div>
               </div>
 
-              <!-- Форма ввода данных -->
+              <!-- Информация о текущем потоке -->
               <div class="journal-header">
-                <div class="journal-title">💾 Новый акт взвешивания</div>
+                <div class="journal-title">📡 Статус потока</div>
               </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Количество голов</label>
-                  <input type="number" id="manualCount" min="0" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center; width: 100%; box-sizing: border-box;" placeholder="0">
+              
+              <div style="padding: 12px; background: rgba(255,255,255,0.2); border-radius: 8px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 13px; color: var(--muted);">Поток:</span>
+                  <span id="currentStreamName" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">Не выбран</span>
                 </div>
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Общий вес (кг)</label>
-                  <input type="number" id="manualTotalWeight" min="0" step="0.1" class="journal-filter-input" style="font-size: 20px; font-weight: 600; text-align: center; width: 100%; box-sizing: border-box;" placeholder="0.0">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 13px; color: var(--muted);">Статус:</span>
+                  <span id="streamStatus" style="font-size: 14px; font-weight: 600; color: #28a745;">Остановлен</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 13px; color: var(--muted);">Время:</span>
+                  <span id="currentTime" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">00:00</span>
                 </div>
               </div>
-
-              <button id="saveManualBtn" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">
-                💾 Сохранить акт взвешивания
-              </button>
 
               <!-- График -->
               <div style="margin-top: 10px; background: var(--liquid-glass-bg); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); padding: 8px; backdrop-filter: blur(var(--liquid-glass-blur)); box-shadow: 0 4px 16px var(--liquid-glass-shadow);">
@@ -308,72 +302,6 @@
             </div>
           </div>
 
-          <!-- Панель Взвешивания (liquid glass стиль) -->
-          <div id="weighingPanel" class="panel-content" style="padding:0; display:none;">
-            <div class="journal-container">
-              <div class="journal-header">
-                <div class="journal-title">
-                  ⚖️ Журналирование актов взвешивания
-                </div>
-              </div>
-
-              <!-- Статистика текущего сеанса -->
-              <div class="journal-stats">
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="weighingLeftCount" style="color: #28a745;">0</div>
-                  <div class="journal-stat-label">Слева</div>
-                </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="weighingRightCount" style="color: #17a2b8;">0</div>
-                  <div class="journal-stat-label">Справа</div>
-                </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="weighingDiff" style="color: #ffc107;">0</div>
-                  <div class="journal-stat-label">Разница</div>
-                </div>
-              </div>
-
-              <!-- Форма записи акта -->
-              <div class="journal-header">
-                <div class="journal-title">📝 Новый акт взвешивания</div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Дата</label>
-                  <input type="date" id="weighingDate" class="journal-filter-input">
-                </div>
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Время</label>
-                  <input type="time" id="weighingTime" class="journal-filter-input">
-                </div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Группа/Секция</label>
-                  <input type="text" id="weighingGroup" placeholder="6B 4,5" class="journal-filter-input">
-                </div>
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Всего свиней</label>
-                  <input type="number" id="weighingTotal" min="1" class="journal-filter-input" style="text-align: center;">
-                </div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Общий вес (кг)</label>
-                  <input type="number" id="weighingWeight" step="0.1" min="0" class="journal-filter-input" style="text-align: center;">
-                </div>
-                <div>
-                  <label style="display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px;">Средний вес</label>
-                  <input type="number" id="weighingAvgWeight" step="0.01" readonly class="journal-filter-input" style="text-align: center; background: rgba(255,255,255,0.2);">
-                </div>
-              </div>
-
-              <button id="saveWeighingBtn" style="width: 100%; height: 48px; font-size: 16px; font-weight: 600; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">💾 Сохранить акт взвешивания</button>
-            </div>
-          </div>
 
           <!-- Панель Журнала (liquid glass стиль) -->
           <div id="logsPanel" class="panel-content" style="padding:0; display:none;">
@@ -465,57 +393,6 @@
             </div>
           </div>
 
-          <!-- Панель События (liquid glass стиль) -->
-          <div id="eventsPanel" class="panel-content" style="padding:0; display:none;">
-            <div class="journal-container">
-              <div class="journal-header">
-                <div class="journal-title">
-                  🎯 Журнал событий
-                </div>
-                <div class="journal-controls">
-                  <select id="eventTypeFilter" class="form-control">
-                    <option value="">Все события</option>
-                    <option value="line_crossing">Пересечения линий</option>
-                    <option value="peak_count">Пики количества</option>
-                    <option value="activity_spike">Всплески активности</option>
-                  </select>
-                  <select id="eventTimeFilter" class="form-control">
-                    <option value="">Все время</option>
-                    <option value="1">Последний час</option>
-                    <option value="6">Последние 6 часов</option>
-                    <option value="24">Последние 24 часа</option>
-                  </select>
-                  <button id="refreshEventsBtn" class="btn btn-primary">🔄</button>
-                  <button id="exportEventsBtn" class="btn btn-secondary">📥</button>
-                </div>
-              </div>
-
-              <!-- Статистика событий -->
-              <div class="journal-stats" id="eventsStats">
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="totalEvents">0</div>
-                  <div class="journal-stat-label">Всего событий</div>
-                </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="peakCount" style="color: #ff9800;">0</div>
-                  <div class="journal-stat-label">Пик количества</div>
-                </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="lineCrossings" style="color: #4caf50;">0</div>
-                  <div class="journal-stat-label">Пересечений</div>
-                </div>
-                <div class="journal-stat-card">
-                  <div class="journal-stat-value" id="activitySpikes" style="color: #f44336;">0</div>
-                  <div class="journal-stat-label">Всплесков</div>
-                </div>
-              </div>
-
-              <!-- Список событий -->
-              <div class="journal-events-list" id="eventsList">
-                <div class="loading-message">Выберите поток для просмотра событий</div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -805,6 +682,11 @@
             overlayCanvas.style.cursor = 'crosshair';
             overlayCanvas.style.opacity = '1';
         } catch (e) {}
+        
+        // Запускаем overlay луп в модульной системе
+        if (window.appInstance && window.appInstance.videoManager) {
+            window.appInstance.videoManager.startOverlay();
+        }
         connectWebSocket(streamId);
         initChart();
         // Модульная overlay система запускается автоматически в VideoManager
@@ -996,6 +878,11 @@
         // disable overlay so it doesn't intercept interactions
         overlayEnabled = false;
         
+        // Останавливаем overlay луп в модульной системе
+        if (window.appInstance && window.appInstance.videoManager) {
+            window.appInstance.videoManager.stopOverlay();
+        }
+        
         // Очистка overlay через модульную систему
         if (window.appInstance && window.appInstance.videoManager) {
             window.appInstance.videoManager.clearOverlay();
@@ -1059,10 +946,10 @@
                     
                     console.log('🎨 Маски получены:', lastMasks ? lastMasks.length : 0);
                     
-                    // Отладочная информация для масок (только при необходимости)
-                    if (data.debug.masks_debug && data.debug.masks_debug.count > 0) {
-                        console.log("🔍 Маски отладка:", data.debug.masks_debug);
-                    }
+                        // Отладочная информация для масок (только при необходимости)
+                        if (data.debug.masks_debug && data.debug.masks_debug.count > 0) {
+                            console.log("🔍 Маски отладка:", data.debug.masks_debug);
+                        }
                     
                     try { if (Array.isArray(data.debug.labels)) window.__lastLabels = data.debug.labels; } catch (e) {}
                     
@@ -1102,7 +989,7 @@
                         if (window.appInstance && window.appInstance.videoManager) {
                             try {
                                 if (Array.isArray(data.debug.crossings)) {
-                                    window.appInstance.videoManager.handleCrossings(data.debug.crossings);
+                                window.appInstance.videoManager.handleCrossings(data.debug.crossings);
                                 }
                                 console.log('🎯 Вызываю window.appInstance.videoManager.scheduleOverlay');
                                 window.appInstance.videoManager.scheduleOverlay(lastMasks, lastIds);
@@ -1853,53 +1740,7 @@
 
     // === ВЕРИФИКАЦИЯ И АНАЛИЗ ===
 
-    // Переключение панелей (обновлено для liquid glass стиля)
-    function switchPanel(panelName) {
-      // Скрываем все панели
-      document.querySelectorAll('.panel-content').forEach(panel => {
-        panel.style.display = 'none';
-        panel.classList.remove('active');
-      });
-
-      // Убираем активные стили у всех вкладок
-      document.querySelectorAll('.journal-tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-      });
-
-      // Показываем выбранную панель
-      const targetPanel = document.getElementById(panelName + 'Panel');
-      if (targetPanel) {
-        targetPanel.style.display = 'block';
-        targetPanel.classList.add('active');
-      }
-
-      // Активируем вкладку
-      const targetBtn = document.querySelector(`[onclick="switchPanel('${panelName}')"]`);
-      if (targetBtn) {
-        targetBtn.classList.add('active');
-      }
-
-      // Загружаем данные для журнала при переключении на него
-      if (panelName === 'logs') {
-        loadJournalActs();
-      }
-
-      // Загружаем данные для панели событий
-      if (panelName === 'events') {
-        if (window.eventsManager && activeStreamId) {
-          window.eventsManager.setCurrentStream(activeStreamId);
-        }
-      }
-
-      // Загружаем данные для панели
-      if (panelName === 'weighing') {
-        loadWeighingData();
-      } else if (panelName === 'logs') {
-        loadLogsData();
-      } else if (panelName === 'verification') {
-        loadVerificationData();
-      }
-    }
+    // Переключение панелей теперь обрабатывается в ui-manager.js
 
     // Загрузка данных верификации
     async function loadVerificationData() {

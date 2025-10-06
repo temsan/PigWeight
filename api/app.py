@@ -3042,6 +3042,50 @@ async def websocket_endpoint(ws: WebSocket, id: str = Query(...)):
         await STREAM_MANAGER.unregister_websocket(id, ws)
 
 
+# === API для записей (records) ===
 
+@app.get("/api/records")
+async def api_records_list():
+    """Получить список всех записей актов взвешивания"""
+    try:
+        items = []
+        for p in sorted(RECORDS_DIR.glob("act_*.json")):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    items.append({
+                        "name": p.stem,
+                        "date": data.get("date", ""),
+                        "time": data.get("time", ""),
+                        "group": data.get("group", ""),
+                        "total_count": data.get("total_count", 0),
+                        "total_weight": data.get("total_weight", 0),
+                        "avg_weight": data.get("avg_weight", 0)
+                    })
+        return JSONResponse({"records": items})
+    except Exception as e:
+        logger.error(f"Ошибка получения списка записей: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/api/records/{act_name}")
+async def api_record_details(act_name: str):
+    """Получить детали конкретной записи"""
+    try:
+        # Sanitize filename
+        if ".." in act_name or "/" in act_name or "\\" in act_name:
+            raise HTTPException(status_code=400, detail="Invalid act name")
+        
+        file_path = RECORDS_DIR / f"{act_name}.json"
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Record not found")
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        return JSONResponse(data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка получения деталей записи {act_name}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
