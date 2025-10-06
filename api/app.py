@@ -3053,15 +3053,28 @@ async def api_records_list():
             try:
                 with open(p, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    # Извлекаем дату и время из имени файла
+                    filename = p.stem
+                    date_time = ""
+                    if "_" in filename:
+                        parts = filename.split("_")
+                        if len(parts) >= 3:
+                            date_time = parts[-1]  # Последняя часть содержит дату-время
+                    
                     items.append({
                         "name": p.stem,
-                        "date": data.get("date", ""),
-                        "time": data.get("time", ""),
-                        "group": data.get("group", ""),
-                        "total_count": data.get("total_count", 0),
-                        "total_weight": data.get("total_weight", 0),
-                        "avg_weight": data.get("avg_weight", 0)
+                        "date": date_time.split("-")[0] if "-" in date_time else "",
+                        "time": date_time.split("-")[1] if "-" in date_time and len(date_time.split("-")) > 1 else "",
+                        "group": data.get("stream_id", ""),
+                        "total_count": data.get("seen_total", 0),
+                        "total_weight": 0,  # В текущем формате нет веса
+                        "avg_weight": 0,    # В текущем формате нет веса
+                        "duration": data.get("duration_sec", 0),
+                        "peak_concurrent": data.get("peak_concurrent", 0)
                     })
+            except Exception as e:
+                logger.warning(f"Ошибка чтения файла {p}: {e}")
+                continue
         return JSONResponse({"records": items})
     except Exception as e:
         logger.error(f"Ошибка получения списка записей: {e}")

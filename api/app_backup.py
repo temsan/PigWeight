@@ -1258,23 +1258,7 @@ async def api_stream_info(stream_id: str):
         return {"type": "rtsp", "duration": None}
 
 # --- Records API for dashboard ---
-@app.get("/api/records")
-async def api_records_list():
-    try:
-        items = []
-        for p in sorted(RECORDS_DIR.glob("act_*.json")):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    js = json.load(f)
-                items.append({
-                    "act_file": p.name,
-                    **js
-                })
-            except Exception:
-                continue
-        return sorted(items, key=lambda x: x.get("finished_at", 0), reverse=True)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+# @app.get("/api/records") - moved to main app.py
 
 @app.get("/api/records/{act_name}")
 async def api_record_details(act_name: str):
