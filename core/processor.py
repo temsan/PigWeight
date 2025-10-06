@@ -61,9 +61,10 @@ class UnifiedVideoProcessor:
             img_size=getattr(CONFIG, "IMG_SIZE", 960)
         )
 
-        self.model_adapter = ModelAdapter(
-            model_path=getattr(CONFIG, "MODEL_PATH", "")
-        )
+        model_path = getattr(CONFIG, "MODEL_PATH", "")
+        logger.info(f"🔧 Создание ModelAdapter с путем: {model_path}")
+        self.model_adapter = ModelAdapter(model_path=model_path)
+        logger.info(f"✅ ModelAdapter создан: {self.model_adapter}")
 
         # Инициализация системы событий
         self.event_logger = get_event_logger() if HAVE_EVENT_LOGGER else None
