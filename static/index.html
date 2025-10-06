@@ -841,7 +841,15 @@
     function saveLastPosition(streamId, time) {
         try {
             const positions = JSON.parse(localStorage.getItem('lastPositions') || '{}');
-            positions[streamId] = { time: time, timestamp: Date.now() };
+            const sourceUri = streamSources[streamId];
+            const lastFile = loadLastFile();
+            
+            positions[streamId] = { 
+                time: time, 
+                timestamp: Date.now(),
+                sourceUri: sourceUri,
+                fileName: lastFile ? lastFile.fileName : null
+            };
             localStorage.setItem('lastPositions', JSON.stringify(positions));
         } catch (e) {
             console.warn('Failed to save last position:', e);
@@ -1391,9 +1399,54 @@
                 isVideoPlaying = true;
                 videoPlayPauseBtn.textContent = 'Стоп';
             } else {
-                // Если нет активного потока, показываем сообщение вместо автозагрузки
-                alert('Пожалуйста, выберите файл для воспроизведения или настройте поток.');
-                console.log('Нет активного потока для воспроизведения');
+                // Если нет активного потока, пытаемся воспроизвести последний файл
+                const lastFile = loadLastFile();
+                if (lastFile && lastFile.sourceUri) {
+                    // Создаем новый streamId для последнего файла
+                    const newStreamId = 'file_' + Date.now();
+                    activeStreamId = newStreamId;
+                    streamSources[newStreamId] = lastFile.sourceUri;
+                    
+                    // Обновляем название файла на кнопке
+                    fileInputName.textContent = shortenFileName(lastFile.fileName);
+                    fileInputLabel.title = lastFile.fileName;
+                    
+                    // Загружаем сохраненные позиции линий для этого файла
+                    const savedPositions = loadLinePositions(lastFile.fileName);
+                    if (savedPositions) {
+                        window.__lines = { left_x: savedPositions.left_x, right_x: savedPositions.right_x };
+                    } else {
+                        // Используем значения по умолчанию
+                        window.__lines = { left_x: 0.25, right_x: 0.75 };
+                    }
+                    
+                    await startStream(newStreamId, lastFile.sourceUri);
+                    
+                    // Восстанавливаем позицию воспроизведения для этого файла
+                    // Ищем позицию по имени файла в сохраненных позициях
+                    const positions = JSON.parse(localStorage.getItem('lastPositions') || '{}');
+                    let lastPosition = null;
+                    
+                    // Ищем позицию по имени файла или по sourceUri
+                    for (const [streamId, position] of Object.entries(positions)) {
+                        if (position.fileName === lastFile.fileName || position.sourceUri === lastFile.sourceUri) {
+                            lastPosition = position;
+                            break;
+                        }
+                    }
+                    
+                    if (lastPosition && lastPosition.time > 0) {
+                        setTimeout(async () => {
+                            await requestSeekTo(lastPosition.time);
+                            console.log(`Воспроизведение продолжено с ${lastPosition.time.toFixed(1)}с`);
+                        }, 1000);
+                    }
+                    
+                    isVideoPlaying = true;
+                    videoPlayPauseBtn.textContent = 'Стоп';
+                } else {
+                    alert('Нет файла для воспроизведения. Пожалуйста, загрузите видеофайл.');
+                }
             }
         }
     });
