@@ -65,6 +65,7 @@ export class VideoManager extends EventEmitter {
         
         // Отключаем OffscreenCanvas worker - используем только основной поток
         // Это проще и надежнее для нашего случая
+        this.maskWorker = null; // Принудительно отключаем worker
         if (this.overlayCanvas) {
             this.overlayContext = this.overlayCanvas.getContext('2d');
             console.log('✅ Overlay context инициализирован в основном потоке');
