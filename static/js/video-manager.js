@@ -706,6 +706,12 @@ export class VideoManager extends EventEmitter {
         this.isDraggingLines = false;
         this.draggingLine = null; // 'left' | 'right'
         
+        // Сохраняем ссылки на обработчики для правильного удаления
+        this.globalMouseUpHandler = null;
+        this.globalMouseMoveHandler = null;
+        this.globalTouchEndHandler = null;
+        this.globalTouchMoveHandler = null;
+        
         const onPos = (e) => {
             const r = this.overlayCanvas.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -750,10 +756,10 @@ export class VideoManager extends EventEmitter {
                 console.log('🎯 Начато перетаскивание линии:', this.draggingLine);
                 
                 // Добавляем глобальные обработчики для корректного завершения перетаскивания
-                document.addEventListener('mouseup', onUp);
-                document.addEventListener('touchend', onUp);
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('touchmove', onMove);
+                document.addEventListener('mouseup', this.globalMouseUpHandler);
+                document.addEventListener('touchend', this.globalTouchEndHandler);
+                document.addEventListener('mousemove', this.globalMouseMoveHandler);
+                document.addEventListener('touchmove', this.globalTouchMoveHandler);
             } else {
                 console.log('❌ Слишком далеко от линий');
             }
@@ -794,6 +800,9 @@ export class VideoManager extends EventEmitter {
             e.preventDefault();
         };
         
+        // Сохраняем ссылку на onMove для глобального обработчика
+        this.globalMouseMoveHandler = onMove;
+        
         const onUp = async (e) => {
             if (!this.draggingLine) return;
             
@@ -821,11 +830,28 @@ export class VideoManager extends EventEmitter {
             this.isDraggingLines = false;
             
             // Удаляем глобальные обработчики
-            document.removeEventListener('mouseup', onUp);
-            document.removeEventListener('touchend', onUp);
-            document.removeEventListener('mousemove', onMove);
-            document.removeEventListener('touchmove', onMove);
+            if (this.globalMouseUpHandler) {
+                document.removeEventListener('mouseup', this.globalMouseUpHandler);
+                this.globalMouseUpHandler = null;
+            }
+            if (this.globalTouchEndHandler) {
+                document.removeEventListener('touchend', this.globalTouchEndHandler);
+                this.globalTouchEndHandler = null;
+            }
+            if (this.globalMouseMoveHandler) {
+                document.removeEventListener('mousemove', this.globalMouseMoveHandler);
+                this.globalMouseMoveHandler = null;
+            }
+            if (this.globalTouchMoveHandler) {
+                document.removeEventListener('touchmove', this.globalTouchMoveHandler);
+                this.globalTouchMoveHandler = null;
+            }
         };
+        
+        // Сохраняем ссылку на onUp для глобального обработчика
+        this.globalMouseUpHandler = onUp;
+        this.globalTouchEndHandler = onUp;
+        this.globalTouchMoveHandler = onMove;
         
         // Добавляем только обработчики начала перетаскивания
         this.overlayCanvas.addEventListener('mousedown', onDown);
