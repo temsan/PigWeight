@@ -4,7 +4,7 @@
  */
 
 import { UIManager } from './ui-manager.js';
-import { VideoManager } from './video-manager.js?v=4';
+import { VideoManager } from './video-manager.js?v=5';
 import { WebSocketManager } from './websocket-manager.js';
 import { ChartManager } from './chart-manager.js';
 import { JournalManager } from './journal-manager.js';
