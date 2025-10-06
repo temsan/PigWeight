@@ -34,19 +34,24 @@ async def api_stream_start(stream_id: str, source_uri: str):
     """Запуск потока обработки"""
     start_time = time.time()
     try:
+        logger.info(f"🚀 Запуск потока {stream_id} с источником {source_uri}")
         perf_logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Starting stream {stream_id} with source {source_uri}")
 
         # Basic validation for file paths to give clearer errors
         if not source_uri.startswith("rtsp://") and not source_uri.startswith("demo://"):
             p = Path(source_uri)
             if not p.exists():
+                logger.warning(f"⚠️ Файл не найден: {source_uri}")
                 perf_logger.warning(".3f")
                 return JSONResponse({"error": f"file not found: {source_uri}"}, status_code=404)
             if not p.is_file():
+                logger.warning(f"⚠️ Не файл: {source_uri}")
                 perf_logger.warning(".3f")
                 return JSONResponse({"error": f"not a file: {source_uri}"}, status_code=400)
 
+        logger.info(f"📡 Создание потока {stream_id}")
         stream = await STREAM_MANAGER.get_or_create_stream(stream_id, source_uri)
+        logger.info(f"▶️ Запуск потока {stream_id}")
         await stream.start()
         resp = {"status": "started", "stream_id": stream_id}
         
