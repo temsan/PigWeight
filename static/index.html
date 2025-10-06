@@ -1391,33 +1391,9 @@
                 isVideoPlaying = true;
                 videoPlayPauseBtn.textContent = 'Стоп';
             } else {
-                // Если нет активного потока, пытаемся воспроизвести последний файл
-                const lastFile = loadLastFile();
-                if (lastFile && lastFile.sourceUri) {
-                    // Создаем новый streamId для последнего файла
-                    const newStreamId = 'file_' + Date.now();
-                    activeStreamId = newStreamId;
-                    streamSources[newStreamId] = lastFile.sourceUri;
-                    
-                    // Обновляем название файла на кнопке
-                    fileInputName.textContent = shortenFileName(lastFile.fileName);
-                    fileInputLabel.title = lastFile.fileName;
-                    
-                    // Загружаем сохраненные позиции линий для этого файла
-                    const savedPositions = loadLinePositions(lastFile.fileName);
-                    if (savedPositions) {
-                        window.__lines = { left_x: savedPositions.left_x, right_x: savedPositions.right_x };
-                    } else {
-                        // Используем значения по умолчанию
-                        window.__lines = { left_x: 0.25, right_x: 0.75 };
-                    }
-                    
-                    await startStream(newStreamId, lastFile.sourceUri);
-                    isVideoPlaying = true;
-                    videoPlayPauseBtn.textContent = 'Стоп';
-                } else {
-                    alert('Нет файла для воспроизведения. Пожалуйста, загрузите видеофайл.');
-                }
+                // Если нет активного потока, показываем сообщение вместо автозагрузки
+                alert('Пожалуйста, выберите файл для воспроизведения или настройте поток.');
+                console.log('Нет активного потока для воспроизведения');
             }
         }
     });
