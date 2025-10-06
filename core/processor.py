@@ -77,11 +77,14 @@ class UnifiedVideoProcessor:
         self.event_cooldown = 2.0  # Минимальный интервал между событиями одного типа
         
         # Приоритетная очередь для кадров
-        self.priority_queue = PriorityFrameQueue(
-            max_size_mb=100,  # Максимум 100MB в очереди
+        from core.priority_frame_queue import QueueConfig
+        queue_config = QueueConfig(
+            max_size=1000,  # Максимальное количество кадров
+            max_memory_mb=100,  # Максимум 100MB в очереди
             max_age_seconds=5.0,  # Максимум 5 секунд в очереди
             cleanup_interval=1.0  # Очистка каждую секунду
         )
+        self.priority_queue = PriorityFrameQueue(queue_config)
         
         # Настройки для детекции линий (можно вынести в конфиг)
         self.line_left_x = getattr(CONFIG, "LINE_LEFT_X", 0.25)
