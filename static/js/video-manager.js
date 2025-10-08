@@ -276,36 +276,74 @@ export class VideoManager extends EventEmitter {
                 lines: window.__lines
             });
             
-            // Фон линий
-            ctx.fillStyle = 'rgba(44,123,229,0.12)';
-            ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
-            ctx.fillStyle = 'rgba(81,207,102,0.12)';
-            ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
+            // Фон линий (более заметный)
+            ctx.fillStyle = 'rgba(44,123,229,0.15)';
+            ctx.fillRect(x1 - 3, rect.y, 6, rect.h);
+            ctx.fillStyle = 'rgba(81,207,102,0.15)';
+            ctx.fillRect(x2 - 3, rect.y, 6, rect.h);
             
-            // Сами линии
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = 'rgba(44,123,229,0.9)';
+            // Сами линии (толще и ярче)
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(44,123,229,0.95)';
             ctx.beginPath();
             ctx.moveTo(x1, rect.y);
             ctx.lineTo(x1, rect.y + rect.h);
             ctx.stroke();
             
-            ctx.strokeStyle = 'rgba(81,207,102,0.9)';
+            ctx.strokeStyle = 'rgba(81,207,102,0.95)';
             ctx.beginPath();
             ctx.moveTo(x2, rect.y);
             ctx.lineTo(x2, rect.y + rect.h);
             ctx.stroke();
             
-            // Кружочки на линиях
+            // Индикаторы направления (стрелки)
+            const arrowSize = 8;
+            const arrowY = rect.y + 20;
+            
+            // Стрелка для левой линии (вправо)
             ctx.fillStyle = 'rgba(44,123,229,0.95)';
             ctx.beginPath();
-            ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.moveTo(x1, arrowY);
+            ctx.lineTo(x1 + arrowSize, arrowY - arrowSize/2);
+            ctx.lineTo(x1 + arrowSize, arrowY + arrowSize/2);
+            ctx.closePath();
             ctx.fill();
+            
+            // Стрелка для правой линии (влево)
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.beginPath();
+            ctx.moveTo(x2, arrowY);
+            ctx.lineTo(x2 - arrowSize, arrowY - arrowSize/2);
+            ctx.lineTo(x2 - arrowSize, arrowY + arrowSize/2);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Кружочки на линиях (больше и ярче)
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.beginPath();
+            ctx.arc(x1, rect.y + 10, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
             
             ctx.fillStyle = 'rgba(81,207,102,0.95)';
             ctx.beginPath();
-            ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.arc(x2, rect.y + 10, 5, 0, Math.PI * 2);
             ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Подписи линий
+            ctx.font = 'bold 12px system-ui, Segoe UI, Arial';
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('Вход', x1, rect.y + 35);
+            
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.fillText('Выход', x2, rect.y + 35);
         } catch (e) {
             console.warn('Ошибка отрисовки линий:', e);
         }
@@ -485,12 +523,6 @@ export class VideoManager extends EventEmitter {
         
         const now = performance.now();
         
-        // Отладка rect для первого вызова
-        if (this.popupCounters.length > 0 && !this._popupDebugLogged) {
-            console.log('🎆 drawPopupCounters rect:', rect);
-            this._popupDebugLogged = true;
-        }
-        
         ctx.save();
         this.popupCounters.forEach(popup => {
             const elapsed = now - popup.startTime;
@@ -500,39 +532,63 @@ export class VideoManager extends EventEmitter {
             
             const x = rect.x + popup.x * rect.w;
             const y = rect.y + popup.y * rect.h - ease * popup.riseDistance;
-            const radius = 16;
-            
-            // Отладка позиционирования
-            if (this.popupCounters.indexOf(popup) === 0) { // Только для первого счетчика
-                console.log(`🎆 Отрисовка счетчика "${popup.text}":`, {
-                    normalized: { x: popup.x, y: popup.y },
-                    rect: rect,
-                    screen: { x: x.toFixed(1), y: y.toFixed(1) },
-                    riseDistance: popup.riseDistance,
-                    ease: ease.toFixed(3)
-                });
-            }
             
             // Применяем прозрачность
             ctx.globalAlpha = Math.max(0, alpha);
             
-            // Рисуем круг фона
+            // Рисуем кружок пересечения на линии (стационарный)
             ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.arc(x, y, 8, 0, Math.PI * 2);
             ctx.fillStyle = popup.color;
             ctx.fill();
             
-            // Рисуем обводку
+            // Обводка кружка
             ctx.lineWidth = 2;
-            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx.strokeStyle = '#ffffff';
             ctx.stroke();
             
+            // Всплывающий счетчик (поднимается вверх)
+            const popupY = y - 25 - ease * 20;
+            const radius = 18;
+            
+            // Тень для всплывающего счетчика
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetY = 2;
+            
+            // Рисуем всплывающий круг
+            ctx.beginPath();
+            ctx.arc(x, popupY, radius, 0, Math.PI * 2);
+            ctx.fillStyle = popup.color;
+            ctx.fill();
+            
+            // Обводка всплывающего круга
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+            
+            // Сбрасываем тень
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+            
             // Рисуем текст
-            ctx.font = '700 14px system-ui, Segoe UI, Arial';
+            ctx.font = 'bold 16px system-ui, Segoe UI, Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = '#fff';
-            ctx.fillText(popup.text, x, y + 1);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(popup.text, x, popupY);
+            
+            // Добавляем стрелку, указывающую на точку пересечения
+            if (progress < 0.8) { // Показываем стрелку только в начале анимации
+                ctx.beginPath();
+                ctx.moveTo(x, popupY + radius);
+                ctx.lineTo(x - 4, y + 8);
+                ctx.lineTo(x + 4, y + 8);
+                ctx.closePath();
+                ctx.fillStyle = popup.color;
+                ctx.fill();
+            }
         });
         ctx.globalAlpha = 1.0; // Сброс прозрачности
         ctx.restore();
@@ -612,36 +668,74 @@ export class VideoManager extends EventEmitter {
             const x1 = rect.x + rect.w * leftX;
             const x2 = rect.x + rect.w * rightX;
             
-            // Фон линий
-            ctx.fillStyle = 'rgba(44,123,229,0.12)';
-            ctx.fillRect(x1 - 2, rect.y, 4, rect.h);
-            ctx.fillStyle = 'rgba(81,207,102,0.12)';
-            ctx.fillRect(x2 - 2, rect.y, 4, rect.h);
+            // Фон линий (более заметный)
+            ctx.fillStyle = 'rgba(44,123,229,0.15)';
+            ctx.fillRect(x1 - 3, rect.y, 6, rect.h);
+            ctx.fillStyle = 'rgba(81,207,102,0.15)';
+            ctx.fillRect(x2 - 3, rect.y, 6, rect.h);
             
-            // Сами линии
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = 'rgba(44,123,229,0.9)';
+            // Сами линии (толще и ярче)
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(44,123,229,0.95)';
             ctx.beginPath();
             ctx.moveTo(x1, rect.y);
             ctx.lineTo(x1, rect.y + rect.h);
             ctx.stroke();
             
-            ctx.strokeStyle = 'rgba(81,207,102,0.9)';
+            ctx.strokeStyle = 'rgba(81,207,102,0.95)';
             ctx.beginPath();
             ctx.moveTo(x2, rect.y);
             ctx.lineTo(x2, rect.y + rect.h);
             ctx.stroke();
             
-            // Кружочки на линиях
+            // Индикаторы направления (стрелки)
+            const arrowSize = 8;
+            const arrowY = rect.y + 20;
+            
+            // Стрелка для левой линии (вправо)
             ctx.fillStyle = 'rgba(44,123,229,0.95)';
             ctx.beginPath();
-            ctx.arc(x1, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.moveTo(x1, arrowY);
+            ctx.lineTo(x1 + arrowSize, arrowY - arrowSize/2);
+            ctx.lineTo(x1 + arrowSize, arrowY + arrowSize/2);
+            ctx.closePath();
             ctx.fill();
+            
+            // Стрелка для правой линии (влево)
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.beginPath();
+            ctx.moveTo(x2, arrowY);
+            ctx.lineTo(x2 - arrowSize, arrowY - arrowSize/2);
+            ctx.lineTo(x2 - arrowSize, arrowY + arrowSize/2);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Кружочки на линиях (больше и ярче)
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.beginPath();
+            ctx.arc(x1, rect.y + 10, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
             
             ctx.fillStyle = 'rgba(81,207,102,0.95)';
             ctx.beginPath();
-            ctx.arc(x2, rect.y + 10, 3.5, 0, Math.PI * 2);
+            ctx.arc(x2, rect.y + 10, 5, 0, Math.PI * 2);
             ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Подписи линий
+            ctx.font = 'bold 12px system-ui, Segoe UI, Arial';
+            ctx.fillStyle = 'rgba(44,123,229,0.95)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('Вход', x1, rect.y + 35);
+            
+            ctx.fillStyle = 'rgba(81,207,102,0.95)';
+            ctx.fillText('Выход', x2, rect.y + 35);
             
         } catch (error) {
             console.warn('⚠️ Ошибка отрисовки линий:', error);

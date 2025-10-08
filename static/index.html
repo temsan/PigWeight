@@ -1152,7 +1152,42 @@
                             console.warn('⚠️ window.appInstance или videoManager недоступны');
                         }
                         
-                        streamStatus.textContent = 'Live + overlay';
+                        // Проверяем синхронизацию видео и инференса
+                        const videoElement = document.querySelector('video');
+                        const isVideoPlaying = videoElement && !videoElement.paused && !videoElement.ended;
+                        const hasRecentMasks = lastMasks && lastMasks.length > 0;
+                        
+                        if (isVideoPlaying && hasRecentMasks) {
+                            streamStatus.textContent = 'Live + overlay';
+                            streamStatus.style.color = '#28a745';
+                            
+                            // Сбрасываем таймер восстановления при успешной синхронизации
+                            if (window.videoStuckRecovery) {
+                                clearTimeout(window.videoStuckRecovery);
+                                window.videoStuckRecovery = null;
+                            }
+                        } else if (!isVideoPlaying && hasRecentMasks) {
+                            streamStatus.textContent = '⚠️ Видео застопорилось';
+                            streamStatus.style.color = '#ffc107';
+                            
+                            // Автоматическое восстановление через 3 секунды
+                            if (!window.videoStuckRecovery) {
+                                window.videoStuckRecovery = setTimeout(() => {
+                                    console.log('🔄 Попытка восстановления видео...');
+                                    const videoElement = document.querySelector('video');
+                                    if (videoElement && videoElement.paused) {
+                                        videoElement.play().catch(e => console.warn('Не удалось перезапустить видео:', e));
+                                    }
+                                    window.videoStuckRecovery = null;
+                                }, 3000);
+                            }
+                        } else if (isVideoPlaying && !hasRecentMasks) {
+                            streamStatus.textContent = '⚠️ Инференс застопорился';
+                            streamStatus.style.color = '#dc3545';
+                        } else {
+                            streamStatus.textContent = '⏸️ Остановлено';
+                            streamStatus.style.color = '#6c757d';
+                        }
                     } else {
                         console.warn('⚠️ Нет масок для отрисовки');
                     }

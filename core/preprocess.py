@@ -88,23 +88,26 @@ def map_polys_from_center_crop(polys, transform_meta: Dict[str, Any]) -> list:
         List of polygons mapped to original image coordinates.
     """
     orig_w, orig_h = transform_meta['original_size']
-    crop_x, crop_y, crop_w, crop_h = transform_meta['crop_box']
     resize_target = transform_meta['resize_target']
     scale_factor = transform_meta['scale_factor']
+    
+    # Получаем информацию о padding
+    pad_top = transform_meta.get('pad_top', 0)
+    pad_left = transform_meta.get('pad_left', 0)
+    resized_w, resized_h = transform_meta.get('resized_size', (orig_w, orig_h))
 
     mapped_polys = []
 
     for poly in polys:
         new_poly = []
         for x_proc, y_proc in poly:
-            # Упрощенная версия без padding:
-            # 1. Reverse resize from (resize_target, resize_target) to (crop_w, crop_h)
-            y_in_cropped = y_proc * (crop_h / resize_target)
-            x_in_cropped = x_proc * (crop_w / resize_target)
-
-            # 2. Reverse crop
-            y_orig = y_in_cropped + crop_y
-            x_orig = x_in_cropped + crop_x
+            # 1. Убираем padding (переводим из target_size x target_size в resized_w x resized_h)
+            x_in_resized = x_proc - pad_left
+            y_in_resized = y_proc - pad_top
+            
+            # 2. Масштабируем обратно к оригинальному размеру
+            x_orig = x_in_resized / scale_factor
+            y_orig = y_in_resized / scale_factor
 
             # Clamp to original image dimensions
             x_orig = max(0.0, min(float(orig_w - 1), x_orig))
@@ -119,31 +122,40 @@ def map_polys_from_center_crop(polys, transform_meta: Dict[str, Any]) -> list:
 
 
 def center_crop_resize(frame: np.ndarray, target_size: int = 640) -> Dict[str, Any]:
-    """Центрирует кадр, приводит его к квадрату target_size и возвращает метаданные."""
+    """Масштабирует кадр с сохранением пропорций и добавляет padding до квадрата target_size."""
     h, w = frame.shape[:2]
-    crop_size = min(h, w)
-    start_x = max(0, (w - crop_size) // 2)
-    start_y = max(0, (h - crop_size) // 2)
-    cropped = frame[start_y:start_y + crop_size, start_x:start_x + crop_size]
-
-    # Упрощенная версия без дополнительного padding для ускорения
-    if cropped.shape[0] != target_size:
-        resized = cv2.resize(cropped, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
-        final_img = resized
-    else:
-        final_img = cropped
+    
+    # Вычисляем масштаб для вписывания в target_size с сохранением пропорций
+    scale = float(target_size) / max(h, w)
+    new_w = int(round(w * scale))
+    new_h = int(round(h * scale))
+    
+    # Масштабируем изображение
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    
+    # Добавляем padding до квадрата target_size x target_size
+    pad_w = target_size - new_w
+    pad_h = target_size - new_h
+    top = pad_h // 2
+    bottom = pad_h - top
+    left = pad_w // 2
+    right = pad_w - left
+    
+    # Создаем квадратное изображение с padding
+    final_img = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=[0, 0, 0])
 
     transform_meta = {
         'original_size': (w, h),
-        'crop_box': (start_x, start_y, crop_size, crop_size),
+        'crop_box': (0, 0, w, h),  # Нет обрезки, используем весь кадр
         'resize_target': target_size,
-        'scale_factor': float(target_size) / crop_size,
-        'pad_top': 0, 'pad_bottom': 0, 'pad_left': 0, 'pad_right': 0
+        'scale_factor': scale,
+        'pad_top': top, 'pad_bottom': bottom, 'pad_left': left, 'pad_right': right,
+        'resized_size': (new_w, new_h)
     }
 
     return {
         'img': final_img,
-        'method': 'center_crop_with_padding',
+        'method': 'scale_with_padding',
         'transform_meta': transform_meta,
     }
 

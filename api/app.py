@@ -938,6 +938,18 @@ async def _global_infer_loop(self):
 
                 jpeg = frame_data['jpeg']
                 timestamp = frame_data.get('ts', time.time()) # Get real timestamp
+                
+                # Проверяем синхронизацию для файлов
+                if hasattr(self, 'duration') and self.duration > 0:
+                    # Это файл - проверяем синхронизацию
+                    frame_time = frame_data.get('pts', 0) * frame_data.get('time_base', 0)
+                    time_diff = abs(frame_time - self.current_time)
+                    
+                    # Если разница больше 2 секунд, видео застопорилось
+                    if time_diff > 2.0:
+                        logger.warning(f"🎬 Видео застопорилось: frame_time={frame_time:.2f}, current_time={self.current_time:.2f}, diff={time_diff:.2f}")
+                        await asyncio.sleep(0.1)  # Увеличиваем задержку при застопоривании
+                        continue
 
                 arr = np.frombuffer(jpeg, dtype=np.uint8)
                 frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
