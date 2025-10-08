@@ -817,16 +817,12 @@ export class VideoManager extends EventEmitter {
                 const text = isPositive ? '+1' : '-1';
                 const color = isPositive ? '#51cf66' : '#ff6b6b';
                 
-                // Используем актуальные позиции линий для X-координаты
-                let x = Number(crossing.x || 0.5);
+                // Используем точные координаты пересечения без коррекции
+                const x = Number(crossing.x || 0.5);
                 const y = Number(crossing.y || 0.5);
                 
-                // Если координата X не соответствует актуальной позиции линии, корректируем её
-                if (side === 'left' && Math.abs(x - leftLineX) > 0.01) {
-                    x = leftLineX;
-                } else if (side === 'right' && Math.abs(x - rightLineX) > 0.01) {
-                    x = rightLineX;
-                }
+                console.log(`🔍 Пересечение: side=${side}, mode=${mode}, координаты=(${x}, ${y})`);
+                console.log(`🔍 Позиции линий: left=${leftLineX}, right=${rightLineX}`);
                 
                 this.popupCounters.push({
                     x: x,
