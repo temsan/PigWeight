@@ -179,24 +179,26 @@ def main():
             else:
                 app = app_str
                 
+            # Собираем только существующие директории для reload
+            reload_dirs = []
+            for dirname in ["api", "core", "services", "static"]:
+                dirpath = Path(__file__).parent / dirname
+                if dirpath.exists() and dirpath.is_dir():
+                    reload_dirs.append(str(dirpath))
+            
             uvicorn.run(
                 app,
                 host=CONFIG.HOST,
                 port=CONFIG.PORT,
                 reload=CONFIG.RELOAD,
                 log_level="debug" if CONFIG.DEBUG else "warning",
-                reload_dirs=[
-                    str(Path(__file__).parent / "api"),
-                    str(Path(__file__).parent / "core"),
-                    str(Path(__file__).parent / "services"),
-                    str(Path(__file__).parent / "static"),
-                ],
+                reload_dirs=reload_dirs if reload_dirs else None,
                 reload_excludes=[
                     "logs", "logs/**", "*.log",
                     "uploads", "uploads/**",
                     "records", "records/**",
                     "models", "models/**",
-                ]
+                ] if CONFIG.RELOAD else None
             )
         except Exception as e:
             logger.error(f'Ошибка запуска сервера через uvicorn: {str(e)}')
