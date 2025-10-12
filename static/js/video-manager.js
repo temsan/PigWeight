@@ -37,12 +37,10 @@ export class VideoManager extends EventEmitter {
         // Инициализируем позиции линий по умолчанию
         if (!window.__lines || typeof window.__lines.left_x !== 'number') {
             window.__lines = { left_x: 0.25, right_x: 0.75 };
-            console.log('🔧 Инициализированы позиции линий по умолчанию:', window.__lines);
         }
     }
     
     async init() {
-        console.log('🎥 Инициализация Video Manager...');
         
         // Кэшируем элементы
         this.cacheElements();
@@ -55,8 +53,6 @@ export class VideoManager extends EventEmitter {
         
         // Запускаем overlay луп
         this.startOverlayLoop();
-        
-        console.log('✅ Video Manager инициализирован');
     }
     
     cacheElements() {
@@ -75,19 +71,16 @@ export class VideoManager extends EventEmitter {
         this.maskWorker = null; // Принудительно отключаем worker
         if (this.overlayCanvas) {
             this.overlayContext = this.overlayCanvas.getContext('2d');
-            console.log('✅ Overlay context инициализирован в основном потоке');
         }
     }
     
     setupEventHandlers() {
         // Обработчики изменения размера
         window.addEventListener('resize', () => {
-            console.log('🔄 Изменение размера окна, обновляем overlay');
             this.updateOverlaySize();
             // Принудительно перерисовываем overlay после изменения размера
             if (this.lastMasks && this.lastIds) {
                 setTimeout(() => {
-                    console.log('🔄 Принудительная перерисовка overlay после resize');
                     this.drawOverlayDirect(this.lastMasks, this.lastIds);
                 }, 100);
             }
@@ -122,17 +115,11 @@ export class VideoManager extends EventEmitter {
         const height = Math.floor(rect.height);
         
         if (this.overlayCanvas.width !== width || this.overlayCanvas.height !== height) {
-            console.log('🔄 Изменение размера overlay canvas:', {
-                old: { w: this.overlayCanvas.width, h: this.overlayCanvas.height },
-                new: { w: width, h: height }
-            });
-            
             this.overlayCanvas.width = width;
             this.overlayCanvas.height = height;
             
             // Принудительно перерисовываем overlay после изменения размера
             if (this.lastMasks && this.lastIds) {
-                console.log('🔄 Перерисовка overlay после изменения размера');
                 // Небольшая задержка для стабилизации размеров
                 setTimeout(() => {
                     this.drawOverlayDirect(this.lastMasks, this.lastIds);
@@ -150,17 +137,8 @@ export class VideoManager extends EventEmitter {
     }
     
     scheduleOverlay(masks, ids) {
-        console.log('🎯 scheduleOverlay вызван:', {
-            masksCount: masks ? masks.length : 0,
-            idsCount: ids ? ids.length : 0,
-            overlayBlockUntil: this.overlayBlockUntil,
-            currentTime: performance.now(),
-            overlayEnabled: this.overlayEnabled
-        });
-        
         // Проверяем что overlay включен
         if (!this.overlayEnabled) {
-            console.log('🚫 scheduleOverlay пропущен - overlay отключен');
             return;
         }
         
@@ -168,7 +146,6 @@ export class VideoManager extends EventEmitter {
         this.updateOverlaySize();
         
         if (performance.now() < this.overlayBlockUntil) {
-            console.log('🚫 scheduleOverlay заблокирован до:', this.overlayBlockUntil);
             return;
         }
         
@@ -181,23 +158,14 @@ export class VideoManager extends EventEmitter {
         const timeSinceLastDraw = performance.now() - this.overlayLastDraw;
         const minInterval = 1000 / this.overlayMaxFps;
         
-        console.log('⏰ scheduleOverlay:', {
-            timeSinceLastDraw: timeSinceLastDraw.toFixed(1),
-            minInterval: minInterval.toFixed(1),
-            shouldDraw: timeSinceLastDraw > minInterval
-        });
-        
         if (timeSinceLastDraw > minInterval) {
-            console.log('🎨 Вызываю drawOverlay()');
             this.drawOverlay();
         } else {
-            console.log('⏳ drawOverlay отложен, слишком рано');
-        }
+            }
     }
     
     drawOverlay() {
         if (!this.overlayPending) {
-            console.log('🚫 drawOverlay: нет отложенных задач');
             return;
         }
         
@@ -205,15 +173,8 @@ export class VideoManager extends EventEmitter {
         this.overlayPending = null;
         this.overlayLastDraw = performance.now();
         
-        console.log('🎨 drawOverlay:', {
-            masksCount: masks ? masks.length : 0,
-            idsCount: ids ? ids.length : 0,
-            hasWorker: !!this.maskWorker
-        });
-        
         if (this.maskWorker) {
             // Используем worker
-            console.log('👷 Используем worker для отрисовки');
             const rect = this.overlayCanvas.getBoundingClientRect();
             this.maskWorker.postMessage({
                 type: 'overlay',
@@ -224,7 +185,6 @@ export class VideoManager extends EventEmitter {
             });
         } else {
             // Fallback на основной поток
-            console.log('🎯 Используем drawOverlayDirect (основной поток)');
             this.drawOverlayDirect(masks, ids);
         }
     }
@@ -250,31 +210,12 @@ export class VideoManager extends EventEmitter {
         }
         
         // Отладочные логи
-        console.log('🎨 drawOverlayDirect:', {
-            masksCount: masks ? masks.length : 0,
-            idsCount: ids ? ids.length : 0,
-            rect: rect,
-            canvasSize: { width: canvas.width, height: canvas.height },
-            canvasRect: canvas.getBoundingClientRect(),
-            videoElement: {
-                webrtc: document.getElementById('webrtcVideo')?.getBoundingClientRect(),
-                stream: this.videoStream?.getBoundingClientRect()
-            }
-        });
-        
         // Отрисовка вертикальных линий
         try {
             const leftX = (window.__lines && typeof window.__lines.left_x === 'number') ? window.__lines.left_x : 0.25;
             const rightX = (window.__lines && typeof window.__lines.right_x === 'number') ? window.__lines.right_x : 0.75;
             const x1 = rect.x + rect.w * leftX;
             const x2 = rect.x + rect.w * rightX;
-            
-            console.log('📏 Рисую вертикальные линии:', {
-                leftX, rightX,
-                x1, x2,
-                rect: rect,
-                lines: window.__lines
-            });
             
             // Фон линий (более заметный)
             ctx.fillStyle = 'rgba(44,123,229,0.15)';
@@ -350,7 +291,6 @@ export class VideoManager extends EventEmitter {
         
         // Отрисовка масок свиней
         if (Array.isArray(masks) && masks.length > 0) {
-            console.log('🎭 Начинаю отрисовку масок:', masks.length);
             masks.forEach((mask, idx) => {
                 if (!Array.isArray(mask) || mask.length < 3) {
                     console.warn('⚠️ Пропускаю маску', idx, 'неверный формат:', mask);
@@ -420,21 +360,13 @@ export class VideoManager extends EventEmitter {
         const webrtcEl = document.getElementById('webrtcVideo');
         const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none';
         
-        console.log('🔍 Поиск видео элемента:', {
-            hasWebrtcEl: !!webrtcEl,
-            webrtcDisplay: webrtcEl ? webrtcEl.style.display : 'N/A',
-            webrtcVisible: webrtcVisible,
-            hasVideoStream: !!this.videoStream,
-            videoStreamSrc: this.videoStream ? this.videoStream.src : 'N/A'
-        });
+        // Убрано избыточное логирование
         
         let videoEl = null;
         if (webrtcVisible) {
             videoEl = webrtcEl;
-            console.log('📹 Используем WebRTC элемент');
         } else if (this.videoStream) {
             videoEl = this.videoStream;
-            console.log('📹 Используем videoStream элемент');
         }
         
         if (!videoEl) {
@@ -445,15 +377,6 @@ export class VideoManager extends EventEmitter {
         // Получаем реальные размеры видео
         const iw = videoEl.videoWidth || videoEl.naturalWidth || 0;
         const ih = videoEl.videoHeight || videoEl.naturalHeight || 0;
-        
-        console.log('📏 Размеры видео элемента:', {
-            videoWidth: videoEl.videoWidth,
-            videoHeight: videoEl.videoHeight,
-            naturalWidth: videoEl.naturalWidth,
-            naturalHeight: videoEl.naturalHeight,
-            finalWidth: iw,
-            finalHeight: ih
-        });
         
         if (!iw || !ih) {
             console.warn('⚠️ Размеры видео не определены, используем размеры wrapper');
@@ -466,12 +389,6 @@ export class VideoManager extends EventEmitter {
         const h = Math.round(ih * scale);
         const x = Math.floor((cw - w) / 2);
         const y = Math.floor((ch - h) / 2);
-        
-        console.log('📐 getRenderedImageRect:', {
-            wrapper: { w: cw, h: ch },
-            video: { w: iw, h: ih },
-            rendered: { x, y, w, h, scale: scale.toFixed(3) }
-        });
         
         return { x, y, w, h };
     }
@@ -745,7 +662,6 @@ export class VideoManager extends EventEmitter {
     startOverlayLoop() {
         // Инициализируем основной луп overlay рендеринга
         if (!this.overlayRaf) {
-            console.log('🎆 Запуск overlay лупа');
             this.overlayTick();
         }
     }
@@ -753,7 +669,6 @@ export class VideoManager extends EventEmitter {
     overlayTick() {
         // Проверяем что overlay включен
         if (!this.overlayEnabled) {
-            console.log('🚫 overlayTick пропущен - overlay отключен');
             return;
         }
         
@@ -855,8 +770,6 @@ export class VideoManager extends EventEmitter {
     }
     
     stopOverlay() {
-        console.log('🛑 Остановка overlay лупа');
-        
         if (this.overlayRaf) {
             cancelAnimationFrame(this.overlayRaf);
             this.overlayRaf = null;
@@ -873,8 +786,6 @@ export class VideoManager extends EventEmitter {
     }
     
     startOverlay() {
-        console.log('▶️ Запуск overlay лупа');
-        
         this.overlayEnabled = true;
         this.startOverlayLoop();
     }
@@ -894,17 +805,7 @@ export class VideoManager extends EventEmitter {
     }
     
     setupLineDragging() {
-        console.log('🔧 setupLineDragging вызван:', {
-            hasOverlayCanvas: !!this.overlayCanvas,
-            lineDragInitialized: this.lineDragInitialized,
-            overlayEnabled: this.overlayEnabled
-        });
-        
         if (!this.overlayCanvas || this.lineDragInitialized) {
-            console.warn('⚠️ setupLineDragging пропущен:', {
-                hasOverlayCanvas: !!this.overlayCanvas,
-                lineDragInitialized: this.lineDragInitialized
-            });
             return;
         }
         
@@ -927,14 +828,7 @@ export class VideoManager extends EventEmitter {
         };
         
         const onDown = (e) => {
-            console.log('🖱️ onDown вызван:', {
-                overlayEnabled: this.overlayEnabled,
-                eventType: e.type,
-                clientX: e.clientX || (e.touches ? e.touches[0].clientX : 'N/A')
-            });
-            
             if (!this.overlayEnabled) {
-                console.warn('⚠️ overlayEnabled = false, пропускаем onDown');
                 return;
             }
             
@@ -945,30 +839,18 @@ export class VideoManager extends EventEmitter {
             const distL = Math.abs(nx - lx);
             const distR = Math.abs(nx - rx);
             
-            console.log('🎯 Проверка расстояний:', {
-                nx: nx.toFixed(3),
-                lx: lx.toFixed(3),
-                rx: rx.toFixed(3),
-                distL: distL.toFixed(3),
-                distR: distR.toFixed(3),
-                threshold: 0.02
-            });
-            
             if (distL < 0.02 || distR < 0.02) {
                 this.draggingLine = (distL < distR) ? 'left' : 'right';
                 this.isDraggingLines = true;
                 this.overlayCanvas.style.cursor = 'ew-resize';
                 e.preventDefault();
-                console.log('🎯 Начато перетаскивание линии:', this.draggingLine);
-                
                 // Добавляем глобальные обработчики для корректного завершения перетаскивания
                 document.addEventListener('mouseup', this.globalMouseUpHandler);
                 document.addEventListener('touchend', this.globalTouchEndHandler);
                 document.addEventListener('mousemove', this.globalMouseMoveHandler);
                 document.addEventListener('touchmove', this.globalTouchMoveHandler);
             } else {
-                console.log('❌ Слишком далеко от линий');
-            }
+                }
         };
         
         const onMove = (e) => {
@@ -1012,8 +894,6 @@ export class VideoManager extends EventEmitter {
         const onUp = async (e) => {
             if (!this.draggingLine) return;
             
-            console.log('🎯 Завершено перетаскивание линии:', this.draggingLine);
-            
             try {
                 const { left_x, right_x } = window.__lines || {};
                 const response = await fetch('/api/lines', {
@@ -1023,8 +903,7 @@ export class VideoManager extends EventEmitter {
                 });
                 
                 if (response.ok) {
-                    console.log('✅ Позиции линий сохранены:', { left_x, right_x });
-                } else {
+                    } else {
                     console.warn('⚠️ Ошибка сохранения позиций линий');
                 }
             } catch (error) {
@@ -1081,6 +960,5 @@ export class VideoManager extends EventEmitter {
             }
         });
         
-        console.log('✅ Обработчики перетаскивания линий настроены');
-    }
+        }
 }
