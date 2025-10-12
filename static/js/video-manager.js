@@ -533,11 +533,6 @@ export class VideoManager extends EventEmitter {
             const x = rect.x + popup.x * rect.w;
             const y = rect.y + popup.y * rect.h - ease * popup.riseDistance;
             
-            // Отладка только для первого счетчика
-            if (index === 0) {
-                console.log(`🎯 Отрисовка счетчика: popup.x=${popup.x}, popup.y=${popup.y}, rect.x=${rect.x}, rect.y=${rect.y}, rect.w=${rect.w}, rect.h=${rect.h}, screen_x=${x}, screen_y=${y}`);
-            }
-            
             // Применяем прозрачность
             ctx.globalAlpha = Math.max(0, alpha);
             
@@ -826,8 +821,7 @@ export class VideoManager extends EventEmitter {
                 const x = Number(crossing.x || 0.5);
                 const y = Number(crossing.y || 0.5);
                 
-                console.log(`🔍 Пересечение: side=${side}, mode=${mode}, x=${x}, y=${y}`);
-                console.log(`🔍 Позиции линий: left=${leftLineX}, right=${rightLineX}`);
+                console.log(`🎯 Пересечение: side=${side}, x=${x.toFixed(3)} (должно быть ${side === 'left' ? '0.25' : '0.75'})`);
                 
                 this.popupCounters.push({
                     x: x,
