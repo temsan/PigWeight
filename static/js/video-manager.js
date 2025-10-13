@@ -447,15 +447,16 @@ export class VideoManager extends EventEmitter {
             const alpha = 1 - progress;
             const ease = progress * (2 - progress); // Плавная анимация
             
-            const x = rect.x + popup.x * rect.w;
-            const y = rect.y + popup.y * rect.h - ease * popup.riseDistance;
+            // Базовая позиция на линии (без анимации)
+            const baseX = rect.x + popup.x * rect.w;
+            const baseY = rect.y + popup.y * rect.h;
             
             // Применяем прозрачность
             ctx.globalAlpha = Math.max(0, alpha);
             
             // Рисуем кружок пересечения на линии (стационарный)
             ctx.beginPath();
-            ctx.arc(x, y, 8, 0, Math.PI * 2);
+            ctx.arc(baseX, baseY, 8, 0, Math.PI * 2);
             ctx.fillStyle = popup.color;
             ctx.fill();
             
@@ -465,7 +466,7 @@ export class VideoManager extends EventEmitter {
             ctx.stroke();
             
             // Всплывающий счетчик (поднимается вверх)
-            const popupY = y - 25 - ease * 20;
+            const popupY = baseY - 25 - ease * 20;
             const radius = 18;
             
             // Тень для всплывающего счетчика
@@ -475,7 +476,7 @@ export class VideoManager extends EventEmitter {
             
             // Рисуем всплывающий круг
             ctx.beginPath();
-            ctx.arc(x, popupY, radius, 0, Math.PI * 2);
+            ctx.arc(baseX, popupY, radius, 0, Math.PI * 2);
             ctx.fillStyle = popup.color;
             ctx.fill();
             
@@ -494,14 +495,14 @@ export class VideoManager extends EventEmitter {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = '#ffffff';
-            ctx.fillText(popup.text, x, popupY);
+            ctx.fillText(popup.text, baseX, popupY);
             
             // Добавляем стрелку, указывающую на точку пересечения
             if (progress < 0.8) { // Показываем стрелку только в начале анимации
                 ctx.beginPath();
-                ctx.moveTo(x, popupY + radius);
-                ctx.lineTo(x - 4, y + 8);
-                ctx.lineTo(x + 4, y + 8);
+                ctx.moveTo(baseX, popupY + radius);
+                ctx.lineTo(baseX - 4, baseY + 8);
+                ctx.lineTo(baseX + 4, baseY + 8);
                 ctx.closePath();
                 ctx.fillStyle = popup.color;
                 ctx.fill();
