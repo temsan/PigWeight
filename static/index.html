@@ -1120,11 +1120,16 @@
                                 
                                 // Используем актуальные позиции линий для X-координаты
                                 let x = Number(c.x) || 0.5;
+                                const originalX = x;
                                 if (side === 'left' && Math.abs(x - leftLineX) > 0.01) {
+                                    console.log(`⚠️ Корректировка X для левой линии: ${x.toFixed(3)} → ${leftLineX.toFixed(3)}`);
                                     x = leftLineX;
                                 } else if (side === 'right' && Math.abs(x - rightLineX) > 0.01) {
+                                    console.log(`⚠️ Корректировка X для правой линии: ${x.toFixed(3)} → ${rightLineX.toFixed(3)}`);
                                     x = rightLineX;
                                 }
+                                
+                                console.log(`📍 Пересечение (index.html): side=${side}, originalX=${originalX.toFixed(3)}, finalX=${x.toFixed(3)}, y=${Number(c.y).toFixed(3)}`);
                                 
                                 window.__popups.push({ x: x, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
                             }
