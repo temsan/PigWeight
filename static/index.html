@@ -1105,10 +1105,6 @@
                         const cr = window.__lastCrossings;
                         let maxTs = prevTs;
                         
-                        // Получаем актуальные позиции линий
-                        const linePositions = data.debug.lines || { left_x: 0.25, right_x: 0.75 };
-                        const leftLineX = Number(linePositions.left_x || 0.25);
-                        const rightLineX = Number(linePositions.right_x || 0.75);
                         cr.forEach(c => {
                             const tsMs = Number(c.ts || 0) * 1000;
                             if (tsMs > prevTs) {
@@ -1118,20 +1114,13 @@
                                 const text = isPositive ? '+1' : '-1';
                                 const color = isPositive ? '#51cf66' : '#ff6b6b';
                                 
-                                // Используем актуальные позиции линий для X-координаты
-                                let x = Number(c.x) || 0.5;
-                                const originalX = x;
-                                if (side === 'left' && Math.abs(x - leftLineX) > 0.01) {
-                                    console.log(`⚠️ Корректировка X для левой линии: ${x.toFixed(3)} → ${leftLineX.toFixed(3)}`);
-                                    x = leftLineX;
-                                } else if (side === 'right' && Math.abs(x - rightLineX) > 0.01) {
-                                    console.log(`⚠️ Корректировка X для правой линии: ${x.toFixed(3)} → ${rightLineX.toFixed(3)}`);
-                                    x = rightLineX;
-                                }
+                                // КРИТИЧНО: Используем координаты НАПРЯМУЮ с сервера без корректировки
+                                const x = Number(c.x) || 0.5;
+                                const y = Number(c.y) || 0.5;
                                 
-                                console.log(`📍 Пересечение (index.html): side=${side}, originalX=${originalX.toFixed(3)}, finalX=${x.toFixed(3)}, y=${Number(c.y).toFixed(3)}`);
+                                console.log(`📍 Пересечение (index.html): side=${side}, mode=${mode}, x=${x.toFixed(3)}, y=${y.toFixed(3)}, text=${text}`);
                                 
-                                window.__popups.push({ x: x, y: Number(c.y)||0.5, text, color, t0: now, dur: 900, rise: 28 });
+                                window.__popups.push({ x: x, y: y, text, color, t0: now, dur: 900, rise: 28 });
                             }
                             if (tsMs > maxTs) maxTs = tsMs;
                         });

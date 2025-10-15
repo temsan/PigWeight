@@ -444,16 +444,22 @@ export class VideoManager extends EventEmitter {
         this.popupCounters.forEach((popup, index) => {
             const elapsed = now - popup.startTime;
             const progress = Math.min(1, elapsed / popup.duration);
+            
+            // Пропускаем завершенные анимации
+            if (progress >= 1) return;
+            
             const alpha = 1 - progress;
             const ease = progress * (2 - progress); // Плавная анимация
             
-            // Базовая позиция на линии (без анимации)
+            // КРИТИЧНО: Базовая позиция на линии пересечения
+            // popup.x - это позиция ЛИНИИ (L или R), не центроида!
+            // popup.y - это интерполированная Y-координата пересечения
             const baseX = rect.x + popup.x * rect.w;
             const baseY = rect.y + popup.y * rect.h;
             
             // Отладка: выводим координаты только для первого кадра анимации
             if (elapsed < 50) {
-                console.log(`🎨 Отрисовка popup: x=${popup.x.toFixed(3)}, y=${popup.y.toFixed(3)}, baseX=${baseX.toFixed(0)}, baseY=${baseY.toFixed(0)}, rect={x:${rect.x}, y:${rect.y}, w:${rect.w}, h:${rect.h}}`);
+                console.log(`🎨 Отрисовка: side=${popup.side}, x=${popup.x.toFixed(3)}, y=${popup.y.toFixed(3)}, baseX=${baseX.toFixed(0)}, baseY=${baseY.toFixed(0)}`);
             }
             
             // Применяем прозрачность
@@ -515,6 +521,9 @@ export class VideoManager extends EventEmitter {
         });
         ctx.globalAlpha = 1.0; // Сброс прозрачности
         ctx.restore();
+        
+        // Очистка завершенных анимаций
+        this.popupCounters = this.popupCounters.filter(p => (now - p.startTime) < p.duration);
     }
     
     handleControl(action, data) {
@@ -713,11 +722,6 @@ export class VideoManager extends EventEmitter {
             this.popupCounters = [];
         }
         
-        // Получаем актуальные позиции линий
-        const lines = linePositions || { left_x: 0.25, right_x: 0.75 };
-        const leftLineX = Number(lines.left_x || 0.25);
-        const rightLineX = Number(lines.right_x || 0.75);
-        
         // Отслеживаем последний timestamp для избежания дубликатов
         const prevTs = this.lastPopupTimestamp || 0;
         let maxTs = prevTs;
@@ -728,7 +732,7 @@ export class VideoManager extends EventEmitter {
                 const side = String(crossing.side || 'left');
                 const mode = String(crossing.mode || 'enter');
                 
-                // Правильная логика определения знака:
+                // Логика определения знака:
                 // Вход слева (свинья идет вправо) = +1
                 // Выход слева (свинья идет влево) = -1  
                 // Вход справа (свинья идет влево) = -1
@@ -738,20 +742,23 @@ export class VideoManager extends EventEmitter {
                 const text = isPositive ? '+1' : '-1';
                 const color = isPositive ? '#51cf66' : '#ff6b6b';
                 
-                // Используем точные координаты пересечения без коррекции
+                // КРИТИЧНО: Используем координаты НАПРЯМУЮ с сервера
+                // x - это позиция линии (L или R)
+                // y - это интерполированная Y-координата пересечения
                 const x = Number(crossing.x || 0.5);
                 const y = Number(crossing.y || 0.5);
                 
-                console.log(`🎯 Пересечение (video-manager): side=${side}, mode=${mode}, x=${x.toFixed(3)}, y=${y.toFixed(3)}, text=${text}, leftLineX=${leftLineX.toFixed(3)}, rightLineX=${rightLineX.toFixed(3)}`);
+                console.log(`🎯 Пересечение: side=${side}, mode=${mode}, x=${x.toFixed(3)}, y=${y.toFixed(3)}, text=${text}`);
                 
                 this.popupCounters.push({
+                    side: side,
+                    mode: mode,
                     x: x,
                     y: y,
                     text: text,
                     color: color,
                     startTime: now,
-                    duration: 1200,
-                    riseDistance: 40
+                    duration: 1200
                 });
             }
             if (tsMs > maxTs) maxTs = tsMs;
