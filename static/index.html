@@ -2792,13 +2792,35 @@
       }, 2000);
 
       // === ИНИЦИАЛИЗАЦИЯ НОВОГО LIQUID GLASS ИНТЕРФЕЙСА ===
+      
+      // Обработчик переключения вкладок
+      document.querySelectorAll('.journal-tab-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const panelName = btn.getAttribute('data-panel');
+          
+          // Убираем active у всех вкладок и панелей
+          document.querySelectorAll('.journal-tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.panel-content').forEach(p => p.style.display = 'none');
+          
+          // Активируем выбранную вкладку и панель
+          btn.classList.add('active');
+          const panel = document.getElementById(`${panelName}Panel`);
+          if (panel) {
+            panel.style.display = 'block';
+            
+            // Загружаем данные при переключении на панель журнала
+            if (panelName === 'logs') {
+              await loadLogsData();
+            }
+          }
+        });
+      });
 
       // Обработчик кнопки сохранения акта (если элемент существует)
       const saveManualBtnEl = document.getElementById('saveManualBtn');
       if (saveManualBtnEl) saveManualBtnEl.addEventListener('click', saveNewAct);
 
       // Обработчик изменения фильтров для журнала актов (используем loadJournalActs для актов взвешивания)
-      // refreshLogsBtn уже привязан к refreshLogs выше
       document.getElementById('logsCameraFilter').addEventListener('change', loadJournalActs);
 
       // Обработчики для загрузки Excel файла
@@ -2858,19 +2880,35 @@
         const dateTo = document.getElementById('logsDateTo').value;
         const camera = document.getElementById('logsCameraFilter').value;
         
-        const params = new URLSearchParams();
-        if (dateFrom) params.append('date_from', dateFrom);
-        if (dateTo) params.append('date_to', dateTo);
-        if (camera) params.append('camera', camera);
-        
-        const response = await fetch(`/api/records?${params}`);
+        const response = await fetch('/api/records');
         const data = await response.json();
         
         if (data.error) {
           throw new Error(data.error);
         }
         
-        displayJournalActs(data);
+        // Фильтруем записи по датам и камере на клиенте
+        let filteredRecords = data.records || [];
+        
+        if (dateFrom) {
+          filteredRecords = filteredRecords.filter(record => {
+            return record.date >= dateFrom;
+          });
+        }
+        
+        if (dateTo) {
+          filteredRecords = filteredRecords.filter(record => {
+            return record.date <= dateTo;
+          });
+        }
+        
+        if (camera) {
+          filteredRecords = filteredRecords.filter(record => {
+            return record.name === camera;
+          });
+        }
+        
+        displayJournalActs({ records: filteredRecords });
         
       } catch (error) {
         console.error('Ошибка загрузки актов:', error);
