@@ -144,6 +144,7 @@
 3. `725836f` - feat: добавлены API endpoints для журнала событий
 4. `1bfd152` - docs: добавлен файл статуса задач TASKS_STATUS.md
 5. `cac495d` - feat: добавлена сверка данных с Excel
+6. `ecab861` - fix: добавлен импорт List, Dict, Any в validation.py
 
 ---
 
