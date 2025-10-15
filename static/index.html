@@ -2413,7 +2413,7 @@
         document.getElementById('logsDateTo').value = now.toISOString().split('T')[0];
         document.getElementById('logsDateFrom').value = monthAgo.toISOString().split('T')[0];
         
-        await refreshLogs();
+        await loadJournalActs();
       } catch (error) {
         console.error('Error loading logs data:', error);
       }
@@ -2602,11 +2602,11 @@
       if (saveWeighingBtnEl) saveWeighingBtnEl.addEventListener('click', saveWeighingAct);
       
       // Обработчики для панели журналов
-      document.getElementById('refreshLogsBtn').addEventListener('click', refreshLogs);
+      document.getElementById('refreshLogsBtn').addEventListener('click', loadJournalActs);
       document.getElementById('cleanupLogsBtn').addEventListener('click', cleanupEmptyRecords);
       document.getElementById('exportLogsBtn').addEventListener('click', exportLogs);
-      document.getElementById('logsDateFrom').addEventListener('change', refreshLogs);
-      document.getElementById('logsDateTo').addEventListener('change', refreshLogs);
+      document.getElementById('logsDateFrom').addEventListener('change', loadJournalActs);
+      document.getElementById('logsDateTo').addEventListener('change', loadJournalActs);
       
       // Обработчики для панели событий
       const refreshEventsBtn = document.getElementById('refreshEventsBtn');
