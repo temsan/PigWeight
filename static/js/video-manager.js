@@ -451,6 +451,11 @@ export class VideoManager extends EventEmitter {
             const baseX = rect.x + popup.x * rect.w;
             const baseY = rect.y + popup.y * rect.h;
             
+            // Отладка: выводим координаты только для первого кадра анимации
+            if (elapsed < 50) {
+                console.log(`🎨 Отрисовка popup: x=${popup.x.toFixed(3)}, y=${popup.y.toFixed(3)}, baseX=${baseX.toFixed(0)}, baseY=${baseY.toFixed(0)}, rect={x:${rect.x}, y:${rect.y}, w:${rect.w}, h:${rect.h}}`);
+            }
+            
             // Применяем прозрачность
             ctx.globalAlpha = Math.max(0, alpha);
             
@@ -501,8 +506,8 @@ export class VideoManager extends EventEmitter {
             if (progress < 0.8) { // Показываем стрелку только в начале анимации
                 ctx.beginPath();
                 ctx.moveTo(baseX, popupY + radius);
-                ctx.lineTo(baseX - 4, baseY + 8);
-                ctx.lineTo(baseX + 4, baseY + 8);
+                ctx.lineTo(baseX - 4, baseY - 8);
+                ctx.lineTo(baseX + 4, baseY - 8);
                 ctx.closePath();
                 ctx.fillStyle = popup.color;
                 ctx.fill();
@@ -737,7 +742,7 @@ export class VideoManager extends EventEmitter {
                 const x = Number(crossing.x || 0.5);
                 const y = Number(crossing.y || 0.5);
                 
-                console.log(`🎯 Пересечение: side=${side}, x=${x.toFixed(3)} (должно быть ${side === 'left' ? '0.25' : '0.75'})`);
+                console.log(`🎯 Пересечение: side=${side}, mode=${mode}, x=${x.toFixed(3)}, y=${y.toFixed(3)}, text=${text}`);
                 
                 this.popupCounters.push({
                     x: x,
