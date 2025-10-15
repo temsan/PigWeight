@@ -5,7 +5,7 @@ API endpoints для сверки данных с Excel.
 
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import JSONResponse
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)

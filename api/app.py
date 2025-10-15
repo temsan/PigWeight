@@ -682,119 +682,119 @@ class VideoStream(abc.ABC):
                     if (not prev_inside) and cur_inside:
                         if prev < L <= cx:  # Вход слева (свинья идет вправо)
                             key = (tid, 'enter_left')
-                                self.left_in += 1
-                                self.total_crossings += 1
-                                self.left_flow += 1
-                                self._track_last_side_time[key] = now
+                            self.left_in += 1
+                            self.total_crossings += 1
+                            self.left_flow += 1
+                            self._track_last_side_time[key] = now
                             self._track_last_side_time[track_cooldown_key] = now
-                                y_at = _interp_y(prev, prev_y, cx, cy, L)
+                            y_at = _interp_y(prev, prev_y, cx, cy, L)
                             logger.info(f"🔵 L={L:.3f} y={y_at:.3f} t{tid} ←IN ({self.left_in})")
-                                self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события пересечения линии (неблокирующее)
-                                if self.event_logger:
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'left', 'enter', int(tid), self.left_in, L, y_at
-                                        ))
-                                    except Exception:
-                                    pass
+                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "enter", "x": float(L), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события пересечения линии (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "left", "mode": "enter",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(L), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
-                                    if int(tid) not in self._left_cross_rank:
-                                        self._left_cross_rank[int(tid)] = self._left_cross_counter
-                                        self._left_cross_counter += 1
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'left', 'enter', int(tid), self.left_in, L, y_at
+                                    ))
                                 except Exception:
                                     pass
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "left", "mode": "enter",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(L), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                                if int(tid) not in self._left_cross_rank:
+                                    self._left_cross_rank[int(tid)] = self._left_cross_counter
+                                    self._left_cross_counter += 1
+                            except Exception:
+                                pass
                         elif prev <= R < cx:  # Вход справа (свинья идет влево)
                             key = (tid, 'enter_right')
-                                self.right_in += 1
-                                self.total_crossings += 1
-                                self.right_flow += 1
-                                self._track_last_side_time[key] = now
+                            self.right_in += 1
+                            self.total_crossings += 1
+                            self.right_flow += 1
+                            self._track_last_side_time[key] = now
                             self._track_last_side_time[track_cooldown_key] = now
-                                y_at = _interp_y(prev, prev_y, cx, cy, R)
+                            y_at = _interp_y(prev, prev_y, cx, cy, R)
                             logger.info(f"🔴 R={R:.3f} y={y_at:.3f} t{tid} →IN ({self.right_in})")
-                                self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события пересечения линии (неблокирующее)
-                                if self.event_logger:
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'right', 'enter', int(tid), self.right_in, R, y_at
-                                        ))
-                                    except Exception:
-                                        pass
+                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события пересечения линии (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "right", "mode": "enter",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(R), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'right', 'enter', int(tid), self.right_in, R, y_at
+                                    ))
                                 except Exception:
                                     pass
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "right", "mode": "enter",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(R), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
                     # exit events
                     if prev_inside and (not cur_inside):
                         if cx < L <= prev:  # Выход слева (свинья идет влево)
                             key = (tid, 'exit_left')
-                                self.left_in = max(0, self.left_in - 1)
-                                self.left_flow -= 1
-                                self._track_last_side_time[key] = now
+                            self.left_in = max(0, self.left_in - 1)
+                            self.left_flow -= 1
+                            self._track_last_side_time[key] = now
                             self._track_last_side_time[track_cooldown_key] = now
-                                y_at = _interp_y(prev, prev_y, cx, cy, L)
+                            y_at = _interp_y(prev, prev_y, cx, cy, L)
                             logger.info(f"🔵 L={L:.3f} y={y_at:.3f} t{tid} OUT→ ({self.left_in})")
-                                self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события выхода (неблокирующее)
-                                if self.event_logger:
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'left', 'exit', int(tid), self.left_in, L, y_at
-                                        ))
-                                    except Exception:
-                                        pass
+                            self._recent_crossings.append({"id": int(tid), "side": "left", "mode": "exit", "x": float(L), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события выхода (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "left", "mode": "exit",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(L), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'left', 'exit', int(tid), self.left_in, L, y_at
+                                    ))
                                 except Exception:
                                     pass
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "left", "mode": "exit",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(L), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
                         elif prev >= R > cx:  # Выход справа (свинья идет вправо)
                             key = (tid, 'exit_right')
-                                self.right_in = max(0, self.right_in - 1)
-                                self.right_flow -= 1
-                                self._track_last_side_time[key] = now
+                            self.right_in = max(0, self.right_in - 1)
+                            self.right_flow -= 1
+                            self._track_last_side_time[key] = now
                             self._track_last_side_time[track_cooldown_key] = now
-                                y_at = _interp_y(prev, prev_y, cx, cy, R)
+                            y_at = _interp_y(prev, prev_y, cx, cy, R)
                             logger.info(f"🔴 R={R:.3f} y={y_at:.3f} t{tid} ←OUT ({self.right_in})")
-                                self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
-                                
-                                # Журналирование события выхода (неблокирующее)
-                                if self.event_logger:
-                                    try:
-                                        asyncio.create_task(self._log_crossing_async(
-                                            'right', 'exit', int(tid), self.right_in, R, y_at
-                                        ))
-                                    except Exception:
-                                        pass
+                            self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
+                            
+                            # Журналирование события выхода (неблокирующее)
+                            if self.event_logger:
                                 try:
-                                    self._act_crossings.append({
-                                        "id": int(tid), "side": "right", "mode": "exit",
-                                        "t": float(max(0.0, now - self._act_start_ts)),
-                                        "x": float(R), "y": float(y_at),
-                                        "count_est": int(self.reported_count)
-                                    })
+                                    asyncio.create_task(self._log_crossing_async(
+                                        'right', 'exit', int(tid), self.right_in, R, y_at
+                                    ))
                                 except Exception:
                                     pass
+                            try:
+                                self._act_crossings.append({
+                                    "id": int(tid), "side": "right", "mode": "exit",
+                                    "t": float(max(0.0, now - self._act_start_ts)),
+                                    "x": float(R), "y": float(y_at),
+                                    "count_est": int(self.reported_count)
+                                })
+                            except Exception:
+                                pass
 
                 self._track_prev_x[tid] = cx
                 self._track_prev_y[tid] = cy
