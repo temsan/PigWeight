@@ -246,6 +246,90 @@
       padding: 4px 8px;
       border-radius: 6px;
     }
+    
+    /* Компактная панель журнала */
+    .journal-header-compact {
+      padding: 12px;
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .journal-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    
+    .journal-filters-compact {
+      display: flex;
+      gap: 8px;
+      flex: 1;
+    }
+    
+    .journal-input-compact {
+      padding: 6px 10px;
+      font-size: 13px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: var(--text);
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .journal-input-compact:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: rgba(255,255,255,0.08);
+    }
+    
+    .journal-buttons-compact {
+      display: flex;
+      gap: 6px;
+    }
+    
+    .journal-btn {
+      padding: 6px 12px;
+      font-size: 16px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(10px);
+    }
+    
+    .journal-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    
+    .journal-btn-primary {
+      color: var(--accent);
+      border-color: rgba(44,123,229,0.3);
+    }
+    
+    .journal-btn-primary:hover {
+      background: rgba(44,123,229,0.15);
+    }
+    
+    .journal-btn-danger {
+      color: #ff6b6b;
+      border-color: rgba(255,107,107,0.3);
+    }
+    
+    .journal-btn-danger:hover {
+      background: rgba(255,107,107,0.15);
+    }
+    
+    .journal-btn-secondary {
+      color: var(--text-secondary);
+    }
+    
+    .journal-btn-secondary:hover {
+      background: rgba(255,255,255,0.1);
+    }
 
     /* Responsive Adjustments */
     @media (max-width: 1024px) {
@@ -410,21 +494,23 @@
           <!-- Панель Журнала (liquid glass стиль) -->
           <div id="logsPanel" class="panel-content" style="padding:0; display:none;">
             <div class="journal-container">
-              <div class="journal-header">
-                <div class="journal-title">
-                  📊 Журнал взвешиваний
-                </div>
-                <div class="journal-filters">
-                  <input type="date" id="logsDateFrom" class="journal-filter-input" placeholder="От даты">
-                  <input type="date" id="logsDateTo" class="journal-filter-input" placeholder="До даты">
-                  <select id="logsCameraFilter" class="journal-filter-input">
-                    <option value="">Все камеры</option>
-                    <option value="cam1">Камера 1</option>
-                    <option value="cam2">Камера 2</option>
-                  </select>
-                  <button id="refreshLogsBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 500; background: var(--liquid-glass-active); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); box-shadow: 0 4px 16px var(--liquid-glass-shadow); cursor: pointer; transition: all 0.2s ease;">🔄 Обновить</button>
-                  <button id="cleanupLogsBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 500; background: rgba(255,107,107,0.1); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid rgba(255,107,107,0.3); border-radius: var(--radius-sm); color: #ff6b6b; cursor: pointer; transition: all 0.2s ease;">🗑️ Очистить пустые</button>
-                  <button id="exportLogsBtn" style="padding: 6px 12px; font-size: 14px; font-weight: 500; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease;">📥 Экспорт</button>
+              <div class="journal-header-compact">
+                <div class="journal-title">📊 Журнал взвешиваний</div>
+                <div class="journal-controls">
+                  <div class="journal-filters-compact">
+                    <input type="date" id="logsDateFrom" class="journal-input-compact">
+                    <input type="date" id="logsDateTo" class="journal-input-compact">
+                    <select id="logsCameraFilter" class="journal-input-compact">
+                      <option value="">Все камеры</option>
+                      <option value="cam1">Камера 1</option>
+                      <option value="cam2">Камера 2</option>
+                    </select>
+                  </div>
+                  <div class="journal-buttons-compact">
+                    <button id="refreshLogsBtn" class="journal-btn journal-btn-primary">🔄</button>
+                    <button id="cleanupLogsBtn" class="journal-btn journal-btn-danger">🗑️</button>
+                    <button id="exportLogsBtn" class="journal-btn journal-btn-secondary">📥</button>
+                  </div>
                 </div>
               </div>
 
