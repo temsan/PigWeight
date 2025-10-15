@@ -144,124 +144,125 @@
     }
     
     /* Стили для группировки журнала */
+    /* Стили для журнала с группировкой по датам */
     .journal-date-group {
       margin-bottom: 16px;
-      background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(255,255,255,0.05);
-      border-radius: 8px;
-      padding: 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      overflow: hidden;
     }
     
     .journal-date-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
+      padding: 14px 16px;
+      background: rgba(44,123,229,0.1);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .journal-date-header:hover {
+      background: rgba(44,123,229,0.15);
+    }
+    
+    .journal-date-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .journal-date-toggle {
+      font-size: 14px;
+      color: var(--accent);
+      transition: transform 0.2s;
+      user-select: none;
     }
     
     .journal-date-title {
       font-size: 16px;
       font-weight: 600;
-      color: var(--accent);
+      color: var(--text);
     }
     
     .journal-date-summary {
-      font-size: 12px;
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+    }
+    
+    .journal-date-stat {
       color: var(--muted);
+      background: rgba(255,255,255,0.05);
+      padding: 4px 10px;
+      border-radius: 12px;
     }
     
     .journal-date-records {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-    }
-    
-    .journal-section-group {
+      gap: 1px;
       background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 8px;
-    }
-    
-    .journal-section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-    }
-    
-    .journal-section-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--accent);
-    }
-    
-    .journal-section-summary {
-      font-size: 12px;
-      color: var(--muted);
-    }
-    
-    .journal-section-records {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
     }
     
     .journal-item {
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
-      padding: 8px;
+      background: rgba(255,255,255,0.02);
+      padding: 14px 16px;
+      transition: background 0.2s;
+    }
+    
+    .journal-item:hover {
+      background: rgba(255,255,255,0.05);
+    }
+    
+    .journal-item-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-    }
-    
-    .journal-item-info {
-      flex: 1;
+      margin-bottom: 10px;
     }
     
     .journal-item-time {
-      font-size: 12px;
+      font-size: 13px;
       color: var(--muted);
-      margin-bottom: 4px;
+      font-weight: 500;
     }
     
-    .journal-item-group {
-      font-size: 11px;
+    .journal-item-camera {
+      font-size: 12px;
       color: var(--text-secondary);
-      margin-bottom: 6px;
+      background: rgba(255,255,255,0.05);
+      padding: 3px 8px;
+      border-radius: 8px;
+      font-family: monospace;
     }
     
     .journal-item-metrics {
-      display: flex;
-      gap: 12px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
     }
     
     .journal-item-metric {
       text-align: center;
-    }
-    
-    .journal-item-metric-value {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--accent);
+      padding: 8px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
     }
     
     .journal-item-metric-label {
-      font-size: 10px;
+      font-size: 11px;
       color: var(--muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     
-    .journal-item-camera {
-      font-size: 11px;
-      color: var(--text-secondary);
-      font-family: monospace;
+    .journal-item-metric-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent);
     }
 
     /* Responsive Adjustments */
@@ -2788,10 +2789,16 @@
     function displayJournalActs(data) {
       const records = data.records || [];
       
+      // Фильтруем нулевые записи
+      const validRecords = records.filter(record => {
+        const count = record.total_count || 0;
+        return count > 0; // Показываем только записи с количеством > 0
+      });
+      
       // Вычисляем статистику
-      const totalActs = records.length;
-      const totalCount = records.reduce((sum, record) => sum + (record.total_count || 0), 0);
-      const totalWeight = records.reduce((sum, record) => sum + (record.total_weight || 0), 0);
+      const totalActs = validRecords.length;
+      const totalCount = validRecords.reduce((sum, record) => sum + (record.total_count || 0), 0);
+      const totalWeight = validRecords.reduce((sum, record) => sum + (record.total_weight || 0), 0);
       const avgWeight = totalCount > 0 ? (totalWeight / totalCount).toFixed(1) : '0.0';
       
       // Обновляем статистику
@@ -2808,109 +2815,113 @@
       // Отображаем список актов
       const journalList = document.getElementById('journalList');
       
-      if (records.length === 0) {
+      if (validRecords.length === 0) {
         journalList.innerHTML = '<div class="journal-empty">📝 Нет актов взвешивания</div>';
         return;
       }
       
-      // Группируем по дате, а внутри даты - по участкам взвешивания
+      // Группируем по дате
       const groupedByDate = {};
-      records.forEach(record => {
+      validRecords.forEach(record => {
         const date = record.date || 'Неизвестная дата';
-        const section = record.weighing_section || 'Неизвестный участок';
-        
         if (!groupedByDate[date]) {
-          groupedByDate[date] = {};
+          groupedByDate[date] = [];
         }
-        if (!groupedByDate[date][section]) {
-          groupedByDate[date][section] = [];
-        }
-        groupedByDate[date][section].push(record);
+        groupedByDate[date].push(record);
       });
       
-      // Сортируем даты
+      // Сортируем даты (новые сверху)
       const sortedDates = Object.keys(groupedByDate).sort((a, b) => {
         if (a === 'Неизвестная дата') return 1;
         if (b === 'Неизвестная дата') return -1;
-        return new Date(b) - new Date(a); // Новые даты сверху
+        return new Date(b) - new Date(a);
       });
       
-      journalList.innerHTML = sortedDates.map(date => {
-        const daySections = groupedByDate[date];
-        const dayTotalCount = Object.values(daySections).flat().reduce((sum, record) => sum + (record.total_count || 0), 0);
-        const dayTotalWeight = Object.values(daySections).flat().reduce((sum, record) => sum + (record.total_weight || 0), 0);
-        const dayAvgWeight = dayTotalCount > 0 ? (dayTotalWeight / dayTotalCount).toFixed(1) : '0.0';
+      // Генерируем HTML с возможностью сворачивания
+      journalList.innerHTML = sortedDates.map((date, dateIndex) => {
+        const dayRecords = groupedByDate[date];
+        const dayTotalCount = dayRecords.reduce((sum, record) => sum + (record.total_count || 0), 0);
+        const dayTotalWeight = dayRecords.reduce((sum, record) => sum + (record.total_weight || 0), 0);
+        const dayAvgWeight = dayTotalCount > 0 ? (dayTotalWeight / dayTotalCount).toFixed(2) : '0.0';
         
-        // Сортируем участки внутри даты
-        const sortedSections = Object.keys(daySections).sort();
+        // Форматируем дату для отображения
+        let displayDate = date;
+        try {
+          const d = new Date(date);
+          if (!isNaN(d.getTime())) {
+            const options = { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' };
+            displayDate = d.toLocaleDateString('ru-RU', options);
+          }
+        } catch (e) {}
         
-        const sectionsHtml = sortedSections.map(section => {
-          const sectionRecords = daySections[section];
-          const sectionTotalCount = sectionRecords.reduce((sum, record) => sum + (record.total_count || 0), 0);
-          const sectionTotalWeight = sectionRecords.reduce((sum, record) => sum + (record.total_weight || 0), 0);
-          const sectionAvgWeight = sectionTotalCount > 0 ? (sectionTotalWeight / sectionTotalCount).toFixed(1) : '0.0';
-          
-          const recordsHtml = sectionRecords.map(record => {
+        // Генерируем записи для этой даты
+        const recordsHtml = dayRecords.map(record => {
           const count = record.total_count || 0;
           const weight = record.total_weight || 0;
-        const avgWeight = count > 0 ? (weight / count).toFixed(1) : '0.0';
-          const group = record.group || 'Не указана';
+          const avgWeight = count > 0 ? (weight / count).toFixed(2) : '0.0';
           const time = record.time || '';
-        
-            return `
-              <div class="journal-item">
-                <div class="journal-item-info">
-                  <div class="journal-item-time">${time}</div>
-                  <div class="journal-item-group">${group}</div>
-                  <div class="journal-item-metrics">
-                    <div class="journal-item-metric">
-                      <div class="journal-item-metric-value">${count}</div>
-                      <div class="journal-item-metric-label">голов</div>
-                    </div>
-                    <div class="journal-item-metric">
-                      <div class="journal-item-metric-value">${weight.toFixed(1)}</div>
-                      <div class="journal-item-metric-label">кг</div>
-                    </div>
-                    <div class="journal-item-metric">
-                      <div class="journal-item-metric-value">${avgWeight}</div>
-                      <div class="journal-item-metric-label">кг/гол</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="journal-item-camera">${record.name || 'unknown'}</div>
-              </div>
-            `;
-          }).join('');
+          const name = record.name || 'unknown';
+          const peakConcurrent = record.peak_concurrent || 0;
+          const duration = record.duration_sec ? (record.duration_sec / 60).toFixed(1) : '0';
           
           return `
-            <div class="journal-section-group">
-              <div class="journal-section-header">
-                <div class="journal-section-title">${section}</div>
-                <div class="journal-section-summary">
-                  Голов: ${sectionTotalCount} Вес: ${sectionTotalWeight.toFixed(1)} кг Средний: ${sectionAvgWeight} кг
-                </div>
+            <div class="journal-item">
+              <div class="journal-item-header">
+                <div class="journal-item-time">🕐 ${time}</div>
+                <div class="journal-item-camera">📹 ${name}</div>
               </div>
-              <div class="journal-section-records">
-                ${recordsHtml}
+              <div class="journal-item-metrics">
+                <div class="journal-item-metric">
+                  <div class="journal-item-metric-label">Всего голов</div>
+                  <div class="journal-item-metric-value">${count}</div>
+                </div>
+                <div class="journal-item-metric">
+                  <div class="journal-item-metric-label">Пик одновременно</div>
+                  <div class="journal-item-metric-value">${peakConcurrent}</div>
+                </div>
+                <div class="journal-item-metric">
+                  <div class="journal-item-metric-label">Длительность</div>
+                  <div class="journal-item-metric-value">${duration} мин</div>
+                </div>
               </div>
             </div>
           `;
         }).join('');
         
+        const collapseId = `date-collapse-${dateIndex}`;
+        
         return `
           <div class="journal-date-group">
-            <div class="journal-date-header">
-              <div class="journal-date-title">${date}</div>
+            <div class="journal-date-header" onclick="toggleDateCollapse('${collapseId}')">
+              <div class="journal-date-header-left">
+                <span class="journal-date-toggle" id="${collapseId}-toggle">▼</span>
+                <span class="journal-date-title">📅 ${displayDate}</span>
+              </div>
               <div class="journal-date-summary">
-                Голов: ${dayTotalCount} Вес: ${dayTotalWeight.toFixed(1)} кг Средний: ${dayAvgWeight} кг
+                <span class="journal-date-stat">👥 ${dayTotalCount} голов</span>
+                <span class="journal-date-stat">📊 ${dayRecords.length} актов</span>
               </div>
             </div>
-            <div class="journal-date-records">
-              ${sectionsHtml}
+            <div class="journal-date-records" id="${collapseId}" style="display: block;">
+              ${recordsHtml}
             </div>
           </div>
         `;
       }).join('');
+    }
+    
+    // Функция для сворачивания/разворачивания дат
+    function toggleDateCollapse(collapseId) {
+      const element = document.getElementById(collapseId);
+      const toggle = document.getElementById(`${collapseId}-toggle`);
+      
+      if (element.style.display === 'none') {
+        element.style.display = 'block';
+        toggle.textContent = '▼';
+      } else {
+        element.style.display = 'none';
+        toggle.textContent = '▶';
+      }
     }
 
     // Сохранение нового акта
