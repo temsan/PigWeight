@@ -32,15 +32,46 @@ def _load_records() -> List[Dict[str, Any]]:
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
+            
+            # Форматируем данные для отображения в журнале
+            from datetime import datetime
+            
+            # Извлекаем дату и время из finished_at или started_at
+            timestamp = payload.get("finished_at") or payload.get("started_at") or 0
+            if timestamp:
+                dt = datetime.fromtimestamp(timestamp)
+                date_str = dt.strftime("%Y-%m-%d")
+                time_str = dt.strftime("%H:%M:%S")
+            else:
+                date_str = "Неизвестная дата"
+                time_str = ""
+            
+            # Извлекаем данные из payload
+            stream_id = payload.get("stream_id", "unknown")
+            seen_total = payload.get("seen_total", 0)
+            peak_concurrent = payload.get("peak_concurrent", 0)
+            flow = payload.get("flow", {})
+            left_in = flow.get("left_in", 0)
+            right_in = flow.get("right_in", 0)
+            
+            # Формируем запись для журнала
             items.append({
                 "act_file": path.name,
+                "name": stream_id,
+                "date": date_str,
+                "time": time_str,
+                "weighing_section": stream_id,  # Используем stream_id как участок
+                "group": f"Акт {path.stem}",
+                "total_count": seen_total,
+                "total_weight": 0.0,  # Вес не записывается в актах
+                "timestamp": timestamp,
                 **payload,
             })
         except Exception as exc:
             logger.warning("Не удалось прочитать акт %s: %s", path.name, exc)
             continue
 
-    return sorted(items, key=lambda item: item.get("finished_at", 0), reverse=True)
+    return sorted(items, key=lambda item: item.get("timestamp", 0), reverse=True)
 
 
 def _load_record_details(act_name: str) -> Dict[str, Any]:
@@ -72,7 +103,8 @@ async def get_records_list() -> List[Dict[str, Any]]:
 @router.get("/records")
 async def list_records():
     try:
-        return await get_records_list()
+        records = await get_records_list()
+        return {"records": records}
     except HTTPException:
         raise
     except Exception as exc:
