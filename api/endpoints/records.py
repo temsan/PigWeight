@@ -33,26 +33,57 @@ def _load_records() -> List[Dict[str, Any]]:
             with open(path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             
-            # Форматируем данные для отображения в журнале
             from datetime import datetime
-            
-            # Извлекаем дату и время из finished_at или started_at
-            timestamp = payload.get("finished_at") or payload.get("started_at") or 0
-            if timestamp:
-                dt = datetime.fromtimestamp(timestamp)
-                date_str = dt.strftime("%Y-%m-%d")
-                time_str = dt.strftime("%H:%M:%S")
-            else:
-                date_str = "Неизвестная дата"
-                time_str = ""
+            import re
             
             # Извлекаем данные из payload
             stream_id = payload.get("stream_id", "unknown")
             seen_total = payload.get("seen_total", 0)
             peak_concurrent = payload.get("peak_concurrent", 0)
-            flow = payload.get("flow", {})
-            left_in = flow.get("left_in", 0)
-            right_in = flow.get("right_in", 0)
+            duration_sec = payload.get("duration_sec", 0)
+            
+            # КРИТИЧНО: Пропускаем нулевые записи
+            if seen_total == 0:
+                logger.debug(f"Пропускаем нулевую запись: {path.name}")
+                continue
+            
+            # Извлекаем timestamp - ПРИОРИТЕТ: имя файла > finished_at > started_at > mtime
+            timestamp = None
+            
+            # 1. Пытаемся извлечь из имени файла: act_stream_20251015-175651.json
+            match = re.search(r'(\d{8})-(\d{6})', path.name)
+            if match:
+                try:
+                    date_part = match.group(1)  # 20251015
+                    time_part = match.group(2)  # 175651
+                    dt_str = f"{date_part}{time_part}"
+                    dt = datetime.strptime(dt_str, "%Y%m%d%H%M%S")
+                    timestamp = dt.timestamp()
+                    logger.debug(f"Timestamp из имени файла: {timestamp}")
+                except Exception as e:
+                    logger.debug(f"Ошибка парсинга даты из имени: {e}")
+            
+            # 2. Если не получилось, пробуем finished_at или started_at
+            if not timestamp or timestamp < 1000000000:
+                ts = payload.get("finished_at") or payload.get("started_at")
+                if ts and ts > 1000000000:
+                    timestamp = ts
+                    logger.debug(f"Timestamp из payload: {timestamp}")
+            
+            # 3. Если все еще нет, используем время модификации файла
+            if not timestamp or timestamp < 1000000000:
+                timestamp = path.stat().st_mtime
+                logger.debug(f"Timestamp из mtime: {timestamp}")
+            
+            # Форматируем дату и время
+            if timestamp and timestamp > 1000000000:
+                dt = datetime.fromtimestamp(timestamp)
+                date_str = dt.strftime("%Y-%m-%d")
+                time_str = dt.strftime("%H:%M")
+            else:
+                # Если timestamp все еще некорректный, пропускаем запись
+                logger.warning(f"Некорректный timestamp для {path.name}, пропускаем")
+                continue
             
             # Формируем запись для журнала
             items.append({
@@ -60,12 +91,10 @@ def _load_records() -> List[Dict[str, Any]]:
                 "name": stream_id,
                 "date": date_str,
                 "time": time_str,
-                "weighing_section": stream_id,  # Используем stream_id как участок
-                "group": f"Акт {path.stem}",
                 "total_count": seen_total,
-                "total_weight": 0.0,  # Вес не записывается в актах
+                "peak_concurrent": peak_concurrent,
+                "duration_sec": duration_sec,
                 "timestamp": timestamp,
-                **payload,
             })
         except Exception as exc:
             logger.warning("Не удалось прочитать акт %s: %s", path.name, exc)
@@ -120,4 +149,48 @@ async def get_record(act_name: str):
         raise
     except Exception as exc:
         logger.exception("Ошибка при чтении акта %s: %s", act_name, exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@router.post("/records/cleanup")
+async def cleanup_empty_records():
+    """Удаляет нулевые записи из журнала"""
+    try:
+        records_dir = _get_records_dir()
+        deleted_count = 0
+        
+        for path in records_dir.glob("act_*.json"):
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                
+                seen_total = payload.get("seen_total", 0)
+                
+                # Удаляем файлы с нулевым количеством
+                if seen_total == 0:
+                    path.unlink()
+                    deleted_count += 1
+                    logger.info(f"Удален нулевой акт: {path.name}")
+                    
+                    # Удаляем связанные файлы (svg, md)
+                    svg_path = path.with_suffix(".svg")
+                    if svg_path.exists():
+                        svg_path.unlink()
+                    
+                    md_path = path.with_suffix(".md")
+                    if md_path.exists():
+                        md_path.unlink()
+                        
+            except Exception as e:
+                logger.warning(f"Ошибка при проверке {path.name}: {e}")
+                continue
+        
+        return {
+            "status": "success",
+            "deleted_count": deleted_count,
+            "message": f"Удалено {deleted_count} нулевых записей"
+        }
+        
+    except Exception as exc:
+        logger.exception("Ошибка при очистке записей: %s", exc)
         return JSONResponse({"error": str(exc)}, status_code=500)
