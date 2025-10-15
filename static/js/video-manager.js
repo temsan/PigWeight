@@ -742,7 +742,7 @@ export class VideoManager extends EventEmitter {
                 const x = Number(crossing.x || 0.5);
                 const y = Number(crossing.y || 0.5);
                 
-                console.log(`🎯 Пересечение: side=${side}, mode=${mode}, x=${x.toFixed(3)}, y=${y.toFixed(3)}, text=${text}`);
+                console.log(`🎯 Пересечение (video-manager): side=${side}, mode=${mode}, x=${x.toFixed(3)}, y=${y.toFixed(3)}, text=${text}, leftLineX=${leftLineX.toFixed(3)}, rightLineX=${rightLineX.toFixed(3)}`);
                 
                 this.popupCounters.push({
                     x: x,
