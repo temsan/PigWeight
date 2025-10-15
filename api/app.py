@@ -711,7 +711,7 @@ class VideoStream(abc.ABC):
                                     self._left_cross_counter += 1
                             except Exception:
                                 pass
-                        elif prev <= R < cx:  # Вход справа (свинья идет влево)
+                        elif cx < R <= prev:  # Вход справа (свинья идет влево)
                             key = (tid, 'enter_right')
                             self.right_in += 1
                             self.total_crossings += 1
@@ -719,7 +719,7 @@ class VideoStream(abc.ABC):
                             self._track_last_side_time[key] = now
                             self._track_last_side_time[track_cooldown_key] = now
                             y_at = _interp_y(prev, prev_y, cx, cy, R)
-                            logger.info(f"🔴 R={R:.3f} y={y_at:.3f} t{tid} →IN ({self.right_in}) | centroid: prev=({prev:.3f},{prev_y:.3f}) cur=({cx:.3f},{cy:.3f})")
+                            logger.info(f"🔴 R={R:.3f} y={y_at:.3f} t{tid} ←IN ({self.right_in}) | centroid: prev=({prev:.3f},{prev_y:.3f}) cur=({cx:.3f},{cy:.3f})")
                             self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "enter", "x": float(R), "y": float(y_at), "ts": float(now)})
                             
                             # Журналирование события пересечения линии (неблокирующее)
@@ -768,14 +768,14 @@ class VideoStream(abc.ABC):
                                 })
                             except Exception:
                                 pass
-                        elif prev >= R > cx:  # Выход справа (свинья идет вправо)
+                        elif prev <= R < cx:  # Выход справа (свинья идет вправо, выходит через правую линию)
                             key = (tid, 'exit_right')
                             self.right_in = max(0, self.right_in - 1)
                             self.right_flow -= 1
                             self._track_last_side_time[key] = now
                             self._track_last_side_time[track_cooldown_key] = now
                             y_at = _interp_y(prev, prev_y, cx, cy, R)
-                            logger.info(f"🔴 R={R:.3f} y={y_at:.3f} t{tid} ←OUT ({self.right_in})")
+                            logger.info(f"🔴 R={R:.3f} y={y_at:.3f} t{tid} OUT→ ({self.right_in}) | centroid: prev=({prev:.3f},{prev_y:.3f}) cur=({cx:.3f},{cy:.3f})")
                             self._recent_crossings.append({"id": int(tid), "side": "right", "mode": "exit", "x": float(R), "y": float(y_at), "ts": float(now)})
                             
                             # Журналирование события выхода (неблокирующее)
