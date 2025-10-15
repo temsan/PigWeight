@@ -71,16 +71,9 @@ async def upload_video_file(file: UploadFile = File(...)):
         # Очищаем имя файла от потенциально опасных символов
         safe_filename = re.sub(r'[^\w\-_\.]', '_', file.filename)
         
-        # Если файл с таким именем уже существует, добавляем уникальный суффикс
+        # Используем оригинальное имя файла без добавления суффиксов
+        # Если файл существует, он будет перезаписан
         file_path = UPLOAD_DIR / safe_filename
-        if file_path.exists():
-            name_part = file_path.stem
-            extension = file_path.suffix
-            counter = 1
-            while file_path.exists():
-                safe_filename = f"{name_part}_{counter}{extension}"
-                file_path = UPLOAD_DIR / safe_filename
-                counter += 1
         
         # Сохранение файла
         with open(file_path, "wb") as f:
