@@ -43,7 +43,8 @@
 
 ## 🎯 ЭТАП 1: MVP С БАЗОЙ ДАННЫХ
 
-- [-] 1. Настройка локального Supabase
+- [x] 1. Настройка локального Supabase
+
 
   - Создать docker-compose.yml для локального Supabase
   - Запустить Supabase локально через Docker
@@ -51,8 +52,10 @@
   - Добавить параметры подключения в `.env` (SUPABASE_URL, SUPABASE_KEY)
   - _Требования: 5.1, 5.14, 5.15_
 
+
 - [ ] 2. Модуль базы данных (DatabaseManager)
-  - [ ] 2.1 Реализовать класс DatabaseManager
+  - [x] 2.1 Реализовать класс DatabaseManager
+
     - Использовать supabase-py клиент
     - Подключение через SUPABASE_URL и SUPABASE_KEY из .env
     - Обработка ошибок подключения
