@@ -43,7 +43,8 @@
 
 ## 🎯 ЭТАП 1: MVP С БАЗОЙ ДАННЫХ
 
-- [ ] 1. Настройка локального Supabase
+- [-] 1. Настройка локального Supabase
+
   - Создать docker-compose.yml для локального Supabase
   - Запустить Supabase локально через Docker
   - Создать SQL миграции для таблиц `weighing_acts` и `crossings`
