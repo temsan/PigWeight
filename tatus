@@ -1,0 +1,58 @@
+[33mcommit 7c21445300afeb04b08e1c5356cabc829a6627ef[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32moptimize[m[33m, [m[1;31morigin/optimize[m[33m)[m
+Author: Biryukov.Artyom <temsanone@gmail.com>
+Date:   Fri Sep 12 15:51:12 2025 +0300
+
+    ui: обновление интерфейса в index.html\n- переработаны элементы управления воспроизведением и статистики для улучшения визуального восприятия\n- добавлены новые функции для расчета веса и обновления статистики\n- улучшены стили и структура элементов для повышения удобства использования
+
+[1mdiff --git a/static/index.html b/static/index.html[m
+[1mindex 828fcad..eb879e6 100644[m
+[1m--- a/static/index.html[m
+[1m+++ b/static/index.html[m
+[36m@@ -113,33 +113,43 @@[m
+ <body style="overflow:hidden;">[m
+   <div id="main-container" class="flex flex-col" style="min-height:100vh; overflow:hidden; height:100vh;">[m
+             <div class="top-toolbar minimal sticky-top" id="topToolbar" style="padding:6px 12px; position:fixed; top:12px; left:12px; right:12px; z-index:1000; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 8px 32px var(--liquid-glass-shadow); border-radius: 16px;">[m
+[31m-      <div class="container toolbar-row-horizontal" style="display:flex; gap:4px; align-items:center; flex-wrap:nowrap;">[m
+[31m-        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap;">PigWeight v3.0</h2>[m
+[31m-[m
+[31m-        <div class="toolbar-group" id="streamGroup" style="flex:0 1 auto; min-width:150px; white-space:nowrap;">[m
+[31m-          <div id="streamRadios" class="toggle-group compact"></div>[m
+[31m-        </div>[m
+[31m-        <label class="file-input-btn nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="flex:0 0 auto; padding:4px 8px; min-width:auto; text-align:center; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; order:4; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">[m
+[31m-          <span id="fileInputName">Файл</span>[m
+[31m-          <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">[m
+[31m-        </label>[m
+[31m-        <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; flex:0 0 auto; padding:4px 10px; min-width:auto; height:32px; line-height:24px; font-weight:600; order:5; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">Старт</button>[m
+[31m-        <div style="display:flex; align-items:center; gap:4px; flex:0 0 auto; order:2; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 0 8px;">[m
+[31m-          <label style="font-size:13px; color:var(--text-secondary);">Транспорт:</label>[m
+[31m-          <select id="transportSelect" style="height:32px; background: transparent; border: none; color: var(--text-primary); font-weight: 500;">[m
+[31m-            <option value="mjpeg">MJPEG</option>[m
+[31m-            <option value="webrtc" selected>WebRTC</option>[m
+[31m-          </select>[m
+[32m+[m[32m      <div class="container toolbar-row-horizontal" style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">[m
+[32m+[m[32m        <!-- Левая группа: Логотип (компактнее) -->[m
+[32m+[m[32m        <h2 class="m-0" style="flex:0 0 auto; white-space:nowrap; font-size:14px; margin-right:6px; opacity:0.8;">PigWeight v3.0</h2>[m
+[32m+[m[41m        [m
+[32m+[m[32m        <!-- Центральная группа: Управление воспроизведением (ВАЖНОЕ - крупнее) -->[m
+[32m+[m[32m        <div class="control-group" style="display:flex; gap:8px; align-items:center; flex:0 0 auto;">[m
+[32m+[m[32m          <label class="file-input-btn nowrap file-btn" id="fileInputLabel" title="Открыть видеофайл" style="padding:6px 12px; min-width:auto; text-align:center; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 2px solid var(--liquid-glass-border); border-radius: var(--radius-md); color: var(--text-primary); font-weight:600; font-size:14px; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 2px 8px var(--liquid-glass-shadow);">[m
+[32m+[m[32m            <span id="fileInputName">📁 Файл</span>[m
+[32m+[m[32m            <input id="videoFileInput" type="file" accept=".mp4,.mkv,.avi,.mov,.m4v,.webm,video/*">[m
+[32m+[m[32m          </label>[m
+[32m+[m[32m          <button id="videoPlayPauseBtn" class="nowrap" style="visibility:visible; padding:8px 16px; min-width:auto; height:40px; line-height:24px; font-weight:700; font-size:16px; background: linear-gradient(135deg, var(--accent-color), #1e5fb8); backdrop-filter: blur(var(--liquid-glass-blur)); border: 2px solid rgba(124, 199, 255, 0.4); border-radius: var(--radius-md); color: white; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 4px 16px rgba(44, 123, 229, 0.3); text-shadow: 0 1px 2px rgba(0,0,0,0.2);">▶️ Старт</button>[m
+         </div>[m
+[31m-        <button id="fullscreenBtn" class="nowrap" aria-label="На весь экран" title="На весь экран"[m
+[31m-                style="flex:0 0 auto; padding:6px; width:40px; height:40px; line-height:0; display:inline-flex; align-items:center; justify-content:center; order:3; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); color: var(--text-primary); transition: all 0.2s ease; cursor: pointer;">[m
+[31m-          <!-- icon injected by JS -->[m
+[31m-        </button>[m
+[31m-        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 100%; min-width:480px; max-width:100%; order:1; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">[m
+[32m+[m
+[32m+[m[32m        <!-- Центральная группа: Seekbar -->[m
+[32m+[m[32m        <div class="seek-wrap flex items-center gap-6 nowrap" style="flex:1 1 auto; min-width:300px; background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); box-shadow: 0 4px 16px var(--liquid-glass-shadow); border-radius: var(--radius-md); padding: 4px 8px;">[m
+           <input id="seekRange" type="range" min="0" max="0" step="0.1" value="0" style="flex:1 1 auto;">[m
+           <div class="seek-times" style="flex:0 0 auto;"><span id="curTime">0.0</span> / <span id="durTime">0.0</span> c</div>[m
+         </div>[m
+[31m-        <span id="streamStatus" class="nowrap stream-status" aria-live="polite" style="flex:0 0 auto; order:6; font-size:12px; color:var(--text-secondary); background: var(--liquid-glass-bg); backdrop-filter: blur(var(--liquid-glass-blur)); border: 1px solid var(--liquid-glass-border); border-radius: var(--radius-sm); padding: 4px 8px; margin-left:6px; white-space:nowrap;"></span>[m
+[32m+[m
+[32m+[m[32m        <!-- Правая группа: Настройки и статус (компактнее) -->[m
+[32m+[m[32m        <div class="settings-group" style="display:flex; gap:4px; align-items:
