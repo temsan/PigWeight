@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pig Tracking Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .controls {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        .status {
+            margin-left: auto;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status.online {
+            background: #10b981;
+            color: white;
+        }
+        
+        .status.offline {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #333;
+            font-size: 18px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .stat-item:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .stat-value {
+            color: #333;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .stat-value.highlight {
+            color: #667eea;
+            font-size: 24px;
+        }
+        
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .empty {
+            text-align: center;
+            padding: 30px;
+            color: #999;
+            font-style: italic;
+        }
+        
+        .act-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .act-item {
+            background: #f9fafb;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            border-left: 3px solid #667eea;
+        }
+        
+        .act-item strong {
+            color: #667eea;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .updating {
+            animation: pulse 1s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🐷 Система отслеживания свиней</h1>
+            <p class="subtitle">Мониторинг в реальном времени</p>
+        </header>
+        
+        <div class="controls">
+            <button onclick="loadAll()">🔄 Обновить</button>
+            <button onclick="toggleAutoRefresh()">
+                <span id="autoRefreshBtn">⏸️ Остановить авто-обновление</span>
+            </button>
+            <div class="status" id="status">
+                <span id="statusText">Проверка...</span>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>📊 Статистика</h2>
+                <div id="stats" class="loading">Загрузка...</div>
+            </div>
+            
+            <div class="card">
+                <h2>📝 Акты взвешивания</h2>
+                <div id="acts" class="loading">Загрузка...</div>
+            </div>
+            
+            <div class="card">
+                <h2>↔️ Пересечения линий</h2>
+                <div id="crossings" class="loading">Загрузка...</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>🔍 Детали последнего акта</h2>
+            <div id="actDetails" class="loading">Загрузка...</div>
+        </div>
+    </div>
+    
+    <script>
+        let autoRefreshInterval = null;
+        let isAutoRefresh = true;
+        
+        async function checkHealth() {
+            try {
+                const response = await fetch('/health');
+                if (response.ok) {
+                    document.getElementById('status').className = 'status online';
+                    document.getElementById('statusText').textContent = '🟢 Онлайн';
+                    return true;
+                } else {
+                    throw new Error('Server error');
+                }
+            } catch (error) {
+                document.getElementById('status').className = 'status offline';
+                document.getElementById('statusText').textContent = '🔴 Оффлайн';
+                return false;
+            }
+        }
+        
+        async function loadStats() {
+            const container = document.getElementById('stats');
+            container.classList.add('updating');
+            
+            try {
+                const response = await fetch('/api/weighing/stats');
+                if (!response.ok) throw new Error('API error');
+                
+                const data = await response.json();
+                
+                let html = '';
+                if (data.total_acts !== undefined) {
+                    html += `
+                        <div class="stat-item">
+                            <span class="stat-label">Всего актов:</span>
+                            <span class="stat-value highlight">${data.total_acts || 0}</span>
+                        </div>
+                    `;
+                }
+                if (data.total_crossings !== undefined) {
+                    html += `
+                        <div class="stat-item">
+                            <span class="stat-label">Всего пересечений:</span>
+                            <span class="stat-value">${data.total_crossings || 0}</span>
+                        </div>
+                    `;
+                }
+                if (data.avg_duration !== undefined) {
+                    html += `
+                        <div class="stat-item">
+                            <span class="stat-label">Средняя длительность:</span>
+                            <span class="stat-value">${data.avg_duration?.toFixed(1) || 0} сек</span>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html || '<div class="empty">Нет данных</div>';
+            } catch (error) {
+                container.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
+            } finally {
+                container.classList.remove('updating');
+            }
+        }
+        
+        async function loadActs() {
+            const container = document.getElementById('acts');
+            container.classList.add('updating');
+            
+            try {
+                const response = await fetch('/api/journal/acts');
+                if (!response.ok) throw new Error('API error');
+                
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    container.innerHTML = `
+                        <div class="stat-item">
+                            <span class="stat-label">Всего актов:</span>
+                            <span class="stat-value highlight">${data.length}</span>
+                        </div>
+                        <div class="act-list">
+                            ${data.slice(0, 5).map(act => `
+                                <div class="act-item">
+                                    <strong>Акт #${act.id || act.act_id}</strong><br>
+                                    <small>
+                                        ${new Date(act.started_at || act.timestamp).toLocaleString('ru-RU')}<br>
+                                        Слева: ${act.left_count || 0} | Справа: ${act.right_count || 0}
+                                    </small>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = '<div class="empty">Актов пока нет<br><small>Обработайте видео через console_app.py</small></div>';
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
+            } finally {
+                container.classList.remove('updating');
+            }
+        }
+        
+        async function loadCrossings() {
+            const container = document.getElementById('crossings');
+            container.classList.add('updating');
+            
+            try {
+                const response = await fetch('/api/line-crossings?limit=10');
+                if (!response.ok) throw new Error('API error');
+                
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    container.innerHTML = `
+                        <div class="stat-item">
+                            <span class="stat-label">Последних:</span>
+                            <span class="stat-value">${data.length}</span>
+                        </div>
+                        <pre>${JSON.stringify(data.slice(0, 3), null, 2)}</pre>
+                    `;
+                } else {
+                    container.innerHTML = '<div class="empty">Пересечений пока нет</div>';
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
+            } finally {
+                container.classList.remove('updating');
+            }
+        }
+        
+        async function loadActDetails() {
+            const container = document.getElementById('actDetails');
+            container.classList.add('updating');
+            
+            try {
+                const response = await fetch('/api/journal/acts');
+                if (!response.ok) throw new Error('API error');
+                
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    container.innerHTML = `<pre>${JSON.stringify(data[0], null, 2)}</pre>`;
+                } else {
+                    container.innerHTML = '<div class="empty">Нет актов для отображения</div>';
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
+            } finally {
+                container.classList.remove('updating');
+            }
+        }
+        
+        async function loadAll() {
+            await checkHealth();
+            await Promise.all([
+                loadStats(),
+                loadActs(),
+                loadCrossings(),
+                loadActDetails()
+            ]);
+        }
+        
+        function toggleAutoRefresh() {
+            isAutoRefresh = !isAutoRefresh;
+            const btn = document.getElementById('autoRefreshBtn');
+            
+            if (isAutoRefresh) {
+                btn.textContent = '⏸️ Остановить авто-обновление';
+                startAutoRefresh();
+            } else {
+                btn.textContent = '▶️ Запустить авто-обновление';
+                stopAutoRefresh();
+            }
+        }
+        
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            autoRefreshInterval = setInterval(loadAll, 5000);
+        }
+        
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+        
+        // Инициализация
+        loadAll();
+        startAutoRefresh();
+    </script>
+</body>
+</html>

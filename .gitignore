@@ -130,7 +130,6 @@ Thumbs.db
 # Исключения - важные файлы, которые нужно сохранить
 !.gitkeep
 !README.md
-!INTEGRATION.md
 !example_*.py
 !test_*.py
 
@@ -147,3 +146,38 @@ Thumbs.db
 !static/icons/*.svg
 !docs/*.svg
 /models/
+
+# Temporary files
+temp/
+*.tmp
+.env.supabase
+
+# Test outputs
+test_output/
+test_results/
+
+# Generated files
+deep_perf_analysis.json
+measurements_analysis.json
+pipeline_analysis.json
+
+# Uploads (except examples)
+uploads/*
+!uploads/.gitkeep
+
+# Models (too large)
+models/*.pt
+models/*.onnx
+!models/.gitkeep
+
+# Records
+records/*
+!records/.gitkeep
+
+# Results
+results/*
+!results/.gitkeep
+
+# Screenshots
+screenshots/*
+!screenshots/.gitkeep

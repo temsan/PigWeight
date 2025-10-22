@@ -55,7 +55,8 @@ class DatabaseManager:
             supabase_key: API ключ Supabase (по умолчанию из .env)
         """
         self.url = supabase_url or os.getenv('SUPABASE_URL', 'http://localhost:8000')
-        self.key = supabase_key or os.getenv('SUPABASE_KEY')
+        # Используем service_role ключ для полного доступа к БД
+        self.key = supabase_key or os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_KEY')
         
         if not self.key:
             raise ValueError("SUPABASE_KEY не найден в переменных окружения")
