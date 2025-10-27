@@ -16,7 +16,21 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Импорты из существующей системы
 from core.config import get_config
-from pig_tracking.database import DatabaseManager
+from pig_tracking.database import DatabaseManager, WeighingAct, CrossingEvent
+
+# Rich для красивого TUI
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.prompt import Prompt
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    from rich.live import Live
+    from rich.layout import Layout
+    from rich import box
+    HAVE_RICH = True
+except ImportError:
+    HAVE_RICH = False
 
 # Настройка логирования
 logging.basicConfig(
@@ -25,13 +39,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Глобальная консоль Rich
+console = Console() if HAVE_RICH else None
+
 class VideoSelector:
-    """Класс для выбора видеофайлов"""
+    """Класс для выбора видеофайлов и камер"""
     
     def __init__(self, uploads_dir: str = "uploads"):
         self.uploads_dir = Path(uploads_dir)
         if not self.uploads_dir.exists():
             self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.cameras = self._load_cameras()
+    
+    def _load_cameras(self) -> dict:
+        """Загружает список камер из .env"""
+        cameras = {}
+        
+        # Ищем переменные CAM_CH*
+        for key, value in os.environ.items():
+            if key.startswith('CAM_CH') and value:
+                cam_id = key.replace('CAM_CH', '')
+                cameras[f"cam{cam_id}"] = {
+                    'name': f"Камера {cam_id}",
+                    'url': value
+                }
+        
+        # Fallback на CAM_URL или CAM_DEFAULT
+        if not cameras:
+            cam_url = os.getenv('CAM_URL') or os.getenv('CAM_DEFAULT')
+            if cam_url:
+                cameras['cam101'] = {
+                    'name': 'Камера 101',
+                    'url': cam_url
+                }
+        
+        return cameras
     
     def get_video_files(self) -> List[Path]:
         """Получает список видеофайлов из папки uploads"""
@@ -96,40 +138,149 @@ class VideoSelector:
                 'path': file_path
             }
     
-    def select_video_interactive(self) -> Optional[Path]:
-        """Интерактивный выбор видеофайла"""
+    def select_source_interactive(self) -> Optional[dict]:
+        """Интерактивный выбор источника (видео или камера) с красивым TUI"""
+        if not HAVE_RICH:
+            return self._select_source_simple()
+        
         video_files = self.get_video_files()
         
-        if not video_files:
-            print(f"❌ Видеофайлы не найдены в папке {self.uploads_dir}")
-            print(f"   Поместите видеофайлы в папку {self.uploads_dir.absolute()}")
+        # Создаем таблицу источников
+        table = Table(title="🐷 PigWeight - Выбор источника", box=box.ROUNDED, show_header=True, header_style="bold magenta")
+        table.add_column("№", style="cyan", width=4)
+        table.add_column("Тип", style="green", width=10)
+        table.add_column("Название", style="white")
+        table.add_column("Детали", style="yellow")
+        
+        sources = []
+        
+        # Добавляем камеры
+        if self.cameras:
+            for cam_id, cam_info in self.cameras.items():
+                sources.append({
+                    'type': 'camera',
+                    'id': cam_id,
+                    'name': cam_info['name'],
+                    'url': cam_info['url']
+                })
+                table.add_row(
+                    str(len(sources)),
+                    "🎥 Камера",
+                    cam_info['name'],
+                    "RTSP поток"
+                )
+        
+        # Добавляем видеофайлы
+        for video_file in video_files:
+            info = self.get_file_info(video_file)
+            sources.append({
+                'type': 'file',
+                'path': video_file
+            })
+            table.add_row(
+                str(len(sources)),
+                "📁 Файл",
+                video_file.name,
+                f"{info['size']} • {info['duration']}"
+            )
+        
+        if not sources:
+            console.print(Panel(
+                "[red]❌ Нет доступных источников[/red]\n\n"
+                f"Поместите видеофайлы в папку [cyan]{self.uploads_dir.absolute()}[/cyan]\n"
+                "или настройте камеры в .env (CAM_CH101, CAM_CH102, ...)",
+                title="Ошибка",
+                border_style="red"
+            ))
             return None
         
-        print(f"\n📁 Доступные видео в папке {self.uploads_dir}:")
+        console.print(table)
+        console.print()
+        
+        # Выбор источника
+        while True:
+            try:
+                choice = Prompt.ask(
+                    f"[bold cyan]Выберите источник[/bold cyan] [dim](1-{len(sources)} или q для выхода)[/dim]",
+                    default="1"
+                )
+                
+                if choice.lower() == 'q':
+                    console.print("[yellow]Выход...[/yellow]")
+                    return None
+                
+                index = int(choice) - 1
+                if 0 <= index < len(sources):
+                    source = sources[index]
+                    
+                    if source['type'] == 'camera':
+                        console.print(f"[green]✅ Выбрана камера:[/green] [bold]{source['name']}[/bold]")
+                    else:
+                        console.print(f"[green]✅ Выбран файл:[/green] [bold]{source['path'].name}[/bold]")
+                    
+                    return source
+                else:
+                    console.print(f"[red]❌ Неверный номер. Введите число от 1 до {len(sources)}[/red]")
+                    
+            except ValueError:
+                console.print("[red]❌ Введите число или 'q' для выхода[/red]")
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Выход...[/yellow]")
+                return None
+    
+    def _select_source_simple(self) -> Optional[dict]:
+        """Простой выбор источника без Rich (fallback)"""
+        video_files = self.get_video_files()
+        
+        print(f"\n📹 Выберите источник для обработки:")
         print("=" * 80)
         
-        for i, video_file in enumerate(video_files, 1):
-            info = self.get_file_info(video_file)
-            print(f"{i:2d}. {video_file.name}")
-            print(f"    Размер: {info['size']}, Длительность: {info['duration']}")
+        sources = []
+        
+        # Показываем камеры
+        if self.cameras:
+            print("\n🎥 Камеры:")
+            for cam_id, cam_info in self.cameras.items():
+                sources.append({
+                    'type': 'camera',
+                    'id': cam_id,
+                    'name': cam_info['name'],
+                    'url': cam_info['url']
+                })
+                print(f"{len(sources):2d}. {cam_info['name']} (RTSP)")
+            print()
+        
+        # Показываем видеофайлы
+        if video_files:
+            print("📁 Видеофайлы:")
+            for video_file in video_files:
+                info = self.get_file_info(video_file)
+                sources.append({
+                    'type': 'file',
+                    'path': video_file
+                })
+                print(f"{len(sources):2d}. {video_file.name}")
+                print(f"    Размер: {info['size']}, Длительность: {info['duration']}")
+        
+        if not sources:
+            print(f"❌ Нет доступных источников")
+            return None
         
         print("=" * 80)
         
         while True:
             try:
-                choice = input(f"\nВыберите номер видео (1-{len(video_files)}) или 'q' для выхода: ").strip()
+                choice = input(f"\nВыберите источник (1-{len(sources)}) или 'q' для выхода: ").strip()
                 
                 if choice.lower() == 'q':
                     print("Выход...")
                     return None
                 
                 index = int(choice) - 1
-                if 0 <= index < len(video_files):
-                    selected_file = video_files[index]
-                    print(f"✅ Выбран файл: {selected_file.name}")
-                    return selected_file
+                if 0 <= index < len(sources):
+                    return sources[index]
                 else:
-                    print(f"❌ Неверный номер. Введите число от 1 до {len(video_files)}")
+                    print(f"❌ Неверный номер. Введите число от 1 до {len(sources)}")
                     
             except ValueError:
                 print("❌ Введите число или 'q' для выхода")
@@ -146,7 +297,7 @@ class PigTrackingApp:
         self.video_selector = VideoSelector()
     
     def initialize_database(self):
-        """Инициализация подключения к базе данных"""
+        """Инициализация подключения к базе данных (опционально)"""
         try:
             self.db = DatabaseManager()
             logger.info("✅ Подключение к базе данных успешно")
@@ -156,9 +307,9 @@ class PigTrackingApp:
             logger.info(f"📊 В базе: {stats['total_acts']} актов, {stats['total_crossings']} проходов")
             
         except Exception as e:
-            logger.warning(f"⚠️ Не удалось подключиться к базе данных: {e}")
-            logger.warning("   Результаты будут сохранены только в JSON файл")
-            logger.warning("   Для сохранения в базу запустите: docker-compose up -d")
+            logger.info(f"ℹ️ База данных недоступна (это нормально)")
+            logger.info("   Результаты будут сохранены в JSON файл")
+            logger.info("   Для сохранения в БД: запустите docker-compose up -d")
             self.db = None
     
     async def process_video(self, video_path: Path):
@@ -169,8 +320,17 @@ class PigTrackingApp:
             # Импортируем IntegratedVideoProcessor
             from pig_tracking.video_processor import IntegratedVideoProcessor
             
-            print(f"\n🚀 Обработка видео: {video_path.name}")
-            print("=" * 60)
+            if HAVE_RICH:
+                console.print()
+                console.print(Panel(
+                    f"[bold cyan]Обработка видео:[/bold cyan] [white]{video_path.name}[/white]",
+                    title="🎬 PigWeight",
+                    border_style="cyan",
+                    box=box.DOUBLE
+                ))
+            else:
+                print(f"\n🚀 Обработка видео: {video_path.name}")
+                print("=" * 60)
             
             # Создаем процессор
             processor = IntegratedVideoProcessor(
@@ -179,22 +339,51 @@ class PigTrackingApp:
                 img_size=self.config.IMG_SIZE
             )
             
-            print("⏳ Инициализация процессора...")
+            if HAVE_RICH:
+                console.print("[yellow]⏳ Инициализация процессора...[/yellow]")
+            else:
+                print("⏳ Инициализация процессора...")
+            
             await processor.initialize()
             
-            print("⏳ Начинаем обработку кадров...")
+            if HAVE_RICH:
+                console.print("[green]✓[/green] Процессор готов")
+                console.print("[yellow]⏳ Начинаем обработку кадров...[/yellow]")
+            else:
+                print("⏳ Начинаем обработку кадров...")
             
             # Обрабатываем видео
             summary = await processor.process_video_file(str(video_path))
             
-            print("\n✅ Обработка завершена!")
-            print("\n📊 Результаты:")
-            print(f"   • Обработано кадров: {summary['frames_processed']}")
-            print(f"   • Обнаружено актов взвешивания: {summary['act_stats']['completed_acts_count']}")
-            print(f"   • Общее количество проходов: {summary['crossing_stats']['total_crossings']}")
-            print(f"   • Проходы слева: {summary['crossing_stats']['left_crossings']}")
-            print(f"   • Проходы справа: {summary['crossing_stats']['right_crossings']}")
-            print(f"   • Пиковое количество одновременно: {summary['act_stats']['peak_concurrent']}")
+            if HAVE_RICH:
+                console.print()
+                console.print(Panel(
+                    "[bold green]✅ Обработка завершена![/bold green]",
+                    border_style="green"
+                ))
+                
+                # Красивая таблица результатов
+                results_table = Table(title="📊 Результаты обработки", box=box.ROUNDED)
+                results_table.add_column("Показатель", style="cyan")
+                results_table.add_column("Значение", style="green", justify="right")
+                
+                results_table.add_row("Обработано кадров", str(summary['frames_processed']))
+                results_table.add_row("Актов взвешивания", str(summary['act_stats']['completed_acts_count']))
+                results_table.add_row("Всего проходов", str(summary['crossing_stats']['total_crossings']))
+                results_table.add_row("Проходы слева", str(summary['crossing_stats']['left_crossings']))
+                results_table.add_row("Проходы справа", str(summary['crossing_stats']['right_crossings']))
+                results_table.add_row("Пиковое количество", str(summary['act_stats']['peak_concurrent']))
+                
+                console.print(results_table)
+            else:
+                print("\n✅ Обработка завершена!")
+                print("\n📊 Результаты:")
+                print(f"   • Обработано кадров: {summary['frames_processed']}")
+                print(f"   • Обнаружено актов взвешивания: {summary['act_stats']['completed_acts_count']}")
+                print(f"   • Общее количество проходов: {summary['crossing_stats']['total_crossings']}")
+                print(f"   • Проходы слева: {summary['crossing_stats']['left_crossings']}")
+                print(f"   • Проходы справа: {summary['crossing_stats']['right_crossings']}")
+                print(f"   • Пиковое количество одновременно: {summary['act_stats']['peak_concurrent']}")
             
             # Сохраняем результаты
             if summary['act_stats']['completed_acts_count'] > 0:
@@ -215,41 +404,64 @@ class PigTrackingApp:
                 if self.db:
                     print("\n💾 Сохранение результатов в базу данных...")
                     
-                    for act in summary['act_stats']['completed_acts']:
-                        # Конвертируем в формат для базы данных
-                        from pig_tracking.database import WeighingAct, CrossingEvent
+                    try:
+                        saved_count = 0
+                        for act in summary['act_stats']['completed_acts']:
+                            try:
+                                # Конвертируем timestamp (float) в datetime
+                                started_at = datetime.fromtimestamp(act['started_at'])
+                                ended_at = datetime.fromtimestamp(act['ended_at']) if act.get('ended_at') else datetime.now()
+                                
+                                db_act = WeighingAct(
+                                    started_at=started_at,
+                                    ended_at=ended_at,
+                                    duration_sec=act.get('duration_sec', act.get('duration', 0.0)),
+                                    left_count=act.get('left_count', 0),
+                                    right_count=act.get('right_count', 0),
+                                    peak_count=act.get('peak_count', 0),
+                                    total_weight=act.get('total_weight'),
+                                    avg_weight=act.get('avg_weight'),
+                                    stream_id=video_path.stem,
+                                    video_file=video_path.name
+                                )
+                                
+                                # Добавляем проходы
+                                for crossing in act.get('crossings', []):
+                                    # Конвертируем timestamp в datetime
+                                    crossing_time = datetime.fromtimestamp(crossing['timestamp'])
+                                    
+                                    # БД ожидает direction как 'left' или 'right' (согласно CHECK constraint)
+                                    side = crossing.get('side', 'left')
+                                    
+                                    db_crossing = CrossingEvent(
+                                        pig_id=crossing.get('track_id', 0),
+                                        direction=side,
+                                        timestamp=crossing_time,
+                                        line_x=crossing.get('x', 0.0),
+                                        line_y=crossing.get('y', 0.5),
+                                        weight_estimate=crossing.get('weight_estimate'),
+                                        stream_id=video_path.stem
+                                    )
+                                    db_act.crossings.append(db_crossing)
+                                
+                                # Сохраняем в базу
+                                act_id = self.db.save_weighing_act(db_act)
+                                saved_count += 1
+                                logger.info(f"✅ Акт #{act['act_id']} сохранен в БД с ID {act_id}")
+                                
+                            except Exception as e:
+                                logger.error(f"❌ Ошибка сохранения акта #{act.get('act_id', '?')}: {e}")
+                                continue
                         
-                        db_act = WeighingAct(
-                            started_at=act['started_at'],
-                            ended_at=act['ended_at'],
-                            duration_sec=act['duration_sec'],
-                            left_count=act['left_count'],
-                            right_count=act['right_count'],
-                            peak_count=act['peak_count'],
-                            total_weight=None,
-                            avg_weight=None,
-                            stream_id=video_path.stem,
-                            video_file=video_path.name
-                        )
-                        
-                        # Добавляем проходы
-                        for crossing in act.get('crossings', []):
-                            db_crossing = CrossingEvent(
-                                pig_id=crossing['pig_id'],
-                                direction=crossing['direction'],
-                                timestamp=crossing['timestamp'],
-                                line_x=crossing['line_x'],
-                                line_y=crossing['line_y'],
-                                weight_estimate=None,
-                                stream_id=video_path.stem
-                            )
-                            db_act.crossings.append(db_crossing)
-                        
-                        # Сохраняем в базу
-                        act_id = self.db.save_weighing_act(db_act)
-                        logger.info(f"✅ Акт {act_id} сохранен в базу")
+                        if saved_count > 0:
+                            print(f"✅ Сохранено {saved_count} из {summary['act_stats']['completed_acts_count']} актов в базу данных")
+                        else:
+                            print(f"⚠️ Не удалось сохранить акты в базу данных")
                     
-                    print(f"✅ Сохранено {summary['act_stats']['completed_acts_count']} актов в базу данных")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка сохранения в БД: {e}", exc_info=True)
+                        print(f"⚠️ Ошибка сохранения в БД: {e}")
+                        print("   Результаты сохранены только в JSON")
                 else:
                     print("⚠️ База данных недоступна, результаты сохранены только в JSON")
             else:
@@ -261,14 +473,136 @@ class PigTrackingApp:
             logger.error(f"❌ Ошибка обработки видео: {e}", exc_info=True)
             raise
     
+    async def run_test_mode(self, args):
+        """Тестовый режим с автоматической сверкой"""
+        print("\n🧪 ТЕСТОВЫЙ РЕЖИМ")
+        print("=" * 60)
+        
+        # Проверяем параметры
+        if not args.video:
+            logger.error("❌ Для тестового режима требуется --video")
+            return False
+        
+        if not args.excel_reference:
+            logger.error("❌ Для тестового режима требуется --excel-reference")
+            return False
+        
+        video_path = Path(args.video)
+        excel_path = Path(args.excel_reference)
+        
+        if not video_path.exists():
+            logger.error(f"❌ Видеофайл не найден: {video_path}")
+            return False
+        
+        if not excel_path.exists():
+            logger.error(f"❌ Excel файл не найден: {excel_path}")
+            return False
+        
+        # Определяем папку для результатов
+        output_dir = Path(args.output) if args.output else Path('test_results')
+        output_dir.mkdir(exist_ok=True)
+        
+        print(f"📹 Видео: {video_path.name}")
+        print(f"📊 Эталон: {excel_path.name}")
+        print(f"📁 Результаты: {output_dir}")
+        print()
+        
+        # 1. Обработка видео
+        print("🎬 Шаг 1: Обработка видео...")
+        summary = await self.process_video(video_path)
+        
+        if summary['act_stats']['completed_acts_count'] == 0:
+            logger.warning("⚠️ Акты не обнаружены, сверка невозможна")
+            return False
+        
+        # 2. Сверка с Excel
+        print("\n📊 Шаг 2: Сверка с эталонными данными...")
+        
+        try:
+            from pig_tracking.excel_analyzer import ExcelAnalyzer
+            from pig_tracking.excel_comparator import ExcelComparator
+            
+            # Читаем эталонные данные
+            analyzer = ExcelAnalyzer(str(excel_path))
+            analyzer.load()
+            manual_acts = analyzer.parse_data()
+            
+            print(f"   Эталонных записей: {len(manual_acts)}")
+            print(f"   Автоматических актов: {summary['act_stats']['completed_acts_count']}")
+            
+            # Сверка
+            comparator = ExcelComparator(
+                time_tolerance_minutes=5.0,
+                count_tolerance_percent=10.0
+            )
+            
+            # Конвертируем акты в нужный формат
+            auto_acts = summary['act_stats']['completed_acts']
+            
+            # Сопоставление
+            results = comparator.match_acts_by_time(auto_acts, manual_acts)
+            
+            # Метрики
+            metrics = comparator.calculate_metrics()
+            
+            # Генерация отчета
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            report_path = output_dir / f"comparison_report_{timestamp}.xlsx"
+            comparator.generate_report(str(report_path))
+            
+            # Вывод результатов
+            print("\n✅ Сверка завершена!")
+            print("\n📈 Метрики точности:")
+            print(f"   • Recall (полнота): {metrics['recall']:.1%}")
+            print(f"   • Precision (точность): {metrics['precision']:.1%}")
+            print(f"   • F1-Score: {metrics['f1_score']:.1%}")
+            print(f"   • MAE (средняя ошибка): {metrics['mae']:.1f}")
+            print(f"   • MAPE (ошибка в %): {metrics['mape']:.1f}%")
+            print(f"   • Корреляция: {metrics['correlation']:.1%}")
+            
+            print(f"\n📄 Отчет сохранен: {report_path}")
+            
+            # Сохраняем метрики в JSON
+            import json
+            metrics_path = output_dir / f"metrics_{timestamp}.json"
+            with open(metrics_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'video': str(video_path),
+                    'excel_reference': str(excel_path),
+                    'timestamp': timestamp,
+                    'metrics': metrics,
+                    'summary': {
+                        'auto_acts': len(auto_acts),
+                        'manual_acts': len(manual_acts),
+                        'matched': metrics.get('matched_count', 0),
+                        'missed': metrics.get('missed_count', 0)
+                    }
+                }, f, ensure_ascii=False, indent=2)
+            
+            print(f"📊 Метрики сохранены: {metrics_path}")
+            
+            return True
+            
+        except ImportError as e:
+            logger.error(f"❌ Не установлены модули Excel: {e}")
+            logger.error("   Установите: pip install openpyxl pandas")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Ошибка сверки: {e}", exc_info=True)
+            return False
+    
     async def run_async(self, args):
         """Асинхронный метод запуска приложения"""
         try:
             # Инициализация базы данных
             self.initialize_database()
             
-            # Определяем видеофайл для обработки
-            video_path = None
+            # Проверяем режим работы
+            if args.mode == 'test':
+                return await self.run_test_mode(args)
+            
+            # Обычный режим обработки
+            source = None
             
             if args.video:
                 # Видео указано в аргументах
@@ -276,14 +610,22 @@ class PigTrackingApp:
                 if not video_path.exists():
                     logger.error(f"❌ Видеофайл не найден: {video_path}")
                     return False
+                source = {'type': 'file', 'path': video_path}
             else:
-                # Интерактивный выбор видео
-                video_path = self.video_selector.select_video_interactive()
-                if not video_path:
+                # Интерактивный выбор источника
+                source = self.video_selector.select_source_interactive()
+                if not source:
                     return False
             
-            # Обработка видео
-            await self.process_video(video_path)
+            # Обработка в зависимости от типа источника
+            if source['type'] == 'file':
+                await self.process_video(source['path'])
+            elif source['type'] == 'camera':
+                logger.info(f"🎥 Обработка с камеры: {source['name']}")
+                logger.info(f"   URL: {source['url']}")
+                logger.info("⚠️ Обработка RTSP потоков пока не реализована в консольном режиме")
+                logger.info("   Используйте веб-интерфейс: http://localhost:8000")
+                return False
             
             return True
             
@@ -301,6 +643,18 @@ class PigTrackingApp:
 
 def main():
     """Главная функция"""
+    # Красивый заголовок
+    if HAVE_RICH:
+        console.clear()
+        console.print()
+        console.print(Panel.fit(
+            "[bold cyan]🐷 PigWeight v3.0[/bold cyan]\n"
+            "[white]Система автоматического отслеживания и взвешивания свиней[/white]",
+            border_style="cyan",
+            box=box.DOUBLE
+        ))
+        console.print()
+    
     parser = argparse.ArgumentParser(
         description='Система автоматического отслеживания свиней',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -324,7 +678,19 @@ def main():
         '--mode',
         choices=['process', 'test'],
         default='process',
-        help='Режим работы (process - обычная обработка, test - тестовый режим)'
+        help='Режим работы (process - обычная обработка, test - тестовый режим с автоматической сверкой)'
+    )
+    
+    parser.add_argument(
+        '--excel-reference',
+        type=str,
+        help='Путь к Excel файлу с эталонными данными (для тестового режима)'
+    )
+    
+    parser.add_argument(
+        '--output',
+        type=str,
+        help='Папка для сохранения результатов тестирования (по умолчанию: test_results)'
     )
     
     parser.add_argument(
@@ -348,11 +714,10 @@ def main():
     except ImportError:
         logger.warning("⚠️ python-dotenv не установлен, переменные окружения не загружены")
     
-    # Проверка переменных окружения
+    # Проверка переменных окружения (опционально для БД)
     if not os.getenv('SUPABASE_KEY'):
-        logger.error("❌ SUPABASE_KEY не найден в переменных окружения")
-        logger.error("   Скопируйте .env.example в .env и настройте параметры")
-        return 1
+        logger.info("ℹ️ SUPABASE_KEY не найден - работаем без БД (только JSON)")
+        logger.info("   Для сохранения в БД: скопируйте .env.example в .env")
     
     # Запуск приложения
     app = PigTrackingApp()
