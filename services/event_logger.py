@@ -1,6 +1,7 @@
 """
 Сервис для журналирования ключевых событий в системе PigWeight.
 Записывает события пересечения линий, пики количества и всплески активности.
+Интегрирован с БД Supabase для постоянного хранения.
 """
 
 import asyncio
@@ -16,6 +17,14 @@ import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# Опциональная интеграция с БД
+try:
+    from pig_tracking.database import DatabaseManager, CrossingEvent, WeighingAct
+    HAVE_DATABASE = True
+except ImportError:
+    HAVE_DATABASE = False
+    logger.warning("DatabaseManager недоступен, события будут сохраняться только в файлы")
 
 @dataclass
 class EventData:
@@ -49,7 +58,8 @@ class EventLogger:
                  frames_dir: str = "records/frames",
                  max_events_per_stream: int = 1000,
                  spike_threshold: int = 5,
-                 spike_window_sec: float = 10.0):
+                 spike_window_sec: float = 10.0,
+                 enable_database: bool = True):
         
         self.events_dir = Path(events_dir)
         self.frames_dir = Path(frames_dir)
@@ -69,7 +79,20 @@ class EventLogger:
         # Счетчики для генерации ID
         self.event_counter = 0
         
-        logger.info(f"EventLogger initialized: events_dir={events_dir}, frames_dir={frames_dir}")
+        # Интеграция с БД
+        self.db = None
+        if enable_database and HAVE_DATABASE:
+            try:
+                self.db = DatabaseManager()
+                logger.info("✅ EventLogger подключен к БД Supabase")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось подключиться к БД: {e}")
+                self.db = None
+        
+        # Буфер для актов взвешивания (stream_id -> act_data)
+        self.active_acts: Dict[str, Dict[str, Any]] = {}
+        
+        logger.info(f"EventLogger initialized: events_dir={events_dir}, frames_dir={frames_dir}, db={'enabled' if self.db else 'disabled'}")
     
     def _generate_event_id(self) -> str:
         """Генерирует уникальный ID события"""
@@ -196,6 +219,31 @@ class EventLogger:
 
         # Сохраняем на диск в потоке ввода-вывода
         await asyncio.to_thread(self._save_event_to_file, stream_id, event)
+        
+        # Сохраняем в БД если доступна
+        if self.db and HAVE_DATABASE:
+            try:
+                pig_id = meta.get("pig_id", 0)
+                line_x = meta.get("line_x", 0.0)
+                line_y = meta.get("line_y", 0.5)
+                
+                crossing = CrossingEvent(
+                    pig_id=pig_id,
+                    direction=side or "unknown",
+                    timestamp=datetime.fromtimestamp(event.timestamp),
+                    line_x=line_x,
+                    line_y=line_y,
+                    stream_id=stream_id
+                )
+                
+                # Получаем act_id если акт активен
+                if stream_id in self.active_acts:
+                    crossing.act_id = self.active_acts[stream_id].get("act_id")
+                
+                await asyncio.to_thread(self.db.save_crossing, crossing)
+                logger.debug(f"Crossing saved to DB: pig_id={pig_id}, direction={side}")
+            except Exception as e:
+                logger.error(f"Error saving crossing to DB: {e}")
 
         if movement:
             logger.info(f"Line crossing logged: stream={stream_id}, movement={movement}, count={pig_count}")
@@ -337,6 +385,58 @@ class EventLogger:
             'event_types': event_types,
             'latest_event': events[-1].timestamp if events else None
         }
+    
+    async def start_weighing_act(self, stream_id: str, video_file: Optional[str] = None):
+        """Начинает новый акт взвешивания"""
+        if stream_id in self.active_acts:
+            logger.warning(f"Act already active for stream {stream_id}")
+            return
+        
+        self.active_acts[stream_id] = {
+            "started_at": datetime.now(),
+            "video_file": video_file,
+            "left_count": 0,
+            "right_count": 0,
+            "peak_count": 0,
+            "crossings": []
+        }
+        
+        logger.info(f"Started weighing act for stream {stream_id}")
+    
+    async def end_weighing_act(self, stream_id: str, 
+                              left_count: int, 
+                              right_count: int, 
+                              peak_count: int):
+        """Завершает акт взвешивания и сохраняет в БД"""
+        if stream_id not in self.active_acts:
+            logger.warning(f"No active act for stream {stream_id}")
+            return
+        
+        act_data = self.active_acts[stream_id]
+        ended_at = datetime.now()
+        started_at = act_data["started_at"]
+        duration = (ended_at - started_at).total_seconds()
+        
+        if self.db and HAVE_DATABASE:
+            try:
+                act = WeighingAct(
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    duration_sec=duration,
+                    left_count=left_count,
+                    right_count=right_count,
+                    peak_count=peak_count,
+                    stream_id=stream_id,
+                    video_file=act_data.get("video_file")
+                )
+                
+                act_id = await asyncio.to_thread(self.db.save_weighing_act, act)
+                logger.info(f"✅ Weighing act saved to DB: id={act_id}, left={left_count}, right={right_count}, peak={peak_count}")
+            except Exception as e:
+                logger.error(f"Error saving weighing act to DB: {e}")
+        
+        # Удаляем из активных
+        del self.active_acts[stream_id]
     
     async def cleanup_old_events(self, max_age_hours: int = 24):
         """Очищает старые события"""

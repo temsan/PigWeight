@@ -18,6 +18,9 @@ pillow>=10.0.0
 # ===== DATA & ANALYSIS =====
 pandas>=2.0.0
 
+# ===== CONSOLE UI =====
+rich>=13.0.0
+
 # ===== OPTIONAL FEATURES =====
 # Раскомментировать при необходимости:
 

@@ -16,6 +16,7 @@ from core.processor import get_processor, ProcessingOptions, FrameResult
 from core.config import CONFIG
 from pig_tracking.crossing_counter import CrossingCounter, CrossingEvent
 from pig_tracking.act_detector import ActDetector, WeighingAct
+from pig_tracking.weight_estimator import get_weight_estimator
 
 # Импортируем SimpleTracker из api/app.py
 import sys
@@ -62,6 +63,7 @@ class IntegratedVideoProcessor:
             min_pigs_for_act=min_pigs_for_act,
             max_interval_sec=max_interval_sec
         )
+        self.weight_estimator = get_weight_estimator()
         
         # Статистика
         self.frames_processed = 0
@@ -132,16 +134,38 @@ class IntegratedVideoProcessor:
             centers_x.append(cx)
             centers_y.append(cy)
         
-        # 4. Подсчет пересечений
+        # 4. Подсчет пересечений с оценкой веса
         crossing_events = self.crossing_counter.process_tracks(
             track_ids, centers_x, centers_y
         )
+        
+        # Добавляем оценку веса для каждого пересечения
+        for event in crossing_events:
+            # Оцениваем вес для каждой свиньи при пересечении
+            event.weight_estimate = self.weight_estimator.estimate_weight(
+                pig_id=event.track_id
+            )
         
         # 5. Определение актов взвешивания
         current_count = len(tracked_objects)
         completed_act = self.act_detector.update(
             crossing_events, current_count, ts
         )
+        
+        # Добавляем оценку веса в завершенный акт
+        if completed_act:
+            # Общий вес = сумма весов всех пересечений
+            total_weight = sum(
+                e.weight_estimate for e in completed_act.crossings 
+                if e.weight_estimate
+            )
+            completed_act.total_weight = round(total_weight, 1) if total_weight > 0 else None
+            
+            # Средний вес
+            if completed_act.crossings:
+                completed_act.avg_weight = round(
+                    total_weight / len(completed_act.crossings), 1
+                ) if total_weight > 0 else None
         
         # Обновляем статистику
         self.frames_processed += 1
@@ -163,7 +187,8 @@ class IntegratedVideoProcessor:
                     'mode': e.mode,
                     'x': e.x,
                     'y': e.y,
-                    'timestamp': e.timestamp
+                    'timestamp': e.timestamp,
+                    'weight_estimate': e.weight_estimate
                 }
                 for e in crossing_events
             ],
@@ -238,9 +263,19 @@ class IntegratedVideoProcessor:
                     progress = (frame_num / total_frames) * 100
                     elapsed = time.time() - start_time
                     fps_actual = frame_num / elapsed if elapsed > 0 else 0
-                    logger.info(
-                        f"Прогресс: {frame_num}/{total_frames} ({progress:.1f}%), "
-                        f"FPS: {fps_actual:.1f}"
+                    eta = (total_frames - frame_num) / fps_actual if fps_actual > 0 else 0
+                    
+                    # Визуальный прогресс-бар
+                    bar_length = 30
+                    filled = int(bar_length * frame_num / total_frames)
+                    bar = '█' * filled + '░' * (bar_length - filled)
+                    
+                    print(
+                        f"\r[{bar}] {progress:.1f}% | "
+                        f"{frame_num}/{total_frames} кадров | "
+                        f"{fps_actual:.1f} FPS | "
+                        f"ETA: {int(eta)}s",
+                        end='', flush=True
                     )
         
         finally:

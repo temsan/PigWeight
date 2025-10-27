@@ -14,13 +14,13 @@ services:
       - db-data:/var/lib/postgresql/data
       - ./supabase/migrations:/docker-entrypoint-initdb.d
 
-  # Supabase API
+  # Supabase API (Kong Gateway)
   kong:
     image: kong:2.8.1
     restart: unless-stopped
     ports:
-      - "8000:8000/tcp"
-      - "8443:8443/tcp"
+      - "54321:8000/tcp"  # Supabase API на порту 54321
+      - "54322:8443/tcp"
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml

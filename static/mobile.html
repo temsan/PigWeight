@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PigWeight Mobile</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 16px; }
+    .container { max-width: 480px; margin: 0 auto; }
+    .header { text-align: center; color: white; margin-bottom: 24px; }
+    .header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+    .header p { font-size: 14px; opacity: 0.9; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    @media (min-width: 400px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+    .stat-card { background: rgba(255,255,255,0.95); border-radius: 16px; padding: 20px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .stat-value { font-size: 36px; font-weight: 700; color: #667eea; margin-bottom: 4px; }
+    .stat-label { font-size: 13px; color: #666; }
+    .acts-list { background: rgba(255,255,255,0.95); border-radius: 16px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .acts-header { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .refresh-btn { background: #667eea; color: white; border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+    .act-item { padding: 12px; margin-bottom: 8px; background: #f8f9fa; border-radius: 12px; border-left: 4px solid #667eea; }
+    .act-name { font-weight: 600; color: #333; margin-bottom: 6px; font-size: 14px; }
+    .act-stats { display: flex; gap: 12px; font-size: 12px; color: #666; }
+    .act-stat { display: flex; align-items: center; gap: 4px; }
+    .empty { text-align: center; padding: 40px 20px; color: #999; }
+    .loading { text-align: center; padding: 20px; color: #667eea; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🐷 PigWeight</h1>
+      <p>Система подсчета свиней</p>
+    </div>
+    
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value" id="totalActs">-</div>
+        <div class="stat-label">Актов</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="totalPigs">-</div>
+        <div class="stat-label">Свиней</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="totalWeight">-</div>
+        <div class="stat-label">Вес, кг</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="avgWeight">-</div>
+        <div class="stat-label">Средний, кг</div>
+      </div>
+    </div>
+    
+    <div class="acts-list">
+      <div class="acts-header">
+        <span>Последние акты</span>
+        <button class="refresh-btn" onclick="loadData()">🔄</button>
+      </div>
+      <div id="actsList">
+        <div class="loading">Загрузка...</div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    async function loadData() {
+      try {
+        const resp = await fetch('/api/verification/grouped');
+        const data = await resp.json();
+        
+        if (data.error) {
+          document.getElementById('actsList').innerHTML = '<div class="empty">Ошибка загрузки</div>';
+          return;
+        }
+        
+        // Статистика
+        document.getElementById('totalActs').textContent = data.summary?.total_acts || 0;
+        
+        let totalPigs = 0;
+        let totalWeight = 0;
+        let weightCount = 0;
+        const groups = data.grouped_by_date || {};
+        Object.values(groups).forEach(g => {
+          totalPigs += g.total_pigs || 0;
+          g.acts.forEach(a => {
+            if (a.total_weight) {
+              totalWeight += a.total_weight;
+              weightCount++;
+            }
+          });
+        });
+        
+        document.getElementById('totalPigs').textContent = totalPigs;
+        document.getElementById('totalWeight').textContent = totalWeight > 0 ? 
+          Math.round(totalWeight) : '-';
+        document.getElementById('avgWeight').textContent = weightCount > 0 ? 
+          Math.round(totalWeight / weightCount) : '-';
+        
+        // Список актов
+        const acts = [];
+        Object.values(groups).forEach(g => {
+          g.acts.forEach(a => {
+            if (a.status === 'success') acts.push(a);
+          });
+        });
+        
+        acts.sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0));
+        
+        const listEl = document.getElementById('actsList');
+        if (acts.length === 0) {
+          listEl.innerHTML = '<div class="empty">Нет актов</div>';
+          return;
+        }
+        
+        listEl.innerHTML = acts.slice(0, 10).map(act => {
+          const time = act.finished_at ? 
+            new Date(act.finished_at * 1000).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : 
+            '—';
+          
+          return `
+            <div class="act-item">
+              <div class="act-name">${act.act_file || 'Акт'}</div>
+              <div class="act-stats">
+                <div class="act-stat">⬅️ ${act.flow?.left_in || 0}</div>
+                <div class="act-stat">➡️ ${act.flow?.right_in || 0}</div>
+                <div class="act-stat">🐷 ${act.seen_total || 0}</div>
+                ${act.total_weight ? `<div class="act-stat">⚖️ ${Math.round(act.total_weight)} кг</div>` : ''}
+                <div class="act-stat">🕐 ${time}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+        
+      } catch (err) {
+        console.error(err);
+        document.getElementById('actsList').innerHTML = '<div class="empty">Ошибка: ' + err.message + '</div>';
+      }
+    }
+    
+    loadData();
+    setInterval(loadData, 5000);
+  </script>
+</body>
+</html>
