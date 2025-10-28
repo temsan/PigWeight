@@ -62,8 +62,10 @@ class DatabaseManager:
             raise ValueError("SUPABASE_KEY не найден в переменных окружения")
         
         try:
+            # Создаем клиент Supabase
+            # Библиотека supabase-py автоматически добавляет правильные заголовки
             self.client: Client = create_client(self.url, self.key)
-            logger.info(f"Подключение к Supabase: {self.url}")
+            logger.info(f"Подключение к Supabase: {self.url} (key: {self.key[:20]}...)")
             
             # Тестируем подключение
             self._test_connection()
@@ -245,6 +247,80 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Ошибка получения проходов для акта {act_id}: {e}")
+            raise
+    
+    def get_pig_passages(self, act_id: int = None) -> List[Dict[str, Any]]:
+        """
+        Получает агрегированные данные о проходах свиней
+        Группирует пересечения линий по pig_id в одну запись
+        
+        Args:
+            act_id: ID акта (опционально, если None - все акты)
+            
+        Returns:
+            Список проходов свиней с агрегированными данными
+        """
+        try:
+            # Получаем все пересечения
+            query = self.client.table('crossings').select('*')
+            
+            if act_id:
+                query = query.eq('act_id', act_id)
+            
+            result = query.order('crossed_at').execute()
+            
+            # Группируем по pig_id и act_id
+            passages = {}
+            for row in result.data:
+                key = (row['act_id'], row['pig_id'])
+                
+                if key not in passages:
+                    passages[key] = {
+                        'act_id': row['act_id'],
+                        'pig_id': row['pig_id'],
+                        'stream_id': row['stream_id'],
+                        'first_crossing': row['crossed_at'],
+                        'last_crossing': row['crossed_at'],
+                        'crossings': [],
+                        'weights': []
+                    }
+                
+                passages[key]['last_crossing'] = row['crossed_at']
+                passages[key]['crossings'].append({
+                    'direction': row['direction'],
+                    'timestamp': row['crossed_at'],
+                    'line_x': row['line_x'],
+                    'line_y': row['line_y']
+                })
+                
+                if row['weight_estimate']:
+                    passages[key]['weights'].append(row['weight_estimate'])
+            
+            # Формируем итоговый список
+            result_list = []
+            for passage in passages.values():
+                # Вычисляем путь
+                path = ' -> '.join([c['direction'] for c in passage['crossings']])
+                
+                # Средний вес
+                avg_weight = sum(passage['weights']) / len(passage['weights']) if passage['weights'] else None
+                
+                result_list.append({
+                    'act_id': passage['act_id'],
+                    'pig_id': passage['pig_id'],
+                    'stream_id': passage['stream_id'],
+                    'entered_at': passage['first_crossing'],
+                    'exited_at': passage['last_crossing'],
+                    'crossings_count': len(passage['crossings']),
+                    'path': path,
+                    'avg_weight': round(avg_weight, 1) if avg_weight else None
+                })
+            
+            logger.info(f"Получено {len(result_list)} проходов свиней")
+            return result_list
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения проходов: {e}")
             raise
     
     def get_stats(self) -> Dict[str, Any]:

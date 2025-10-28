@@ -67,9 +67,9 @@ class EventLogger:
         self.spike_threshold = spike_threshold
         self.spike_window_sec = spike_window_sec
         
-        # Создаем директории
+        # Создаем только директорию событий (кадры не сохраняем)
         self.events_dir.mkdir(parents=True, exist_ok=True)
-        self.frames_dir.mkdir(parents=True, exist_ok=True)
+        # НЕ создаем frames_dir - кадры не нужны, все в БД
         
         # Хранилище событий по потокам
         self.stream_events: Dict[str, deque] = {}
@@ -101,30 +101,10 @@ class EventLogger:
         return f"evt_{timestamp}_{self.event_counter:06d}"
     
     def _save_frame(self, frame: np.ndarray, event_id: str) -> Optional[str]:
-        """Сохраняет кадр на диск и возвращает путь к файлу (оптимизировано)"""
-        try:
-            # Для производительности сохраняем кадры только для важных событий
-            # или если включен DEBUG режим
-            import os
-            if not os.getenv('DEBUG') and not os.getenv('SAVE_FRAMES'):
-                return None
-                
-            frame_filename = f"{event_id}.jpg"
-            frame_path = self.frames_dir / frame_filename
-            
-            # Оптимизированное сохранение кадра
-            success = cv2.imwrite(str(frame_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            
-            if success:
-                logger.debug(f"Frame saved: {frame_path}")
-                return str(frame_path)
-            else:
-                logger.debug(f"Failed to save frame: {frame_path}")
-                return None
-                
-        except Exception as e:
-            logger.debug(f"Error saving frame for event {event_id}: {e}")
-            return None
+        """НЕ сохраняет кадры - все данные в БД"""
+        # Кадры не нужны - все данные хранятся в БД
+        # Экономия места: не создаем тысячи JPG файлов
+        return None
     
     def _save_event_to_file(self, stream_id: str, event: EventData):
         """Сохраняет событие в JSON файл"""
@@ -174,6 +154,11 @@ class EventLogger:
                                frame: Optional[np.ndarray] = None,
                                metadata: Optional[Dict[str, Any]] = None):
         """Фиксация события пересечения контрольной линии."""
+        
+        # Проверяем настройку
+        import os
+        if not os.getenv('LOG_LINE_CROSSINGS', 'true').lower() == 'true':
+            return
 
         event_id = self._generate_event_id()
         frame_path = None
@@ -258,6 +243,11 @@ class EventLogger:
                             metadata: Optional[Dict[str, Any]] = None):
         """Логирует событие достижения пикового количества"""
         
+        # Проверяем настройку
+        import os
+        if not os.getenv('LOG_PEAK_COUNTS', 'false').lower() == 'true':
+            return
+        
         # Проверяем, является ли это новым пиком
         current_peak = self.stream_peaks.get(stream_id, 0)
         if pig_count <= current_peak:
@@ -301,6 +291,11 @@ class EventLogger:
                                 frame: Optional[np.ndarray] = None,
                                 metadata: Optional[Dict[str, Any]] = None):
         """Логирует событие всплеска активности"""
+        
+        # Проверяем настройку
+        import os
+        if not os.getenv('LOG_ACTIVITY_SPIKES', 'false').lower() == 'true':
+            return
         
         # Проверяем всплеск
         if not self._detect_activity_spike(stream_id, pig_count):

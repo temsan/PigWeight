@@ -1,4 +1,4 @@
-version: '3.8'
+ version: '3.8'
 
 services:
   # Supabase Database
@@ -19,8 +19,8 @@ services:
     image: kong:2.8.1
     restart: unless-stopped
     ports:
-      - "54321:8000/tcp"  # Supabase API на порту 54321
-      - "54322:8443/tcp"
+      - "54321:8000/tcp"  # Supabase API на порту 54321 (внутри контейнера 8000)
+      - "54322:8443/tcp"  # HTTPS
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml

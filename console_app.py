@@ -425,24 +425,8 @@ class PigTrackingApp:
                                     video_file=video_path.name
                                 )
                                 
-                                # Добавляем проходы
-                                for crossing in act.get('crossings', []):
-                                    # Конвертируем timestamp в datetime
-                                    crossing_time = datetime.fromtimestamp(crossing['timestamp'])
-                                    
-                                    # БД ожидает direction как 'left' или 'right' (согласно CHECK constraint)
-                                    side = crossing.get('side', 'left')
-                                    
-                                    db_crossing = CrossingEvent(
-                                        pig_id=crossing.get('track_id', 0),
-                                        direction=side,
-                                        timestamp=crossing_time,
-                                        line_x=crossing.get('x', 0.0),
-                                        line_y=crossing.get('y', 0.5),
-                                        weight_estimate=crossing.get('weight_estimate'),
-                                        stream_id=video_path.stem
-                                    )
-                                    db_act.crossings.append(db_crossing)
+                                # НЕ сохраняем детальные пересечения - только агрегированные данные акта
+                                # Детали есть в JSON файле, в БД только массовые прохождения
                                 
                                 # Сохраняем в базу
                                 act_id = self.db.save_weighing_act(db_act)
