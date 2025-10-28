@@ -8,6 +8,7 @@ from pig_tracking.video_processor import IntegratedVideoProcessor
 from pig_tracking.excel_analyzer import ExcelAnalyzer
 from pig_tracking.excel_exporter import ExcelExporter
 from pig_tracking.excel_comparator import ExcelComparator, ComparisonResult
+from pig_tracking.database import DatabaseManager
 
 __all__ = [
     'CrossingCounter',
@@ -18,5 +19,6 @@ __all__ = [
     'ExcelAnalyzer',
     'ExcelExporter',
     'ExcelComparator',
-    'ComparisonResult'
+    'ComparisonResult',
+    'DatabaseManager'
 ]

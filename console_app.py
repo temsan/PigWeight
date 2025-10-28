@@ -381,8 +381,8 @@ class PigTrackingApp:
                 print(f"   • Обработано кадров: {summary['frames_processed']}")
                 print(f"   • Обнаружено актов взвешивания: {summary['act_stats']['completed_acts_count']}")
                 print(f"   • Общее количество проходов: {summary['crossing_stats']['total_crossings']}")
-                print(f"   • Проходы слева: {summary['crossing_stats']['left_crossings']}")
-                print(f"   • Проходы справа: {summary['crossing_stats']['right_crossings']}")
+                print(f"   • Проходы слева: {summary['crossing_stats']['left_in']}")
+                print(f"   • Проходы справа: {summary['crossing_stats']['right_in']}")
                 print(f"   • Пиковое количество одновременно: {summary['act_stats']['peak_concurrent']}")
             
             # Сохраняем результаты
