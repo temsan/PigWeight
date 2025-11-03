@@ -151,6 +151,94 @@ class RichFormatter:
             redirect_stdout=False,
             redirect_stderr=False
         )
+    
+    @staticmethod
+    def print_acts_metrics(acts_data: List[dict]):
+        """Печатает красивую таблицу метрик актов взвешивания"""
+        if not HAVE_RICH:
+            # Simple output without Rich
+            print("\n📊 МЕТРИКИ АКТОВ ВЗВЕШИВАНИЯ:")
+            print("=" * 120)
+            for i, act in enumerate(acts_data, 1):
+                print(f"\nАкт #{i}:")
+                print(f"  Время начала:     {act.get('started_at_iso', '-')}")
+                print(f"  Время окончания:  {act.get('ended_at_iso', '-')}")
+                print(f"  Длительность:     {act.get('duration', 0):.1f} сек")
+                print(f"  Зашло слева:      {act.get('left_count', 0)} шт")
+                print(f"  Вышло справа:     {act.get('right_count', 0)} шт")
+                print(f"  Пиковое кол-во:   {act.get('peak_count', 0)} шт")
+                print(f"  Всего свиней:     {act.get('seen_total', 0)} шт")
+                print(f"  Всего вес:        {act.get('total_weight', 0):.1f} кг" if act.get('total_weight') else "  Всего вес:        не определён")
+                print(f"  Средний вес:      {act.get('avg_weight', 0):.1f} кг" if act.get('avg_weight') else "  Средний вес:      не определён")
+            return
+        
+        # Rich таблица с красивым форматированием
+        table = Table(title="📊 Метрики актов взвешивания", box=box.ROUNDED, show_header=True)
+        
+        table.add_column("Акт", style="magenta", width=6)
+        table.add_column("Время начала", style="cyan", width=20)
+        table.add_column("Длит-ть (сек)", style="blue", width=12)
+        table.add_column("Слева↙️", style="yellow", width=8)
+        table.add_column("Справа↗️", style="yellow", width=8)
+        table.add_column("Пик кол-во", style="green", width=10)
+        table.add_column("Всего шт", style="white", width=8)
+        table.add_column("Вес (кг)", style="cyan", width=10)
+        table.add_column("Ср.вес (кг)", style="cyan", width=10)
+        
+        for i, act in enumerate(acts_data, 1):
+            duration = act.get('duration', 0)
+            total_weight = act.get('total_weight')
+            avg_weight = act.get('avg_weight')
+            
+            weight_str = f"{total_weight:.1f}" if total_weight else "—"
+            avg_str = f"{avg_weight:.1f}" if avg_weight else "—"
+            
+            table.add_row(
+                str(i),
+                act.get('started_at_iso', '—')[:19],
+                f"{duration:.1f}",
+                str(act.get('left_count', 0)),
+                str(act.get('right_count', 0)),
+                str(act.get('peak_count', 0)),
+                str(act.get('seen_total', 0)),
+                weight_str,
+                avg_str
+            )
+        
+        console.print()
+        console.print(table)
+    
+    @staticmethod
+    def print_summary_stats(summary: dict):
+        """Печатает итоговую статистику обработки"""
+        if not HAVE_RICH:
+            print("\n📊 ИТОГОВАЯ СТАТИСТИКА:")
+            print("=" * 60)
+            print(f"Обработано кадров:        {summary.get('frames_processed', 0)}")
+            print(f"Обнаружено актов:         {summary.get('act_stats', {}).get('completed_acts_count', 0)}")
+            print(f"Всего проходов:           {summary.get('crossing_stats', {}).get('total_crossings', 0)}")
+            print(f"Проходы слева:            {summary.get('crossing_stats', {}).get('left_crossings', 0)}")
+            print(f"Проходы справа:           {summary.get('crossing_stats', {}).get('right_crossings', 0)}")
+            print(f"Пиковое кол-во:           {summary.get('act_stats', {}).get('peak_concurrent', 0)}")
+            return
+        
+        # Rich таблица итогов
+        act_stats = summary.get('act_stats', {})
+        crossing_stats = summary.get('crossing_stats', {})
+        
+        table = Table(title="📊 Итоговая статистика", box=box.DOUBLE, show_header=False)
+        table.add_column("Метрика", style="cyan")
+        table.add_column("Значение", style="green", justify="right")
+        
+        table.add_row("🎬 Обработано кадров", str(summary.get('frames_processed', 0)))
+        table.add_row("🐷 Обнаружено актов взвешивания", str(act_stats.get('completed_acts_count', 0)))
+        table.add_row("📍 Всего пересечений линий", str(crossing_stats.get('total_crossings', 0)))
+        table.add_row("↙️ Пересечений слева", str(crossing_stats.get('left_crossings', 0)))
+        table.add_row("↗️ Пересечений справа", str(crossing_stats.get('right_crossings', 0)))
+        table.add_row("📈 Пиковое количество одновременно", str(act_stats.get('peak_concurrent', 0)))
+        
+        console.print()
+        console.print(table)
 
 
 class VideoSelector:
