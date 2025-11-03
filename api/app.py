@@ -3500,3 +3500,80 @@ async def read_metrics():
         logger.error(f"Error reading metrics.html: {e}")
         return JSONResponse({"error": f"Cannot read metrics.html: {e}"}, status_code=500)
 
+# === ACTS ENDPOINTS ===
+
+@app.get("/api/acts")
+async def get_acts_list():
+    """Получить список всех актов взвешивания с полной информацией"""
+    try:
+        items = []
+        for p in sorted(RECORDS_DIR.glob("act_*.json")):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    act_data = json.load(f)
+                    # Добавляем информацию об актах
+                    items.append({
+                        "id": p.stem,
+                        "filename": p.name,
+                        "data": act_data
+                    })
+            except Exception as e:
+                logger.error(f"Ошибка чтения акта {p.name}: {e}")
+                continue
+        
+        return JSONResponse({
+            "status": "success",
+            "items": items,
+            "count": len(items)
+        })
+    except Exception as e:
+        logger.error(f"Ошибка получения списка актов: {e}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.get("/api/acts/summary")
+async def get_acts_summary():
+    """Получить итоговую сводку по актам"""
+    try:
+        acts = []
+        total_weight = 0
+        total_pigs = 0
+        total_crossings = 0
+        
+        for p in sorted(RECORDS_DIR.glob("act_*.json")):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    act_data = json.load(f)
+                    acts.append(act_data)
+                    
+                    # Суммируем метрики
+                    if isinstance(act_data, dict):
+                        total_weight += act_data.get('total_weight', 0) or 0
+                        total_pigs += act_data.get('seen_total', 0) or 0
+                        total_crossings += act_data.get('left_count', 0) + act_data.get('right_count', 0)
+            except Exception as e:
+                logger.error(f"Ошибка обработки акта {p.name}: {e}")
+                continue
+        
+        avg_weight = total_weight / len(acts) if acts else 0
+        
+        return JSONResponse({
+            "status": "success",
+            "summary": {
+                "total_acts": len(acts),
+                "total_pigs": total_pigs,
+                "total_crossings": total_crossings,
+                "total_weight_kg": round(total_weight, 1),
+                "average_weight_kg": round(avg_weight, 1)
+            }
+        })
+    except Exception as e:
+        logger.error(f"Ошибка получения сводки актов: {e}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+

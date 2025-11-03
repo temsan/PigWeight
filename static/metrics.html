@@ -472,6 +472,63 @@
                 <button onclick="downloadMetrics()">💾 Скачать метрики</button>
             </div>
         </div>
+
+        <!-- Таблица актов взвешивания (полная ширина) -->
+        <div class="card" style="grid-column: 1/-1; margin-top: 12px;">
+            <h3>📊 Полный список актов взвешивания</h3>
+            
+            <div style="overflow-x: auto;">
+                <table id="acts-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                    <thead style="background: rgba(255,255,255,0.1);">
+                        <tr>
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.2);">Акт</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2);">Время начала</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2);">Длит. (сек)</th>
+                            <th style="padding: 8px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.2);">Зашло слева</th>
+                            <th style="padding: 8px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.2);">Вышло справа</th>
+                            <th style="padding: 8px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.2);">Пик кол-во</th>
+                            <th style="padding: 8px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.2);">Всего свиней</th>
+                            <th style="padding: 8px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.2);">Вес (кг)</th>
+                            <th style="padding: 8px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.2);">Ср.вес (кг)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="acts-tbody">
+                        <tr>
+                            <td colspan="9" style="padding: 20px; text-align: center; color: var(--text-secondary);">
+                                Загрузка актов...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="margin-top: 12px; padding: 12px; background: rgba(255,255,255,0.1); border-radius: 8px;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700; color: var(--accent-color);" id="acts-total">0</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Актов всего</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700; color: var(--success);" id="acts-pigs">0</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Свиней прошло</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700; color: var(--info);" id="acts-crossings">0</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Пересечений</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700; color: var(--warning);" id="acts-total-weight">0</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Вес всего (кг)</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700; color: var(--accent-color);" id="acts-avg-weight">0</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Средний вес (кг)</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="refresh-time" id="acts-refresh-time">Обновлено только что</div>
+        </div>
     </div>
 
     <script>
@@ -647,6 +704,75 @@
             }
         }
 
+        // Получение списка актов взвешивания
+        async function getActsList() {
+            try {
+                const response = await fetch(`${API_BASE}/acts`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const items = data.items || [];
+                    const tbody = document.getElementById('acts-tbody');
+                    
+                    if (items.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="9" style="padding: 20px; text-align: center; color: var(--text-secondary);">Актов не найдено</td></tr>';
+                        return;
+                    }
+                    
+                    // Заполняем таблицу
+                    tbody.innerHTML = items.map((item, idx) => {
+                        const act = item.data;
+                        const startTime = new Date(act.started_at_iso || act.started_at * 1000).toLocaleString('ru-RU', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        });
+                        const duration = (act.duration || 0).toFixed(1);
+                        const weight = act.total_weight ? parseFloat(act.total_weight).toFixed(1) : '—';
+                        const avgWeight = act.avg_weight ? parseFloat(act.avg_weight).toFixed(1) : '—';
+                        
+                        return `
+                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); hover: background: rgba(255,255,255,0.05);">
+                                <td style="padding: 8px;">${idx + 1}</td>
+                                <td style="padding: 8px; text-align: center;">${startTime}</td>
+                                <td style="padding: 8px; text-align: right;">${duration}</td>
+                                <td style="padding: 8px; text-align: right; color: #f59e0b;">${act.left_count || 0}</td>
+                                <td style="padding: 8px; text-align: right; color: #f59e0b;">${act.right_count || 0}</td>
+                                <td style="padding: 8px; text-align: right; color: #10b981;">${act.peak_count || 0}</td>
+                                <td style="padding: 8px; text-align: right;">${act.seen_total || 0}</td>
+                                <td style="padding: 8px; text-align: right; color: #06b6d4;">${weight}</td>
+                                <td style="padding: 8px; text-align: right; color: #06b6d4;">${avgWeight}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                    
+                    // Получаем сводку
+                    getActsSummary();
+                }
+            } catch (error) {
+                console.error('Error getting acts list:', error);
+            }
+        }
+        
+        // Получение сводки актов
+        async function getActsSummary() {
+            try {
+                const response = await fetch(`${API_BASE}/acts/summary`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const summary = data.summary;
+                    document.getElementById('acts-total').textContent = summary.total_acts;
+                    document.getElementById('acts-pigs').textContent = summary.total_pigs;
+                    document.getElementById('acts-crossings').textContent = summary.total_crossings;
+                    document.getElementById('acts-total-weight').textContent = summary.total_weight_kg;
+                    document.getElementById('acts-avg-weight').textContent = summary.average_weight_kg;
+                }
+            } catch (error) {
+                console.error('Error getting acts summary:', error);
+            }
+        }
+
         // Обновление статуса
         function updateStatus(elementId, status, text) {
             const statusEl = document.getElementById(elementId);
@@ -664,10 +790,13 @@
                 getQueueTasks(),
                 getInferStatus(),
                 getRTSPDiagnostics(),
-                getCameras()
+                getCameras(),
+                getActsList() // Добавляем запрос для актов
             ]);
             
             document.getElementById('refresh-time').textContent = 
+                'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
+            document.getElementById('acts-refresh-time').textContent = 
                 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
         }
 
