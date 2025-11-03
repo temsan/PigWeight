@@ -3489,3 +3489,14 @@ async def websocket_processing_progress(ws: WebSocket, task_id: str = Query(...)
         except:
             pass
 
+@app.get("/metrics", response_class=HTMLResponse)
+async def read_metrics():
+    """Страница показателей без видео - только метрики в реальном времени"""
+    metrics_path = STATIC_DIR / "metrics.html"
+    try:
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except Exception as e:
+        logger.error(f"Error reading metrics.html: {e}")
+        return JSONResponse({"error": f"Cannot read metrics.html: {e}"}, status_code=500)
+

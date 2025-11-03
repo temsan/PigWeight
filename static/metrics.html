@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PigWeight - Показатели</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --liquid-glass-bg: rgba(255, 255, 255, 0.65);
+            --liquid-glass-border: rgba(255, 255, 255, 0.18);
+            --liquid-glass-shadow: rgba(31, 38, 135, 0.15);
+            --liquid-glass-blur: 10px;
+            --accent-color: #2c7be5;
+            --text-primary: #1f3d6b;
+            --text-secondary: #2f5078;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #06b6d4;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: var(--liquid-glass-bg);
+            backdrop-filter: blur(var(--liquid-glass-blur));
+            border: 1px solid var(--liquid-glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 8px 32px var(--liquid-glass-shadow);
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.5);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.ok { background: var(--success); }
+        .status-dot.warning { background: var(--warning); }
+        .status-dot.error { background: var(--danger); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--liquid-glass-bg);
+            backdrop-filter: blur(var(--liquid-glass-blur));
+            border: 1px solid var(--liquid-glass-border);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px var(--liquid-glass-shadow);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(31, 38, 135, 0.2);
+        }
+
+        .card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-value {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--accent-color);
+            margin-bottom: 8px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(31, 38, 135, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-color), #667eea);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .two-col {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .three-col {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        @media (max-width: 768px) {
+            .two-col, .three-col {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .stat-small {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--accent-color);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .queue-item {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .queue-status {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .queue-status.pending { background: var(--warning); }
+        .queue-status.processing { background: var(--info); animation: pulse 1s infinite; }
+        .queue-status.completed { background: var(--success); }
+        .queue-status.failed { background: var(--danger); }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        button {
+            flex: 1;
+            padding: 10px 16px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-size: 12px;
+        }
+
+        button:hover {
+            background: #2563eb;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+
+        .success-message {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+
+        .refresh-time {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-align: right;
+            margin-top: 12px;
+        }
+
+        .chart-container {
+            height: 200px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+            display: flex;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .chart-bar {
+            flex: 1;
+            background: linear-gradient(180deg, var(--accent-color), #667eea);
+            border-radius: 4px 4px 0 0;
+            min-height: 4px;
+            transition: height 0.3s;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(44, 123, 229, 0.3);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📊 PigWeight - Показатели</h1>
+            <p>Мониторинг системы обработки видео в реальном времени</p>
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-dot ok" id="server-status"></span>
+                    <span id="server-text">Сервер: Проверка...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-dot" id="rtsp-status"></span>
+                    <span id="rtsp-text">RTSP: Проверка...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-dot" id="infer-status"></span>
+                    <span id="infer-text">Инференс: Проверка...</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="message"></div>
+
+        <!-- Main Grid -->
+        <div class="grid three-col">
+            <!-- Очередь обработки -->
+            <div class="card">
+                <h3>📁 Очередь обработки</h3>
+                <div class="metric-value" id="queue-total">0</div>
+                <div class="metric-label">Всего задач</div>
+
+                <div class="stats-row">
+                    <div class="stat-small">
+                        <div class="stat-value" id="queue-pending">0</div>
+                        <div class="stat-label">Ожидание</div>
+                    </div>
+                    <div class="stat-small">
+                        <div class="stat-value" id="queue-processing">0</div>
+                        <div class="stat-label">Обработка</div>
+                    </div>
+                </div>
+
+                <div class="stats-row">
+                    <div class="stat-small">
+                        <div class="stat-value" id="queue-completed">0</div>
+                        <div class="stat-label">Завершено</div>
+                    </div>
+                    <div class="stat-small">
+                        <div class="stat-value" id="queue-failed">0</div>
+                        <div class="stat-label">Ошибок</div>
+                    </div>
+                </div>
+
+                <div class="progress-bar" style="margin-top: 12px;">
+                    <div class="progress-fill" id="success-rate-bar" style="width: 0%"></div>
+                </div>
+                <div class="metric-label" style="text-align: right; margin-top: 4px;">
+                    <span id="success-rate">0</span>% успешно
+                </div>
+            </div>
+
+            <!-- Обнаруженные акты -->
+            <div class="card">
+                <h3>🐷 Обнаруженные акты</h3>
+                <div class="metric-value" id="acts-count">0</div>
+                <div class="metric-label">Актов взвешивания</div>
+
+                <div class="stats-row">
+                    <div class="stat-small">
+                        <div class="stat-value" id="crossings-total">0</div>
+                        <div class="stat-label">Пересечений</div>
+                    </div>
+                    <div class="stat-small">
+                        <div class="stat-value" id="crossings-avg">0</div>
+                        <div class="stat-label">В среднем</div>
+                    </div>
+                </div>
+
+                <div class="progress-bar" style="margin-top: 12px;">
+                    <div class="progress-fill" id="processing-bar" style="width: 0%"></div>
+                </div>
+                <div class="metric-label" style="text-align: right; margin-top: 4px;">
+                    Прогресс текущей задачи
+                </div>
+            </div>
+
+            <!-- Производительность -->
+            <div class="card">
+                <h3>⚡ Производительность</h3>
+                <div class="metric-value" id="cpu-percent">0<span style="font-size: 20px;">%</span></div>
+                <div class="metric-label">Нагрузка CPU</div>
+
+                <div class="stats-row">
+                    <div class="stat-small">
+                        <div class="stat-value" id="memory-mb">0</div>
+                        <div class="stat-label">MB памяти</div>
+                    </div>
+                    <div class="stat-small">
+                        <div class="stat-value" id="threads">0</div>
+                        <div class="stat-label">Потоков</div>
+                    </div>
+                </div>
+
+                <div class="progress-bar" style="margin-top: 12px;">
+                    <div class="progress-fill" id="memory-bar" style="width: 0%"></div>
+                </div>
+                <div class="metric-label" style="text-align: right; margin-top: 4px;">
+                    <span id="memory-percent">0</span>% памяти
+                </div>
+            </div>
+
+            <!-- RTSP Диагностика -->
+            <div class="card">
+                <h3>📡 RTSP подключение</h3>
+                <div class="metric-value" id="rtsp-success-rate">0<span style="font-size: 20px;">%</span></div>
+                <div class="metric-label">Успешных подключений</div>
+
+                <div class="stats-row">
+                    <div class="stat-small">
+                        <div class="stat-value" id="rtsp-attempts">0</div>
+                        <div class="stat-label">Попыток</div>
+                    </div>
+                    <div class="stat-small">
+                        <div class="stat-value" id="rtsp-timeouts">0</div>
+                        <div class="stat-label">Таймаутов</div>
+                    </div>
+                </div>
+
+                <div id="rtsp-stages" style="margin-top: 12px; font-size: 11px; color: var(--text-secondary);">
+                    <!-- Стадии подключения -->
+                </div>
+            </div>
+
+            <!-- Последние события -->
+            <div class="card">
+                <h3>📋 Очередь задач</h3>
+                <div id="queue-list" style="max-height: 200px; overflow-y: auto; font-size: 11px;">
+                    <div class="metric-label" style="text-align: center; padding: 20px 0; color: var(--text-secondary);">
+                        Задач нет
+                    </div>
+                </div>
+                <div class="refresh-time" id="refresh-time">Обновлено только что</div>
+            </div>
+
+            <!-- Камеры -->
+            <div class="card">
+                <h3>📹 Доступные камеры</h3>
+                <div id="cameras-list" style="max-height: 200px; overflow-y: auto;">
+                    <div class="metric-label" style="text-align: center; padding: 20px 0; color: var(--text-secondary);">
+                        Загрузка камер...
+                    </div>
+                </div>
+                <button onclick="testCamera()" style="margin-top: 12px;">🔍 Тест камеры</button>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="card" style="grid-column: 1/-1;">
+            <h3>⚙️ Действия</h3>
+            <div class="actions">
+                <button onclick="refreshData()">🔄 Обновить сейчас</button>
+                <button onclick="openAPI()">📖 API Документация</button>
+                <button onclick="downloadMetrics()">💾 Скачать метрики</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const REFRESH_INTERVAL = 3000; // 3 секунды
+
+        // Форматирование времени
+        function formatTime(seconds) {
+            if (seconds < 60) return `${Math.round(seconds)}s`;
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.round(seconds % 60);
+            return `${minutes}m ${secs}s`;
+        }
+
+        // Форматирование даты
+        function formatDate(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleString('ru-RU', {
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // Получение статуса сервера
+        async function getHealthStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/../debug/health`);
+                const data = await response.json();
+                
+                updateStatus('server-status', 'ok', `Сервер: OK`);
+                
+                // Обновляем RTSP статус
+                const rtspDiag = data.rtsp_diagnostics;
+                const rtspStatus = rtspDiag.failed_connections === 0 ? 'ok' : 'warning';
+                updateStatus('rtsp-status', rtspStatus, 
+                    `RTSP: ${rtspDiag.successful_connections}/${rtspDiag.connection_attempts}`);
+                
+                // Обновляем инференс статус
+                updateStatus('infer-status', 'ok', `Инференс: OK`);
+                
+                return data;
+            } catch (error) {
+                console.error('Error getting health status:', error);
+                updateStatus('server-status', 'error', 'Сервер: Ошибка');
+                return null;
+            }
+        }
+
+        // Получение статистики очереди
+        async function getQueueStats() {
+            try {
+                const response = await fetch(`${API_BASE}/processing/queue/stats`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const stats = data.stats;
+                    document.getElementById('queue-total').textContent = stats.total_tasks;
+                    document.getElementById('queue-pending').textContent = stats.pending;
+                    document.getElementById('queue-processing').textContent = stats.processing;
+                    document.getElementById('queue-completed').textContent = stats.completed;
+                    document.getElementById('queue-failed').textContent = stats.failed;
+                    
+                    const rate = (stats.success_rate * 100).toFixed(1);
+                    document.getElementById('success-rate').textContent = rate;
+                    document.getElementById('success-rate-bar').style.width = rate + '%';
+                }
+            } catch (error) {
+                console.error('Error getting queue stats:', error);
+            }
+        }
+
+        // Получение списка задач
+        async function getQueueTasks() {
+            try {
+                const response = await fetch(`${API_BASE}/processing/queue/tasks`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const tasks = data.tasks.slice(0, 5); // Последние 5
+                    const listHtml = tasks.length === 0 
+                        ? '<div class="metric-label" style="text-align: center; padding: 12px; color: var(--text-secondary);">Нет задач</div>'
+                        : tasks.map(task => `
+                            <div class="queue-item">
+                                <span>
+                                    <span class="queue-status ${task.status}"></span>
+                                    ${task.video_path.split('/').pop()}
+                                </span>
+                                <span>${Math.round(task.progress)}%</span>
+                            </div>
+                        `).join('');
+                    
+                    document.getElementById('queue-list').innerHTML = listHtml;
+                }
+            } catch (error) {
+                console.error('Error getting queue tasks:', error);
+            }
+        }
+
+        // Получение статуса инференса
+        async function getInferStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/../debug/infer_status`);
+                const data = await response.json();
+                
+                document.getElementById('cpu-percent').textContent = 
+                    Math.round(data.process_info.cpu_percent);
+                document.getElementById('memory-mb').textContent = 
+                    Math.round(data.process_info.memory_mb);
+                document.getElementById('threads').textContent = 
+                    data.process_info.num_threads;
+                
+                const memPercent = data.system_info.memory_percent;
+                document.getElementById('memory-percent').textContent = 
+                    Math.round(memPercent);
+                document.getElementById('memory-bar').style.width = memPercent + '%';
+            } catch (error) {
+                console.error('Error getting infer status:', error);
+            }
+        }
+
+        // Получение RTSP диагностики
+        async function getRTSPDiagnostics() {
+            try {
+                const response = await fetch(`${API_BASE}/../debug/rtsp`);
+                const data = await response.json();
+                
+                const diag = data.diagnostics;
+                const summary = data.summary;
+                
+                document.getElementById('rtsp-attempts').textContent = diag.connection_attempts;
+                document.getElementById('rtsp-success-rate').textContent = 
+                    Math.round(summary.success_rate);
+                document.getElementById('rtsp-timeouts').textContent = diag.timeouts;
+                
+                // Стадии
+                const stagesHtml = Object.entries(diag.stages)
+                    .map(([name, stage]) => `
+                        <div style="margin: 6px 0; padding: 6px; background: rgba(0,0,0,0.1); border-radius: 4px;">
+                            <strong>${name}:</strong> ${stage.status} (${Math.round(stage.duration_ms)}ms)
+                            ${stage.error ? `<br><span style="color: var(--danger);">${stage.error}</span>` : ''}
+                        </div>
+                    `).join('');
+                
+                document.getElementById('rtsp-stages').innerHTML = stagesHtml || 
+                    '<div class="metric-label">Нет данных о стадиях</div>';
+            } catch (error) {
+                console.error('Error getting RTSP diagnostics:', error);
+            }
+        }
+
+        // Получение списка камер
+        async function getCameras() {
+            try {
+                const response = await fetch(`${API_BASE}/cameras`);
+                const cameras = await response.json();
+                
+                const camerasHtml = Object.entries(cameras)
+                    .map(([id, cam]) => `
+                        <div class="queue-item" onclick="testCamera('${id}')">
+                            <span>📹 ${cam.name}</span>
+                            <span style="font-size: 10px; cursor: pointer; color: var(--accent-color);">Тест →</span>
+                        </div>
+                    `).join('');
+                
+                document.getElementById('cameras-list').innerHTML = camerasHtml || 
+                    '<div class="metric-label" style="text-align: center; padding: 12px;">Камер не найдено</div>';
+            } catch (error) {
+                console.error('Error getting cameras:', error);
+            }
+        }
+
+        // Обновление статуса
+        function updateStatus(elementId, status, text) {
+            const statusEl = document.getElementById(elementId);
+            const textEl = document.getElementById(elementId.replace('-status', '-text'));
+            
+            statusEl.className = 'status-dot ' + status;
+            if (textEl) textEl.textContent = text;
+        }
+
+        // Обновление всех данных
+        async function refreshData() {
+            await Promise.all([
+                getHealthStatus(),
+                getQueueStats(),
+                getQueueTasks(),
+                getInferStatus(),
+                getRTSPDiagnostics(),
+                getCameras()
+            ]);
+            
+            document.getElementById('refresh-time').textContent = 
+                'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
+        }
+
+        // Тест камеры
+        async function testCamera(cameraId) {
+            if (!cameraId) {
+                alert('Выберите камеру');
+                return;
+            }
+            
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Тестирование...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/../debug/test_rtsp/${cameraId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    showMessage(`✅ Камера ${cameraId}: подключение успешно (${data.connection_time_sec.toFixed(2)}s)`, 'success');
+                } else {
+                    showMessage(`❌ Ошибка подключения: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showMessage(`❌ Ошибка: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔍 Тест камеры';
+            }
+        }
+
+        // Вывод сообщения
+        function showMessage(text, type) {
+            const msgDiv = document.getElementById('message');
+            const className = type === 'success' ? 'success-message' : 'error-message';
+            msgDiv.innerHTML = `<div class="${className}">${text}</div>`;
+            setTimeout(() => msgDiv.innerHTML = '', 4000);
+        }
+
+        // Открыть API документацию
+        function openAPI() {
+            window.open('/docs', '_blank');
+        }
+
+        // Скачать метрики
+        async function downloadMetrics() {
+            const response = await fetch(`${API_BASE}/processing/queue/stats`);
+            const data = await response.json();
+            
+            const text = JSON.stringify(data, null, 2);
+            const blob = new Blob([text], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `metrics-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshData();
+            setInterval(refreshData, REFRESH_INTERVAL);
+        });
+    </script>
+</body>
+</html>
