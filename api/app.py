@@ -3161,3 +3161,331 @@ async def api_record_details(act_name: str):
         logger.error(f"Ошибка получения деталей записи {act_name}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+# === DEBUG ENDPOINTS ===
+
+@app.get("/debug/health")
+async def debug_health():
+    """Эндпоинт для проверки здоровья сервера и статуса компонентов"""
+    try:
+        from api.av_worker import get_rtsp_diagnostics
+        
+        return JSONResponse({
+            "status": "ok",
+            "timestamp": datetime.now().isoformat(),
+            "server": {
+                "host": CONFIG.HOST,
+                "port": CONFIG.PORT,
+                "debug": CONFIG.DEBUG,
+                "reload": CONFIG.RELOAD
+            },
+            "components": {
+                "unified_processor": HAVE_UNIFIED_PROCESSOR,
+                "event_logger": HAVE_EVENT_LOGGER
+            },
+            "rtsp_diagnostics": get_rtsp_diagnostics(),
+            "performance": {
+                "device": os.getenv("DEVICE", "auto"),
+                "use_half": os.getenv("USE_HALF", "auto"),
+                "target_fps": os.getenv("TARGET_FPS", "not set")
+            }
+        })
+    except Exception as e:
+        logger.error(f"❌ Debug health check error: {e}")
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+@app.get("/debug/rtsp")
+async def debug_rtsp():
+    """Подробная диагностика RTSP подключения"""
+    try:
+        from api.av_worker import get_rtsp_diagnostics
+        
+        diag = get_rtsp_diagnostics()
+        
+        return JSONResponse({
+            "rtsp_status": "diagnostic",
+            "timestamp": datetime.now().isoformat(),
+            "diagnostics": diag,
+            "summary": {
+                "total_attempts": diag.get('connection_attempts', 0),
+                "successful": diag.get('successful_connections', 0),
+                "failed": diag.get('failed_connections', 0),
+                "timeout_count": diag.get('timeouts', 0),
+                "success_rate": (diag.get('successful_connections', 0) / max(1, diag.get('connection_attempts', 1))) * 100
+            },
+            "last_error": {
+                "error": diag.get('last_error'),
+                "timestamp": diag.get('last_error_time')
+            }
+        })
+    except Exception as e:
+        logger.error(f"❌ RTSP diagnostics error: {e}")
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+@app.get("/debug/infer_status")
+async def debug_infer_status():
+    """Статус инференса и обработки кадров"""
+    try:
+        import psutil
+        
+        # Получаем информацию о процессе
+        process = psutil.Process()
+        
+        return JSONResponse({
+            "inference_status": "running" if STREAM_MANAGER else "not_initialized",
+            "timestamp": datetime.now().isoformat(),
+            "process_info": {
+                "pid": process.pid,
+                "memory_mb": process.memory_info().rss / (1024 * 1024),
+                "cpu_percent": process.cpu_percent(interval=0.1),
+                "num_threads": process.num_threads()
+            },
+            "system_info": {
+                "cpu_percent": psutil.cpu_percent(interval=0.1),
+                "memory_percent": psutil.virtual_memory().percent,
+                "available_memory_gb": psutil.virtual_memory().available / (1024**3)
+            },
+            "stream_manager": {
+                "initialized": STREAM_MANAGER is not None,
+                "streams_count": len(STREAM_MANAGER.streams) if STREAM_MANAGER else 0
+            }
+        })
+    except Exception as e:
+        logger.error(f"❌ Infer status error: {e}")
+        return JSONResponse({
+            "inference_status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.post("/debug/test_rtsp/{camera_id}")
+async def debug_test_rtsp(camera_id: str):
+    """Тест подключения к RTSP камере"""
+    try:
+        from api.av_worker import get_rtsp_diagnostics
+        
+        # Получаем URL камеры
+        cameras = cameras_from_env()
+        if camera_id not in cameras:
+            return JSONResponse({
+                "status": "error",
+                "error": f"Camera {camera_id} not found",
+                "available_cameras": list(cameras.keys())
+            }, status_code=404)
+        
+        camera_url = cameras[camera_id]['url']
+        
+        logger.info(f"🔍 Testing RTSP connection to {camera_id}: {camera_url}")
+        
+        # Попытка подключиться с таймаутом
+        start_time = time.time()
+        try:
+            import av
+            container = av.open(camera_url, options={'rtsp_transport': 'tcp', 'timeout': '5000000'})
+            duration = time.time() - start_time
+            
+            logger.info(f"✅ RTSP connection successful for {camera_id} ({duration:.2f}s)")
+            container.close()
+            
+            return JSONResponse({
+                "status": "success",
+                "camera_id": camera_id,
+                "url": camera_url,
+                "connection_time_sec": duration,
+                "timestamp": datetime.now().isoformat()
+            })
+        except TimeoutError:
+            duration = time.time() - start_time
+            logger.error(f"⏱️ RTSP timeout for {camera_id} after {duration:.2f}s")
+            return JSONResponse({
+                "status": "timeout",
+                "camera_id": camera_id,
+                "url": camera_url,
+                "timeout_sec": duration,
+                "timestamp": datetime.now().isoformat()
+            }, status_code=504)
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"❌ RTSP connection failed for {camera_id}: {e}")
+            return JSONResponse({
+                "status": "error",
+                "camera_id": camera_id,
+                "url": camera_url,
+                "error": str(e),
+                "duration_sec": duration,
+                "timestamp": datetime.now().isoformat()
+            }, status_code=500)
+            
+    except Exception as e:
+        logger.error(f"❌ RTSP test error: {e}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+# === QUEUE MANAGEMENT ENDPOINTS ===
+
+@app.post("/api/processing/queue/add")
+async def queue_add_video(video_path: str = Body(...)):
+    """Добавляет видео в очередь обработки"""
+    try:
+        from api.background_worker import get_processing_queue
+        import uuid
+        
+        video_file = Path(video_path)
+        if not video_file.exists():
+            return JSONResponse({
+                "status": "error",
+                "error": f"Video file not found: {video_path}"
+            }, status_code=404)
+        
+        task_id = f"task_{uuid.uuid4().hex[:8]}"
+        queue = get_processing_queue()
+        task = await queue.add_task(task_id, str(video_file))
+        
+        return JSONResponse({
+            "status": "success",
+            "task_id": task_id,
+            "video_path": video_path,
+            "message": "Video added to processing queue"
+        })
+    except Exception as e:
+        logger.error(f"❌ Error adding to queue: {e}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.get("/api/processing/queue/tasks")
+async def queue_get_tasks(status: str = None):
+    """Получает список всех задач в очереди"""
+    try:
+        from api.background_worker import get_processing_queue
+        
+        queue = get_processing_queue()
+        tasks = queue.get_all_tasks()
+        
+        # Фильтруем по статусу если указан
+        if status:
+            tasks = [t for t in tasks if t.status == status]
+        
+        return JSONResponse({
+            "status": "success",
+            "tasks": [t.to_dict() for t in tasks],
+            "count": len(tasks)
+        })
+    except Exception as e:
+        logger.error(f"❌ Error getting tasks: {e}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.get("/api/processing/queue/task/{task_id}")
+async def queue_get_task(task_id: str):
+    """Получает информацию о конкретной задаче"""
+    try:
+        from api.background_worker import get_processing_queue
+        
+        queue = get_processing_queue()
+        task = queue.get_task(task_id)
+        
+        if task is None:
+            return JSONResponse({
+                "status": "error",
+                "error": f"Task not found: {task_id}"
+            }, status_code=404)
+        
+        return JSONResponse({
+            "status": "success",
+            "task": task.to_dict()
+        })
+    except Exception as e:
+        logger.error(f"❌ Error getting task: {e}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.get("/api/processing/queue/stats")
+async def queue_get_stats():
+    """Получает статистику очереди обработки"""
+    try:
+        from api.background_worker import get_processing_queue
+        
+        queue = get_processing_queue()
+        stats = queue.get_stats()
+        
+        return JSONResponse({
+            "status": "success",
+            "stats": stats
+        })
+    except Exception as e:
+        logger.error(f"❌ Error getting stats: {e}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.websocket("/ws/processing/progress")
+async def websocket_processing_progress(ws: WebSocket, task_id: str = Query(...)):
+    """WebSocket для получения обновлений прогресса обработки"""
+    try:
+        from api.background_worker import get_processing_queue
+        
+        await ws.accept()
+        queue = get_processing_queue()
+        
+        async def on_progress(task):
+            if task.task_id == task_id:
+                await ws.send_json({
+                    "event": "progress",
+                    "task": task.to_dict()
+                })
+        
+        async def on_complete(task):
+            if task.task_id == task_id:
+                await ws.send_json({
+                    "event": "complete",
+                    "task": task.to_dict()
+                })
+        
+        async def on_error(task):
+            if task.task_id == task_id:
+                await ws.send_json({
+                    "event": "error",
+                    "task": task.to_dict()
+                })
+        
+        queue.subscribe('on_task_progress', on_progress)
+        queue.subscribe('on_task_complete', on_complete)
+        queue.subscribe('on_task_error', on_error)
+        
+        # Отправляем текущий статус
+        task = queue.get_task(task_id)
+        if task:
+            await ws.send_json({
+                "event": "status",
+                "task": task.to_dict()
+            })
+        
+        # Ждём закрытия соединения
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            logger.info(f"Client disconnected from task {task_id}")
+            
+    except Exception as e:
+        logger.error(f"❌ WebSocket error: {e}")
+        try:
+            await ws.close(code=1000)
+        except:
+            pass
+

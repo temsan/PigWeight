@@ -5,6 +5,7 @@ import time
 import random
 import logging
 from functools import wraps
+from datetime import datetime
 
 # Retry configuration
 MAX_RETRIES = 3
@@ -31,6 +32,63 @@ try:
 except Exception:
     Image = None  # type: ignore
     BytesIO = None  # type: ignore
+
+
+class RTSPDiagnosticsCollector:
+    """Сборщик диагностических данных для RTSP подключений"""
+    
+    def __init__(self):
+        self.diagnostics = {
+            'connection_attempts': 0,
+            'successful_connections': 0,
+            'failed_connections': 0,
+            'timeouts': 0,
+            'avg_connection_time': 0.0,
+            'last_error': None,
+            'last_error_time': None,
+            'connection_history': [],
+            'stages': {}
+        }
+    
+    def log_stage(self, stage_name: str, status: str, duration: float = 0.0, error: str = None):
+        """Логирует стадию подключения"""
+        timestamp = datetime.now().isoformat()
+        self.diagnostics['stages'][stage_name] = {
+            'timestamp': timestamp,
+            'status': status,
+            'duration_ms': duration * 1000,
+            'error': error
+        }
+        
+        if status == 'failed':
+            self.diagnostics['failed_connections'] += 1
+            self.diagnostics['last_error'] = error
+            self.diagnostics['last_error_time'] = timestamp
+        elif status == 'success':
+            self.diagnostics['successful_connections'] += 1
+        
+        logger.info(f"📊 RTSP диагностика [{stage_name}]: {status} ({duration*1000:.1f}ms)" + 
+                   (f" - {error}" if error else ""))
+    
+    def log_attempt(self):
+        """Логирует попытку подключения"""
+        self.diagnostics['connection_attempts'] += 1
+    
+    def log_timeout(self):
+        """Логирует таймаут"""
+        self.diagnostics['timeouts'] += 1
+    
+    def get_diagnostics(self) -> Dict:
+        """Возвращает диагностические данные"""
+        return self.diagnostics.copy()
+
+
+_rtsp_diagnostics = RTSPDiagnosticsCollector()
+
+
+def get_rtsp_diagnostics() -> Dict:
+    """Возвращает текущую диагностику RTSP"""
+    return _rtsp_diagnostics.get_diagnostics()
 
 
 def retry_with_backoff(max_retries: int = MAX_RETRIES, base_delay: float = BASE_DELAY, 

@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
+import asyncio
+import json
 
 # Добавляем корневую папку в путь
 sys.path.insert(0, str(Path(__file__).parent))
