@@ -26,10 +26,16 @@ try:
     from rich.panel import Panel
     from rich.table import Table
     from rich.prompt import Prompt
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
     from rich.live import Live
     from rich.layout import Layout
+    from rich.syntax import Syntax
+    from rich.align import Align
+    from rich.columns import Columns
+    from rich.text import Text
     from rich import box
+    from rich.spinner import Spinner
+    from rich.status import Status
     HAVE_RICH = True
 except ImportError:
     HAVE_RICH = False
@@ -43,6 +49,109 @@ logger = logging.getLogger(__name__)
 
 # Глобальная консоль Rich
 console = Console() if HAVE_RICH else None
+
+
+class RichFormatter:
+    """Форматер для красивого вывода Rich"""
+    
+    @staticmethod
+    def print_header(title: str, subtitle: str = ""):
+        """Печатает красивый заголовок"""
+        if not HAVE_RICH:
+            print(f"\n{'='*80}\n{title}\n{'='*80}\n")
+            return
+        
+        content = f"[bold magenta]{title}[/bold magenta]"
+        if subtitle:
+            content += f"\n[dim]{subtitle}[/dim]"
+        
+        panel = Panel(
+            content,
+            border_style="magenta",
+            padding=(1, 2),
+            expand=False
+        )
+        console.print(panel)
+    
+    @staticmethod
+    def print_success(message: str):
+        """Печатает успешное сообщение"""
+        if not HAVE_RICH:
+            print(f"✓ {message}")
+            return
+        console.print(f"[green]✓[/green] [bold green]{message}[/bold green]")
+    
+    @staticmethod
+    def print_error(message: str):
+        """Печатает ошибку"""
+        if not HAVE_RICH:
+            print(f"✗ {message}")
+            return
+        console.print(f"[red]✗[/red] [bold red]{message}[/bold red]")
+    
+    @staticmethod
+    def print_warning(message: str):
+        """Печатает предупреждение"""
+        if not HAVE_RICH:
+            print(f"⚠ {message}")
+            return
+        console.print(f"[yellow]⚠[/yellow] [bold yellow]{message}[/bold yellow]")
+    
+    @staticmethod
+    def print_info(message: str):
+        """Печатает информацию"""
+        if not HAVE_RICH:
+            print(f"ℹ {message}")
+            return
+        console.print(f"[cyan]ℹ[/cyan] [bold cyan]{message}[/bold cyan]")
+    
+    @staticmethod
+    def print_table(title: str, columns: List[str], rows: List[List[str]], styles: List[str] = None):
+        """Печатает красивую таблицу"""
+        if not HAVE_RICH:
+            # Simple table without Rich
+            col_widths = [max(len(str(col)), max(len(str(row[i])) for row in rows)) for i, col in enumerate(columns)]
+            header = " | ".join(f"{col:<{width}}" for col, width in zip(columns, col_widths))
+            print(f"\n{title}")
+            print("=" * len(header))
+            print(header)
+            print("-" * len(header))
+            for row in rows:
+                print(" | ".join(f"{str(val):<{width}}" for val, width in zip(row, col_widths)))
+            return
+        
+        table = Table(title=title, box=box.ROUNDED, show_header=True, header_style="bold cyan")
+        
+        if styles is None:
+            styles = ["cyan"] * len(columns)
+        
+        for col, style in zip(columns, styles):
+            table.add_column(col, style=style)
+        
+        for row in rows:
+            table.add_row(*[str(val) for val in row])
+        
+        console.print(table)
+    
+    @staticmethod
+    def create_progress_bar(title: str = "Обработка"):
+        """Создает progress bar с красивым форматированием"""
+        if not HAVE_RICH:
+            return None
+        
+        return Progress(
+            SpinnerColumn(style="magenta"),
+            TextColumn("[bold cyan]{task.description}"),
+            BarColumn(complete_style="green", finished_style="bold green"),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            TextColumn("[dim]{task.fields[status]}"),
+            console=console,
+            transient=True,
+            redirect_stdout=False,
+            redirect_stderr=False
+        )
+
 
 class VideoSelector:
     """Класс для выбора видеофайлов и камер"""
