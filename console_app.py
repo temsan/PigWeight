@@ -349,7 +349,14 @@ class VideoSelector:
         """Интерактивный выбор источника (видео или камера) с красивым TUI и навигацией стрелками"""
         # Пытаемся использовать questionary для красивого меню со стрелками
         if HAVE_QUESTIONARY:
-            return self._select_source_questionary()
+            try:
+                return self._select_source_questionary()
+            except Exception as e:
+                logger.warning(f"Questionary ошибка, используем fallback: {e}")
+                if HAVE_RICH:
+                    return self._select_source_rich()
+                else:
+                    return self._select_source_simple()
         elif HAVE_RICH:
             return self._select_source_rich()
         else:
