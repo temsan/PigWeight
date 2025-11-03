@@ -40,6 +40,14 @@ try:
 except ImportError:
     HAVE_RICH = False
 
+# Questionary для интерактивных меню со стрелками
+try:
+    import questionary
+    HAVE_QUESTIONARY = True
+except ImportError:
+    HAVE_QUESTIONARY = False
+
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -338,10 +346,109 @@ class VideoSelector:
             }
     
     def select_source_interactive(self) -> Optional[dict]:
-        """Интерактивный выбор источника (видео или камера) с красивым TUI"""
-        if not HAVE_RICH:
+        """Интерактивный выбор источника (видео или камера) с красивым TUI и навигацией стрелками"""
+        # Пытаемся использовать questionary для красивого меню со стрелками
+        if HAVE_QUESTIONARY:
+            return self._select_source_questionary()
+        elif HAVE_RICH:
+            return self._select_source_rich()
+        else:
             return self._select_source_simple()
+    
+    def _select_source_questionary(self) -> Optional[dict]:
+        """Интерактивное меню со стрелками (questionary)"""
+        video_files = self.get_video_files()
         
+        sources = []
+        choices = []
+        
+        # Добавляем камеры
+        if self.cameras:
+            for cam_id, cam_info in self.cameras.items():
+                sources.append({
+                    'type': 'camera',
+                    'id': cam_id,
+                    'name': cam_info['name'],
+                    'url': cam_info['url']
+                })
+                choices.append(f"🎥 {cam_info['name']} (RTSP поток)")
+        
+        # Добавляем видеофайлы
+        for video_file in video_files:
+            info = self.get_file_info(video_file)
+            sources.append({
+                'type': 'file',
+                'path': video_file
+            })
+            choices.append(f"📁 {video_file.name} ({info['size']} • {info['duration']})")
+        
+        if not sources:
+            if HAVE_RICH:
+                console.print(Panel(
+                    "[red]❌ Нет доступных источников[/red]\n\n"
+                    f"Поместите видеофайлы в папку [cyan]{self.uploads_dir.absolute()}[/cyan]\n"
+                    "или настройте камеры в .env (CAM_CH101, CAM_CH102, ...)",
+                    title="Ошибка",
+                    border_style="red"
+                ))
+            else:
+                print(f"❌ Нет доступных источников")
+            return None
+        
+        # Красивый заголовок
+        if HAVE_RICH:
+            console.print()
+            console.print(Panel(
+                "[bold magenta]🐷 PigWeight - Выбор источника[/bold magenta]\n"
+                "[dim]Используйте стрелки ↑↓ для навигации, Enter для выбора[/dim]",
+                border_style="magenta"
+            ))
+        
+        # Интерактивное меню со стрелками
+        try:
+            answer = questionary.select(
+                "Выберите источник для обработки:",
+                choices=choices,
+                pointer="→ ",
+                use_shortcuts=True,
+                use_arrow_keys=True,
+                use_pointers=True
+            ).ask()
+            
+            if answer is None:
+                if HAVE_RICH:
+                    console.print("[yellow]Выход...[/yellow]")
+                else:
+                    print("Выход...")
+                return None
+            
+            # Находим индекс выбранного варианта
+            index = choices.index(answer)
+            source = sources[index]
+            
+            # Выводим подтверждение
+            if HAVE_RICH:
+                if source['type'] == 'camera':
+                    console.print(f"[green]✅ Выбрана камера:[/green] [bold]{source['name']}[/bold]")
+                else:
+                    console.print(f"[green]✅ Выбран файл:[/green] [bold]{source['path'].name}[/bold]")
+            else:
+                if source['type'] == 'camera':
+                    print(f"✅ Выбрана камера: {source['name']}")
+                else:
+                    print(f"✅ Выбран файл: {source['path'].name}")
+            
+            return source
+            
+        except (KeyboardInterrupt, EOFError):
+            if HAVE_RICH:
+                console.print("\n[yellow]Выход...[/yellow]")
+            else:
+                print("\nВыход...")
+            return None
+    
+    def _select_source_rich(self) -> Optional[dict]:
+        """Интерактивный выбор источника с Rich (fallback если нет questionary)"""
         video_files = self.get_video_files()
         
         # Создаем таблицу источников
