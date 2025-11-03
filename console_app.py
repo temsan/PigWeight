@@ -556,33 +556,23 @@ class PigTrackingApp:
             
             if HAVE_RICH:
                 console.print()
-                console.print(Panel(
-                    "[bold green]✅ Обработка завершена![/bold green]",
-                    border_style="green"
-                ))
-                
-                # Красивая таблица результатов
-                results_table = Table(title="📊 Результаты обработки", box=box.ROUNDED)
-                results_table.add_column("Показатель", style="cyan")
-                results_table.add_column("Значение", style="green", justify="right")
-                
-                results_table.add_row("Обработано кадров", str(summary['frames_processed']))
-                results_table.add_row("Актов взвешивания", str(summary['act_stats']['completed_acts_count']))
-                results_table.add_row("Всего проходов", str(summary['crossing_stats']['total_crossings']))
-                results_table.add_row("Проходы слева", str(summary['crossing_stats']['left_crossings']))
-                results_table.add_row("Проходы справа", str(summary['crossing_stats']['right_crossings']))
-                results_table.add_row("Пиковое количество", str(summary['act_stats']['peak_concurrent']))
-                
-                console.print(results_table)
+                RichFormatter.print_success("Обработка завершена!")
+                RichFormatter.print_summary_stats(summary)
             else:
                 print("\n✅ Обработка завершена!")
                 print("\n📊 Результаты:")
                 print(f"   • Обработано кадров: {summary['frames_processed']}")
                 print(f"   • Обнаружено актов взвешивания: {summary['act_stats']['completed_acts_count']}")
                 print(f"   • Общее количество проходов: {summary['crossing_stats']['total_crossings']}")
-                print(f"   • Проходы слева: {summary['crossing_stats']['left_in']}")
-                print(f"   • Проходы справа: {summary['crossing_stats']['right_in']}")
+                print(f"   • Проходы слева: {summary['crossing_stats']['left_crossings']}")
+                print(f"   • Проходы справа: {summary['crossing_stats']['right_crossings']}")
                 print(f"   • Пиковое количество одновременно: {summary['act_stats']['peak_concurrent']}")
+            
+            # Выводим детальные метрики актов если есть
+            if summary['act_stats']['completed_acts_count'] > 0:
+                acts_data = summary['act_stats'].get('completed_acts', [])
+                if acts_data and HAVE_RICH:
+                    RichFormatter.print_acts_metrics(acts_data)
             
             # Сохраняем результаты
             if summary['act_stats']['completed_acts_count'] > 0:
@@ -597,11 +587,17 @@ class PigTrackingApp:
                 with open(json_path, 'w', encoding='utf-8') as f:
                     json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
                 
-                print(f"\n💾 Результаты сохранены в JSON: {json_path}")
+                if HAVE_RICH:
+                    RichFormatter.print_success(f"Результаты сохранены в JSON: {json_path}")
+                else:
+                    print(f"\n💾 Результаты сохранены в JSON: {json_path}")
                 
                 # Сохранение в базу данных (если доступна)
                 if self.db:
-                    print("\n💾 Сохранение результатов в базу данных...")
+                    if HAVE_RICH:
+                        RichFormatter.print_info("Сохранение результатов в базу данных...")
+                    else:
+                        print("\n💾 Сохранение результатов в базу данных...")
                     
                     try:
                         saved_count = 0
@@ -624,31 +620,42 @@ class PigTrackingApp:
                                     video_file=video_path.name
                                 )
                                 
-                                # НЕ сохраняем детальные пересечения - только агрегированные данные акта
-                                # Детали есть в JSON файле, в БД только массовые прохождения
-                                
                                 # Сохраняем в базу
                                 act_id = self.db.save_weighing_act(db_act)
                                 saved_count += 1
-                                logger.info(f"✅ Акт #{act['act_id']} сохранен в БД с ID {act_id}")
+                                if HAVE_RICH:
+                                    RichFormatter.print_success(f"Акт #{act['act_id']} сохранен в БД (ID: {act_id})")
+                                else:
+                                    logger.info(f"✅ Акт #{act['act_id']} сохранен в БД с ID {act_id}")
                                 
                             except Exception as e:
-                                logger.error(f"❌ Ошибка сохранения акта #{act.get('act_id', '?')}: {e}")
+                                RichFormatter.print_error(f"Ошибка сохранения акта #{act.get('act_id', '?')}: {e}")
                                 continue
                         
                         if saved_count > 0:
-                            print(f"✅ Сохранено {saved_count} из {summary['act_stats']['completed_acts_count']} актов в базу данных")
+                            if HAVE_RICH:
+                                RichFormatter.print_success(f"Сохранено {saved_count} из {summary['act_stats']['completed_acts_count']} актов в БД")
+                            else:
+                                print(f"✅ Сохранено {saved_count} из {summary['act_stats']['completed_acts_count']} актов в базу данных")
                         else:
-                            print(f"⚠️ Не удалось сохранить акты в базу данных")
+                            if HAVE_RICH:
+                                RichFormatter.print_warning("Не удалось сохранить акты в БД")
+                            else:
+                                print(f"⚠️ Не удалось сохранить акты в базу данных")
                     
                     except Exception as e:
-                        logger.error(f"❌ Ошибка сохранения в БД: {e}", exc_info=True)
-                        print(f"⚠️ Ошибка сохранения в БД: {e}")
+                        RichFormatter.print_error(f"Ошибка сохранения в БД: {e}")
                         print("   Результаты сохранены только в JSON")
                 else:
-                    print("⚠️ База данных недоступна, результаты сохранены только в JSON")
+                    if HAVE_RICH:
+                        RichFormatter.print_warning("База данных недоступна, результаты сохранены только в JSON")
+                    else:
+                        print("⚠️ База данных недоступна, результаты сохранены только в JSON")
             else:
-                print("\n⚠️ Акты взвешивания не обнаружены")
+                if HAVE_RICH:
+                    RichFormatter.print_warning("Акты взвешивания не обнаружены")
+                else:
+                    print("\n⚠️ Акты взвешивания не обнаружены")
             
             return summary
             
