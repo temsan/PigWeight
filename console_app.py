@@ -1111,6 +1111,7 @@ def main():
         print("ВЫБОР РЕЖИМА РАБОТЫ")
         print("=" * 70)
     
+    # Всегда используем questionary если доступна
     if HAVE_QUESTIONARY:
         # Интерактивное меню со стрелками
         mode_choice = questionary.select(
@@ -1144,50 +1145,50 @@ def main():
         else:
             mode = "test"
     else:
-        # Fallback на простое меню
+        # Fallback без questionary - простой текстовый ввод
         if HAVE_RICH:
             table = Table(title="Доступные режимы", box=box.ROUNDED, show_header=False)
-            table.add_column("Номер", style="cyan")
             table.add_column("Режим", style="white")
-            table.add_row("1", "Обработка видео/камеры (по одному)")
-            table.add_row("2", "Фоновый мониторинг (непрерывный)")
-            table.add_row("3", "Тестовый режим (с Excel проверкой)")
-            table.add_row("4", "Справка")
-            table.add_row("5", "Выход")
+            table.add_row("Обработка видео/камеры (по одному)")
+            table.add_row("Фоновый мониторинг (непрерывный)")
+            table.add_row("Тестовый режим (с Excel проверкой)")
+            table.add_row("Справка и примеры")
+            table.add_row("Выход")
             console.print(table)
         else:
             print("\nДоступные режимы:")
-            print("1. Обработка видео/камеры (по одному)")
-            print("2. Фоновый мониторинг (непрерывный)")
-            print("3. Тестовый режим (с Excel проверкой)")
-            print("4. Справка")
-            print("5. Выход")
+            print("• Обработка видео/камеры (по одному)")
+            print("• Фоновый мониторинг (непрерывный)")
+            print("• Тестовый режим (с Excel проверкой)")
+            print("• Справка и примеры")
+            print("• Выход")
         
-        choice = input("\nВыберите режим (1-5): ").strip()
+        choice = input("\nВведите режим (пример: 'Фоновый мониторинг'): ").strip().lower()
         
-        if choice == "1":
-            mode = "process"
-        elif choice == "2":
-            mode = "monitor"
-        elif choice == "3":
-            mode = "test"
-        elif choice == "4":
-            import subprocess
-            subprocess.run([sys.executable, "console_app.py", "--help"])
-            return 0
-        elif choice == "5":
+        if "выход" in choice:
             if HAVE_RICH:
                 console.print("[yellow]До свидания![/yellow]")
             else:
                 print("\nДо свидания!")
             return 0
+        elif "справка" in choice:
+            import subprocess
+            subprocess.run([sys.executable, "console_app.py", "--help"])
+            return 0
+        elif "обработка" in choice or "одному" in choice:
+            mode = "process"
+        elif "фоновый" in choice or "мониторинг" in choice:
+            mode = "monitor"
+        elif "тестов" in choice:
+            mode = "test"
         else:
             if HAVE_RICH:
                 console.print("[red]Неверный выбор[/red]")
             else:
                 print("Неверный выбор")
             return 1
-    
+
+
     # После выбора режима - меню параметров
     console.print() if HAVE_RICH else print()
     if HAVE_RICH:
