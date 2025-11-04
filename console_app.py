@@ -905,6 +905,9 @@ class PigTrackingApp:
             if args.mode == 'test':
                 return await self.run_test_mode(args)
             
+            if args.mode == 'monitor':
+                return await self.run_monitor_mode(args)
+            
             # Обычный режим обработки
             source = None
             
@@ -927,8 +930,7 @@ class PigTrackingApp:
             elif source['type'] == 'camera':
                 logger.info(f"🎥 Обработка с камеры: {source['name']}")
                 logger.info(f"   URL: {source['url']}")
-                logger.info("⚠️ Обработка RTSP потоков пока не реализована в консольном режиме")
-                logger.info("   Используйте веб-интерфейс: http://localhost:8000")
+                logger.info("ℹ️ Используйте --mode monitor для фонового мониторинга камеры")
                 return False
             
             return True
@@ -940,10 +942,140 @@ class PigTrackingApp:
             logger.error(f"❌ Ошибка выполнения: {e}")
             return False
     
-    def run(self, args):
-        """Основной метод запуска приложения (синхронная обертка)"""
-        import asyncio
-        return asyncio.run(self.run_async(args))
+    async def run_monitor_mode(self, args):
+        """Режим фонового мониторинга видео или RTSP"""
+        RichFormatter.print_header("РЕЖИМ ФОНОВОГО МОНИТОРИНГА", "Непрерывное отслеживание и запись актов взвешивания")
+        
+        # Определяем источник
+        if args.rtsp:
+            source_type = 'rtsp'
+            source = args.rtsp
+            print(f"\n📹 Источник: RTSP камера")
+            print(f"   URL: {source[:60]}...")
+        elif args.video:
+            source_type = 'video'
+            source = args.video
+            video_path = Path(source)
+            if not video_path.exists():
+                RichFormatter.print_error(f"Видеофайл не найден: {source}")
+                return False
+            print(f"\n📹 Источник: Видеофайл")
+            print(f"   Путь: {video_path.name}")
+            if args.continuous:
+                print(f"   Режим: Непрерывный (повторная обработка)")
+        else:
+            # Интерактивный выбор
+            sel = self.video_selector
+            video_files = sel.get_video_files()
+            
+            if not video_files:
+                RichFormatter.print_error("Видеофайлы не найдены в папке uploads/")
+                return False
+            
+            print(f"\nДоступные видеофайлы:")
+            for i, vf in enumerate(video_files, 1):
+                info = sel.get_file_info(vf)
+                print(f"  {i}. {vf.name} ({info['size']} • {info['duration']})")
+            
+            choice = input(f"\nВыберите номер (1-{len(video_files)}): ").strip()
+            try:
+                idx = int(choice) - 1
+                if not (0 <= idx < len(video_files)):
+                    RichFormatter.print_error("Неверный выбор")
+                    return False
+                source = str(video_files[idx])
+                source_type = 'video'
+            except ValueError:
+                RichFormatter.print_error("Введите число")
+                return False
+        
+        # Параметры обработки
+        print(f"\n⚙️ Параметры детектирования:")
+        print(f"   Порог уверенности: {args.confidence}")
+        print(f"   Минимум свиней: {args.min_pigs}")
+        print(f"   Макс интервал: {args.max_interval}с")
+        
+        # Создаем выходную папку
+        output_dir = Path(args.output) if args.output else Path('records')
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"\n💾 Результаты будут сохранены в: {output_dir.absolute()}")
+        
+        print("\n" + "=" * 70)
+        print("ЗАПУСК МОНИТОРИНГА...")
+        print("=" * 70)
+        print("Нажмите Ctrl+C для остановки\n")
+        
+        try:
+            # Обработка видео
+            if source_type == 'video':
+                from pig_tracking.video_processor import IntegratedVideoProcessor
+                
+                processor = IntegratedVideoProcessor(
+                    stream_id=Path(source).stem,
+                    conf_threshold=args.confidence,
+                    img_size=640
+                )
+                
+                await processor.initialize()
+                
+                iteration = 0
+                while True:
+                    iteration += 1
+                    if args.continuous:
+                        print(f"\n--- Итерация {iteration} ---")
+                    
+                    summary = await processor.process_video_file(str(source))
+                    
+                    # Выводим результаты
+                    if summary.get('act_stats'):
+                        act_count = summary['act_stats']['completed_acts_count']
+                        total_pigs = summary['crossing_stats']['total_crossings']
+                        
+                        print(f"\n✓ Обработано кадров: {summary['frames_processed']}")
+                        print(f"✓ Актов обнаружено: {act_count}")
+                        print(f"✓ Всего пересечений: {total_pigs}")
+                        
+                        if summary['act_stats']['completed_acts']:
+                            print(f"\nДетали актов:")
+                            for act in summary['act_stats']['completed_acts']:
+                                print(f"  Акт {act['act_id']}: {act['left_count']}↙ + {act['right_count']}↗ = {act['seen_total']}шт")
+                        
+                        # Сохраняем результаты
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        
+                        summary_file = output_dir / f"{Path(source).stem}_{timestamp}_summary.json"
+                        with open(summary_file, 'w', encoding='utf-8') as f:
+                            json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
+                        
+                        RichFormatter.print_success(f"Результаты сохранены: {summary_file.name}")
+                    
+                    if not args.continuous:
+                        break
+                    
+                    print(f"\n⏳ Подождите 2 секунды перед повторной обработкой...")
+                    await asyncio.sleep(2)
+                
+                await processor.cleanup() if hasattr(processor, 'cleanup') else None
+                
+            elif source_type == 'rtsp':
+                print(f"⚠️  Обработка RTSP потоков требует WebRTC/HLS интеграции")
+                print(f"   Текущая реализация: только видеофайлы")
+                return False
+            
+            print("\n" + "=" * 70)
+            print("МОНИТОРИНГ ЗАВЕРШЕН")
+            print("=" * 70)
+            return True
+            
+        except KeyboardInterrupt:
+            print("\n\n⏹️ Мониторинг остановлен пользователем")
+            return True
+        except Exception as e:
+            RichFormatter.print_error(f"Ошибка мониторинга: {e}")
+            logger.error(f"Details: {e}", exc_info=True)
+            return False
+
 
 def main():
     """Главная функция"""
@@ -980,9 +1112,9 @@ def main():
     
     parser.add_argument(
         '--mode',
-        choices=['process', 'test'],
+        choices=['process', 'test', 'monitor'],
         default='process',
-        help='Режим работы (process - обычная обработка, test - тестовый режим с автоматической сверкой)'
+        help='Режим работы: process (обычная), test (с проверкой), monitor (фоновый мониторинг)'
     )
     
     parser.add_argument(
@@ -994,7 +1126,41 @@ def main():
     parser.add_argument(
         '--output',
         type=str,
-        help='Папка для сохранения результатов тестирования (по умолчанию: test_results)'
+        help='Папка для сохранения результатов (по умолчанию: records)'
+    )
+    
+    # Параметры фонового мониторинга
+    parser.add_argument(
+        '--rtsp',
+        type=str,
+        help='RTSP URL камеры для фонового мониторинга'
+    )
+    
+    parser.add_argument(
+        '--continuous',
+        action='store_true',
+        help='Непрерывный режим: повторная обработка видео'
+    )
+    
+    parser.add_argument(
+        '--confidence',
+        type=float,
+        default=0.5,
+        help='Порог уверенности для детектирования (0.0-1.0, по умолчанию: 0.5)'
+    )
+    
+    parser.add_argument(
+        '--min-pigs',
+        type=int,
+        default=3,
+        help='Минимум свиней для начала акта (по умолчанию: 3)'
+    )
+    
+    parser.add_argument(
+        '--max-interval',
+        type=float,
+        default=30.0,
+        help='Макс интервал между свиньями в секундах (по умолчанию: 30)'
     )
     
     parser.add_argument(
