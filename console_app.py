@@ -1102,9 +1102,14 @@ def main():
         console.print()
     
     # Главное меню с выбором режима работы
-    print("=" * 70)
-    print("ВЫБОР РЕЖИМА РАБОТЫ")
-    print("=" * 70)
+    if HAVE_RICH:
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+        console.print("[bold cyan]ВЫБОР РЕЖИМА РАБОТЫ[/bold cyan]")
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+    else:
+        print("=" * 70)
+        print("ВЫБОР РЕЖИМА РАБОТЫ")
+        print("=" * 70)
     
     if HAVE_QUESTIONARY:
         # Интерактивное меню со стрелками
@@ -1122,7 +1127,10 @@ def main():
         ).ask()
         
         if mode_choice is None or "Выход" in mode_choice:
-            print("\nДо свидания!")
+            if HAVE_RICH:
+                console.print("[yellow]До свидания![/yellow]")
+            else:
+                print("\nДо свидания!")
             return 0
         elif "Справка" in mode_choice:
             # Показать справку
@@ -1130,22 +1138,30 @@ def main():
             subprocess.run([sys.executable, "console_app.py", "--help"])
             return 0
         elif "Обработка видео" in mode_choice:
-            # Обработка одного видео
             mode = "process"
         elif "Фоновый" in mode_choice:
-            # Фоновый мониторинг
             mode = "monitor"
         else:
-            # Тестовый режим
             mode = "test"
     else:
         # Fallback на простое меню
-        print("\nДоступные режимы:")
-        print("1. Обработка видео/камеры (по одному)")
-        print("2. Фоновый мониторинг (непрерывный)")
-        print("3. Тестовый режим (с Excel проверкой)")
-        print("4. Справка")
-        print("5. Выход")
+        if HAVE_RICH:
+            table = Table(title="Доступные режимы", box=box.ROUNDED, show_header=False)
+            table.add_column("Номер", style="cyan")
+            table.add_column("Режим", style="white")
+            table.add_row("1", "Обработка видео/камеры (по одному)")
+            table.add_row("2", "Фоновый мониторинг (непрерывный)")
+            table.add_row("3", "Тестовый режим (с Excel проверкой)")
+            table.add_row("4", "Справка")
+            table.add_row("5", "Выход")
+            console.print(table)
+        else:
+            print("\nДоступные режимы:")
+            print("1. Обработка видео/камеры (по одному)")
+            print("2. Фоновый мониторинг (непрерывный)")
+            print("3. Тестовый режим (с Excel проверкой)")
+            print("4. Справка")
+            print("5. Выход")
         
         choice = input("\nВыберите режим (1-5): ").strip()
         
@@ -1160,39 +1176,60 @@ def main():
             subprocess.run([sys.executable, "console_app.py", "--help"])
             return 0
         elif choice == "5":
-            print("\nДо свидания!")
+            if HAVE_RICH:
+                console.print("[yellow]До свидания![/yellow]")
+            else:
+                print("\nДо свидания!")
             return 0
         else:
-            print("Неверный выбор")
+            if HAVE_RICH:
+                console.print("[red]Неверный выбор[/red]")
+            else:
+                print("Неверный выбор")
             return 1
     
     # После выбора режима - меню параметров
-    print("\n" + "=" * 70)
-    print("НАСТРОЙКА ПАРАМЕТРОВ")
-    print("=" * 70)
+    console.print() if HAVE_RICH else print()
+    if HAVE_RICH:
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+        console.print("[bold cyan]НАСТРОЙКА ПАРАМЕТРОВ[/bold cyan]")
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+    else:
+        print("=" * 70)
+        print("НАСТРОЙКА ПАРАМЕТРОВ")
+        print("=" * 70)
     
     # Выбор источника
-    print("\nВыбор источника видео/камеры:")
+    if HAVE_RICH:
+        console.print("\n[bold white]Выбор источника видео/камеры:[/bold white]")
+    else:
+        print("\nВыбор источника видео/камеры:")
     
     app = PigTrackingApp()
     source = app.video_selector.select_source_interactive()
     
     if not source:
-        print("\nИсточник не выбран")
+        if HAVE_RICH:
+            console.print("\n[red]Источник не выбран[/red]")
+        else:
+            print("\nИсточник не выбран")
         return 0
     
     # Для режима monitor - дополнительные параметры
     if mode == "monitor":
-        print("\nПараметры детектирования:")
+        if HAVE_RICH:
+            console.print("\n[bold white]Параметры детектирования:[/bold white]")
+        else:
+            print("\nПараметры детектирования:")
         
         if HAVE_QUESTIONARY:
             # Интерактивный выбор параметров
-            confidence = questionary.confirm(
+            use_default = questionary.confirm(
                 "Использовать стандартные параметры? (уверенность 0.5, мин.свиней 3, интервал 30сек)",
                 default=True
             ).ask()
             
-            if not confidence:
+            if not use_default:
                 try:
                     conf_str = input("Порог уверенности (0.0-1.0, default 0.5): ").strip()
                     confidence_val = float(conf_str) if conf_str else 0.5
@@ -1220,9 +1257,19 @@ def main():
             min_pigs = 3
             max_interval = 30.0
         
-        print(f"\n  Уверенность: {confidence_val}")
-        print(f"  Минимум свиней: {min_pigs}")
-        print(f"  Интервал: {max_interval}с")
+        # Вывод параметров
+        if HAVE_RICH:
+            params_table = Table(box=box.ROUNDED, show_header=False)
+            params_table.add_column("Параметр", style="cyan")
+            params_table.add_column("Значение", style="green")
+            params_table.add_row("Уверенность", f"{confidence_val}")
+            params_table.add_row("Минимум свиней", f"{min_pigs}")
+            params_table.add_row("Интервал", f"{max_interval}с")
+            console.print(params_table)
+        else:
+            print(f"\n  Уверенность: {confidence_val}")
+            print(f"  Минимум свиней: {min_pigs}")
+            print(f"  Интервал: {max_interval}с")
         
         continuous = questionary.confirm(
             "Непрерывный режим (повторная обработка видео)?",
@@ -1256,9 +1303,17 @@ def main():
         args.rtsp = source['url']
     
     # Запуск приложения
-    print("\n" + "=" * 70)
-    print("ЗАПУСК ПРИЛОЖЕНИЯ")
-    print("=" * 70 + "\n")
+    console.print() if HAVE_RICH else print()
+    if HAVE_RICH:
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+        console.print("[bold cyan]ЗАПУСК ПРИЛОЖЕНИЯ[/bold cyan]")
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+    else:
+        print("=" * 70)
+        print("ЗАПУСК ПРИЛОЖЕНИЯ")
+        print("=" * 70)
+    
+    console.print() if HAVE_RICH else print()
     
     app = PigTrackingApp()
     success = app.run(args)
