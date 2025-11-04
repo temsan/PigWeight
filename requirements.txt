@@ -22,12 +22,12 @@ pandas>=2.0.0
 rich>=13.0.0
 questionary>=2.0.0
 
-# ===== OPTIONAL FEATURES =====
-# Раскомментировать при необходимости:
+# ===== WebRTC & STREAMING =====
+aiortc>=1.9.0
+av>=10.0.0
+cryptography>=44.0.0
 
-# WebRTC streaming (для real-time видео)
-# aiortc>=1.9.0
-# cryptography>=44.0.0
+# ===== OPTIONAL FEATURES =====
 
 # Real-time updates (для WebSocket)
 # python-socketio>=5.0.0

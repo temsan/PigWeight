@@ -16,13 +16,30 @@ try:
     _HAVE_AIORTC = True
 except ImportError:
     _HAVE_AIORTC = False
+    # Stub классы для предотвращения ошибок
+    class RTCPeerConnection:
+        pass
+    class RTCSessionDescription:
+        pass
+    class VideoStreamTrack:
+        pass
+    class RTCIceCandidate:
+        pass
 
 router = APIRouter()
 
-_PEER_CONNECTIONS: Dict[str, RTCPeerConnection] = {}
+# Используем Dict[str, Any] если aiortc недоступна
+_PEER_CONNECTIONS: Dict[str, Any] = {}
 
 def init_webrtc(app: FastAPI, stream_manager: Any, frame_broker: Any, config: Any):
     logger = logging.getLogger(__name__)
+    
+    # Если aiortc недоступна, просто выполняем graceful shutdown
+    if not _HAVE_AIORTC:
+        logger.warning("⚠️  aiortc не установлена, WebRTC функционал отключен")
+        logger.warning("   Установите: pip install aiortc av")
+        return
+    
     perf_logger = logging.getLogger("perf.webrtc")
 
     class BrokerVideoTrack(VideoStreamTrack):
