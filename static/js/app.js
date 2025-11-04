@@ -44,12 +44,65 @@ class PigWeightApp {
             // Связываем компоненты
             this.setupComponentInteractions();
             
+            // Автозапуск первой доступной камеры
+            await this.autoStartCamera();
+            
             this.initialized = true;
             console.log('✅ PigWeight App инициализирован');
             
         } catch (error) {
             console.error('❌ Ошибка инициализации PigWeight App:', error);
             throw error;
+        }
+    }
+    
+    async autoStartCamera() {
+        try {
+            console.log('📹 Попытка автозапуска камеры...');
+            
+            // Проверяем переменные окружения
+            const autoCamera = new URLSearchParams(window.location.search).get('auto_camera');
+            const autoVideo = new URLSearchParams(window.location.search).get('auto_video');
+            
+            // Если параметр явно указан в URL
+            if (autoCamera) {
+                console.log(`🎬 Запуск камеры: ${autoCamera}`);
+                this.ui.emit('video_control', 'start_stream', { stream_id: autoCamera });
+                return;
+            }
+            
+            if (autoVideo) {
+                console.log(`🎬 Запуск видеофайла: ${autoVideo}`);
+                this.ui.emit('video_control', 'start_file', { file_path: autoVideo });
+                return;
+            }
+            
+            // Иначе пробуем найти первую доступную камеру
+            try {
+                const response = await fetch('/api/cameras');
+                if (!response.ok) throw new Error('Не удалось получить список камер');
+                
+                const cameras = await response.json();
+                if (cameras && Object.keys(cameras).length > 0) {
+                    const firstCameraId = Object.keys(cameras)[0];
+                    console.log(`📹 Найдена камера: ${firstCameraId}`);
+                    console.log(`🎬 Автозапуск камеры: ${firstCameraId}`);
+                    
+                    // Небольшая задержка для инициализации UI
+                    await new Promise(r => setTimeout(r, 500));
+                    this.ui.emit('video_control', 'start_stream', { stream_id: firstCameraId });
+                    return;
+                }
+            } catch (err) {
+                console.warn('⚠️ Не удалось получить камеры для автозапуска:', err);
+            }
+            
+            // Если камер нет, просто выводим сообщение
+            console.log('ℹ️ Камеры не найдены - необходимо выбрать источник вручную');
+            
+        } catch (error) {
+            console.warn('⚠️ Ошибка автозапуска камеры:', error);
+            // Не кидаем ошибку - приложение продолжает работать
         }
     }
     
