@@ -60,6 +60,15 @@ class PigWeightApp {
         try {
             console.log('📹 Попытка автозапуска камеры...');
             
+            // Даем время для инициализации UI и загрузки камер из API
+            await new Promise(r => setTimeout(r, 1000));
+            
+            // Переинициализируем список камер (в случае если они загружены позже)
+            if (window.populateStreams) {
+                console.log('🔄 Обновление списка камер...');
+                await window.populateStreams();
+            }
+            
             // Проверяем переменные окружения
             const autoCamera = new URLSearchParams(window.location.search).get('auto_camera');
             const autoVideo = new URLSearchParams(window.location.search).get('auto_video');
