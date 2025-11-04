@@ -1067,9 +1067,17 @@ class PigTrackingApp:
                 rtsp_url = source  # source это RTSP URL
                 
                 if HAVE_RICH:
-                    console.print(f"[cyan]📹 Подключаюсь к потоку:[/cyan] [bold]{rtsp_url}[/bold]")
+                    console.print()
+                    console.print(Panel(
+                        f"[cyan]📹 Подключаюсь к потоку...[/cyan]\n"
+                        f"[dim]{rtsp_url}[/dim]\n"
+                        f"[yellow]⏳ Это может занять несколько секунд[/yellow]",
+                        border_style="cyan",
+                        title="RTSP Подключение"
+                    ))
                 else:
-                    print(f"📹 Подключаюсь к потоку: {rtsp_url}")
+                    print(f"\n📹 Подключаюсь к потоку: {rtsp_url}")
+                    print(f"⏳ Это может занять несколько секунд...\n")
                 
                 processor = IntegratedVideoProcessor(
                     stream_id="rtsp_stream",
@@ -1085,37 +1093,55 @@ class PigTrackingApp:
                     if args.continuous:
                         print(f"\n--- Итерация потока {iteration} ---")
                     
-                    # process_video_file работает с RTSP URL так же как с файлами
-                    summary = await processor.process_video_file(rtsp_url)
+                    try:
+                        # process_video_file работает с RTSP URL с retry логикой
+                        summary = await processor.process_video_file(rtsp_url)
+                        
+                        # Выводим результаты
+                        if summary.get('act_stats'):
+                            act_count = summary['act_stats']['completed_acts_count']
+                            total_pigs = summary['crossing_stats']['total_crossings']
+                            
+                            if HAVE_RICH:
+                                console.print(f"[green]✓[/green] Обработано кадров: [bold]{summary['frames_processed']}[/bold]")
+                                console.print(f"[green]✓[/green] Актов обнаружено: [bold]{act_count}[/bold]")
+                                console.print(f"[green]✓[/green] Всего пересечений: [bold]{total_pigs}[/bold]")
+                            else:
+                                print(f"\n✓ Обработано кадров: {summary['frames_processed']}")
+                                print(f"✓ Актов обнаружено: {act_count}")
+                                print(f"✓ Всего пересечений: {total_pigs}")
+                            
+                            if summary['act_stats']['completed_acts']:
+                                print(f"\nДетали актов:")
+                                for act in summary['act_stats']['completed_acts']:
+                                    print(f"  Акт {act['act_id']}: {act['left_count']}↙ + {act['right_count']}↗ = {act['seen_total']}шт")
+                            
+                            # Сохраняем результаты
+                            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                            
+                            summary_file = output_dir / f"rtsp_stream_{timestamp}_summary.json"
+                            with open(summary_file, 'w', encoding='utf-8') as f:
+                                json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
+                            
+                            RichFormatter.print_success(f"Результаты сохранены: {summary_file.name}")
+                        
+                        if not args.continuous:
+                            break
+                        
+                        print(f"\n⏳ Подождите 5 секунд перед повторной обработкой потока...")
+                        await asyncio.sleep(5)
                     
-                    # Выводим результаты
-                    if summary.get('act_stats'):
-                        act_count = summary['act_stats']['completed_acts_count']
-                        total_pigs = summary['crossing_stats']['total_crossings']
+                    except RuntimeError as e:
+                        if HAVE_RICH:
+                            console.print(f"[red]✗ Ошибка подключения:[/red] {e}")
+                        else:
+                            print(f"\n✗ Ошибка подключения: {e}")
                         
-                        print(f"\n✓ Обработано кадров: {summary['frames_processed']}")
-                        print(f"✓ Актов обнаружено: {act_count}")
-                        print(f"✓ Всего пересечений: {total_pigs}")
-                        
-                        if summary['act_stats']['completed_acts']:
-                            print(f"\nДетали актов:")
-                            for act in summary['act_stats']['completed_acts']:
-                                print(f"  Акт {act['act_id']}: {act['left_count']}↙ + {act['right_count']}↗ = {act['seen_total']}шт")
-                        
-                        # Сохраняем результаты
-                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        
-                        summary_file = output_dir / f"rtsp_stream_{timestamp}_summary.json"
-                        with open(summary_file, 'w', encoding='utf-8') as f:
-                            json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
-                        
-                        RichFormatter.print_success(f"Результаты сохранены: {summary_file.name}")
-                    
-                    if not args.continuous:
-                        break
-                    
-                    print(f"\n⏳ Подождите 5 секунд перед повторной обработкой потока...")
-                    await asyncio.sleep(5)
+                        if args.continuous:
+                            print(f"⏳ Повтор через 10 секунд...")
+                            await asyncio.sleep(10)
+                        else:
+                            raise
                 
                 await processor.cleanup() if hasattr(processor, 'cleanup') else None
 

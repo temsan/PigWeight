@@ -228,10 +228,45 @@ class IntegratedVideoProcessor:
         else:
             logger.info(f"Начало обработки RTSP потока: {video_path}")
         
-        # Открываем видео или RTSP поток
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            raise RuntimeError(f"Не удалось открыть видео/поток: {video_path}")
+        # Открываем видео или RTSP поток с retry логикой
+        cap = None
+        max_retries = 3
+        retry_delay = 2  # секунды
+        
+        for attempt in range(max_retries):
+            try:
+                cap = cv2.VideoCapture(str(video_path))
+                
+                # Для RTSP устанавливаем параметры подключения
+                if is_rtsp:
+                    # Увеличиваем таймауты для RTSP
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Минимальный буфер
+                    cap.set(cv2.CAP_PROP_FPS, 25)  # Ожидаемый FPS
+                
+                # Пробуем прочитать первый кадр
+                ret, frame = cap.read()
+                if ret:
+                    logger.info(f"✓ Подключение успешно (попытка {attempt + 1}/{max_retries})")
+                    break
+                else:
+                    cap.release()
+                    cap = None
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ Попытка подключения {attempt + 1} неудачна, пересоединяюсь...")
+                        await asyncio.sleep(retry_delay)
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка подключения (попытка {attempt + 1}/{max_retries}): {e}")
+                if cap:
+                    cap.release()
+                    cap = None
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+        
+        if cap is None or not cap.isOpened():
+            error_msg = f"Не удалось подключиться к потоку после {max_retries} попыток: {video_path}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
         
         # Получаем метаданные
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
