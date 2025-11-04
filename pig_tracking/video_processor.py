@@ -208,25 +208,30 @@ class IntegratedVideoProcessor:
         progress_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
         """
-        Обрабатывает видеофайл целиком.
+        Обрабатывает видеофайл целиком или RTSP поток.
         
         Args:
-            video_path: путь к видеофайлу
+            video_path: путь к видеофайлу или RTSP URL
             progress_callback: функция для отчета о прогрессе (frame_num, total_frames)
             
         Returns:
             Итоговая статистика обработки
         """
-        video_path = Path(video_path)
-        if not video_path.exists():
-            raise FileNotFoundError(f"Видеофайл не найден: {video_path}")
+        # Проверяем если это RTSP URL
+        is_rtsp = isinstance(video_path, str) and video_path.startswith("rtsp://")
         
-        logger.info(f"Начало обработки видео: {video_path}")
+        if not is_rtsp:
+            video_path = Path(video_path)
+            if not video_path.exists():
+                raise FileNotFoundError(f"Видеофайл не найден: {video_path}")
+            logger.info(f"Начало обработки видео: {video_path}")
+        else:
+            logger.info(f"Начало обработки RTSP потока: {video_path}")
         
-        # Открываем видео
+        # Открываем видео или RTSP поток
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
-            raise RuntimeError(f"Не удалось открыть видео: {video_path}")
+            raise RuntimeError(f"Не удалось открыть видео/поток: {video_path}")
         
         # Получаем метаданные
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
