@@ -15,6 +15,8 @@ load_dotenv()  # Загружаем .env если существует
 parser = argparse.ArgumentParser(description='PigWeight - Video Processing Server')
 parser.add_argument('--runtime', choices=['auto', 'pytorch', 'onnx-gpu', 'onnx-cpu', 'cpu'], default='auto', help='Выбор рантайма (по умолчанию: auto)')
 parser.add_argument('--install', action='store_true', help='Установить все зависимости')
+parser.add_argument('--auto-start-camera', type=str, help='Автозапуск камеры по ID (например: cam101) при старте')
+parser.add_argument('--auto-start-video', type=str, help='Автозапуск видеофайла при старте')
 args, unknown = parser.parse_known_args()
 
 # Автоматический выбор оптимального рантайма и профиля
@@ -172,6 +174,15 @@ def main():
         else:
             # В production показываем только основную информацию
             print(f'🚀 PigWeight сервер запущен на http://{CONFIG.HOST}:{CONFIG.PORT}')
+
+        # Передаем параметры автозапуска в приложение
+        if args.auto_start_camera:
+            os.environ['AUTO_START_CAMERA'] = args.auto_start_camera
+            print(f'📹 Автозапуск камеры: {args.auto_start_camera}')
+        
+        if args.auto_start_video:
+            os.environ['AUTO_START_VIDEO'] = args.auto_start_video
+            print(f'🎬 Автозапуск видео: {args.auto_start_video}')
 
         try:
             import uvicorn
