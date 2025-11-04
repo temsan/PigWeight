@@ -13,6 +13,10 @@ from typing import List, Optional
 import asyncio
 import json
 
+# Загружаем переменные окружения из .env файла
+from dotenv import load_dotenv
+load_dotenv()  # Загружаем .env если существует
+
 # Добавляем корневую папку в путь
 sys.path.insert(0, str(Path(__file__).parent))
 

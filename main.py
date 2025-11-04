@@ -6,6 +6,10 @@ import logging
 import argparse
 from pathlib import Path
 
+# Загружаем переменные окружения из .env файла
+from dotenv import load_dotenv
+load_dotenv()  # Загружаем .env если существует
+
 # --- Argument Parsing ---
 # This needs to be done before config is imported and instantiated
 parser = argparse.ArgumentParser(description='PigWeight - Video Processing Server')
