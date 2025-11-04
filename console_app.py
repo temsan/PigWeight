@@ -1062,14 +1062,63 @@ class PigTrackingApp:
                 await processor.cleanup() if hasattr(processor, 'cleanup') else None
                 
             elif source_type == 'rtsp':
+                from pig_tracking.video_processor import IntegratedVideoProcessor
+                
+                rtsp_url = source  # source это RTSP URL
+                
                 if HAVE_RICH:
-                    console.print("[yellow]ℹ️  RTSP потоки[/yellow]")
-                    console.print("[dim]Поддержка RTSP будет добавлена в будущих версиях[/dim]")
+                    console.print(f"[cyan]📹 Подключаюсь к потоку:[/cyan] [bold]{rtsp_url}[/bold]")
                 else:
-                    print(f"ℹ️  RTSP потоки")
-                    print(f"   Поддержка RTSP будет добавлена в будущих версиях")
-                return True
-            
+                    print(f"📹 Подключаюсь к потоку: {rtsp_url}")
+                
+                processor = IntegratedVideoProcessor(
+                    stream_id="rtsp_stream",
+                    conf_threshold=args.confidence,
+                    img_size=640
+                )
+                
+                await processor.initialize()
+                
+                iteration = 0
+                while True:
+                    iteration += 1
+                    if args.continuous:
+                        print(f"\n--- Итерация потока {iteration} ---")
+                    
+                    # process_video_file работает с RTSP URL так же как с файлами
+                    summary = await processor.process_video_file(rtsp_url)
+                    
+                    # Выводим результаты
+                    if summary.get('act_stats'):
+                        act_count = summary['act_stats']['completed_acts_count']
+                        total_pigs = summary['crossing_stats']['total_crossings']
+                        
+                        print(f"\n✓ Обработано кадров: {summary['frames_processed']}")
+                        print(f"✓ Актов обнаружено: {act_count}")
+                        print(f"✓ Всего пересечений: {total_pigs}")
+                        
+                        if summary['act_stats']['completed_acts']:
+                            print(f"\nДетали актов:")
+                            for act in summary['act_stats']['completed_acts']:
+                                print(f"  Акт {act['act_id']}: {act['left_count']}↙ + {act['right_count']}↗ = {act['seen_total']}шт")
+                        
+                        # Сохраняем результаты
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        
+                        summary_file = output_dir / f"rtsp_stream_{timestamp}_summary.json"
+                        with open(summary_file, 'w', encoding='utf-8') as f:
+                            json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
+                        
+                        RichFormatter.print_success(f"Результаты сохранены: {summary_file.name}")
+                    
+                    if not args.continuous:
+                        break
+                    
+                    print(f"\n⏳ Подождите 5 секунд перед повторной обработкой потока...")
+                    await asyncio.sleep(5)
+                
+                await processor.cleanup() if hasattr(processor, 'cleanup') else None
+
             print("\n" + "=" * 70)
             print("МОНИТОРИНГ ЗАВЕРШЕН")
             print("=" * 70)
