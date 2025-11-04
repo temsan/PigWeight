@@ -346,18 +346,9 @@ class VideoSelector:
             }
     
     def select_source_interactive(self) -> Optional[dict]:
-        """Интерактивный выбор источника (видео или камера) с красивым TUI и навигацией стрелками"""
-        # Пытаемся использовать questionary для красивого меню со стрелками
-        if HAVE_QUESTIONARY:
-            try:
-                return self._select_source_questionary()
-            except Exception as e:
-                logger.warning(f"Questionary ошибка, используем fallback: {e}")
-                if HAVE_RICH:
-                    return self._select_source_rich()
-                else:
-                    return self._select_source_simple()
-        elif HAVE_RICH:
+        """Интерактивный выбор источника (видео или камера) с красивым TUI"""
+        # Всегда используем Rich вместо questionary для Windows совместимости
+        if HAVE_RICH:
             return self._select_source_rich()
         else:
             return self._select_source_simple()
@@ -1116,43 +1107,64 @@ def main():
         print("ВЫБОР РЕЖИМА РАБОТЫ")
         print("=" * 70)
     
-    # Используем questionary для меню - это лучший способ
-    if not HAVE_QUESTIONARY:
-        print("⚠️ Требуется установка questionary для интерактивного меню")
-        print("pip install questionary")
-        return 1
-    
-    # Интерактивное меню со стрелками - только этот способ
-    mode_choice = questionary.select(
-        "Выберите режим работы:",
-        choices=[
-            "Обработка видео/камеры (по одному)",
-            "Фоновый мониторинг (непрерывный)",
-            "Тестовый режим (с Excel проверкой)",
-            "Справка и примеры",
-            "Выход"
-        ],
-        pointer="→ ",
-        use_arrow_keys=True
-    ).ask()
-    
-    if mode_choice is None or "Выход" in mode_choice:
-        if HAVE_RICH:
-            console.print("[yellow]До свидания![/yellow]")
-        else:
-            print("\nДо свидания!")
-        return 0
-    elif "Справка" in mode_choice:
-        # Показать справку
-        import subprocess
-        subprocess.run([sys.executable, "console_app.py", "--help"])
-        return 0
-    elif "Обработка видео" in mode_choice:
-        mode = "process"
-    elif "Фоновый" in mode_choice:
-        mode = "monitor"
+    # Простое меню на Rich - совместимо с Windows
+    if HAVE_RICH:
+        table = Table(box=box.ROUNDED, show_header=False, padding=(0, 2))
+        table.add_column("№", style="cyan", width=3)
+        table.add_column("Режим", style="white")
+        table.add_row("1", "Обработка видео/камеры (по одному)")
+        table.add_row("2", "Фоновый мониторинг (непрерывный)")
+        table.add_row("3", "Тестовый режим (с Excel проверкой)")
+        table.add_row("4", "Справка и примеры")
+        table.add_row("5", "Выход")
+        console.print(table)
     else:
-        mode = "test"
+        print("\n1. Обработка видео/камеры (по одному)")
+        print("2. Фоновый мониторинг (непрерывный)")
+        print("3. Тестовый режим (с Excel проверкой)")
+        print("4. Справка и примеры")
+        print("5. Выход")
+    
+    # Ввод выбора
+    while True:
+        try:
+            choice = input("\nВыберите режим (1-5): ").strip()
+            if choice == "1":
+                mode = "process"
+                break
+            elif choice == "2":
+                mode = "monitor"
+                break
+            elif choice == "3":
+                mode = "test"
+                break
+            elif choice == "4":
+                import subprocess
+                subprocess.run([sys.executable, "console_app.py", "--help"])
+                return 0
+            elif choice == "5":
+                if HAVE_RICH:
+                    console.print("[yellow]До свидания![/yellow]")
+                else:
+                    print("\nДо свидания!")
+                return 0
+            else:
+                if HAVE_RICH:
+                    console.print("[red]Неверный выбор, попробуйте снова[/red]")
+                else:
+                    print("Неверный выбор, попробуйте снова (1-5)")
+        except (KeyboardInterrupt, EOFError):
+            if HAVE_RICH:
+                console.print("\n[yellow]Прервано[/yellow]")
+            else:
+                print("\n\nПрервано")
+            return 0
+        except Exception as e:
+            if HAVE_RICH:
+                console.print(f"[red]Ошибка: {e}[/red]")
+            else:
+                print(f"Ошибка: {e}")
+            return 1
 
 
     # После выбора режима - меню параметров
@@ -1189,46 +1201,29 @@ def main():
         else:
             print("\nПараметры детектирования:")
         
-        if HAVE_QUESTIONARY:
-            # Интерактивный выбор параметров
-            use_default = questionary.confirm(
-                "Использовать стандартные параметры? (уверенность 0.5, мин.свиней 3, интервал 30сек)",
-                default=True
-            ).ask()
-            
-            if not use_default:
-                try:
-                    conf_str = questionary.text(
-                        "Порог уверенности (0.0-1.0, default 0.5): ",
-                        default="0.5"
-                    ).ask()
-                    confidence_val = float(conf_str) if conf_str else 0.5
-                except:
-                    confidence_val = 0.5
-                
-                try:
-                    pigs_str = questionary.text(
-                        "Минимум свиней для акта (default 3): ",
-                        default="3"
-                    ).ask()
-                    min_pigs = int(pigs_str) if pigs_str else 3
-                except:
-                    min_pigs = 3
-                
-                try:
-                    interval_str = questionary.text(
-                        "Макс интервал между свиньями (сек, default 30): ",
-                        default="30"
-                    ).ask()
-                    max_interval = float(interval_str) if interval_str else 30.0
-                except:
-                    max_interval = 30.0
-            else:
+        # Вопрос о стандартных параметрах
+        use_default_answer = input("\nИспользовать стандартные параметры? (y/n, default=y): ").strip().lower()
+        use_default = use_default_answer != 'n'
+        
+        if not use_default:
+            try:
+                conf_str = input("Порог уверенности (0.0-1.0, default 0.5): ").strip()
+                confidence_val = float(conf_str) if conf_str else 0.5
+            except:
                 confidence_val = 0.5
+            
+            try:
+                pigs_str = input("Минимум свиней для акта (default 3): ").strip()
+                min_pigs = int(pigs_str) if pigs_str else 3
+            except:
                 min_pigs = 3
+            
+            try:
+                interval_str = input("Макс интервал между свиньями (сек, default 30): ").strip()
+                max_interval = float(interval_str) if interval_str else 30.0
+            except:
                 max_interval = 30.0
         else:
-            # Использовать стандартные
             confidence_val = 0.5
             min_pigs = 3
             max_interval = 30.0
@@ -1247,10 +1242,9 @@ def main():
             print(f"  Минимум свиней: {min_pigs}")
             print(f"  Интервал: {max_interval}с")
         
-        continuous = questionary.confirm(
-            "Непрерывный режим (повторная обработка видео)?",
-            default=False
-        ).ask()
+        # Вопрос о непрерывном режиме
+        continuous_answer = input("\nНепрерывный режим (повторная обработка видео)? (y/n, default=n): ").strip().lower()
+        continuous = continuous_answer == 'y'
     else:
         confidence_val = 0.5
         min_pigs = 3
