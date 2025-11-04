@@ -76,13 +76,13 @@ class PigWeightApp {
             // Если параметр явно указан в URL
             if (autoCamera) {
                 console.log(`🎬 Запуск камеры: ${autoCamera}`);
-                this.ui.emit('video_control', 'start_stream', { stream_id: autoCamera });
+                this.ui.emit('video_control', 'switch_stream', { streamId: autoCamera });
                 return;
             }
             
             if (autoVideo) {
                 console.log(`🎬 Запуск видеофайла: ${autoVideo}`);
-                this.ui.emit('video_control', 'start_file', { file_path: autoVideo });
+                this.ui.emit('video_control', 'switch_stream', { streamId: autoVideo });
                 return;
             }
             
@@ -99,7 +99,7 @@ class PigWeightApp {
                     
                     // Небольшая задержка для инициализации UI
                     await new Promise(r => setTimeout(r, 500));
-                    this.ui.emit('video_control', 'start_stream', { stream_id: firstCameraId });
+                    this.ui.emit('video_control', 'switch_stream', { streamId: firstCameraId });
                     return;
                 }
             } catch (err) {
