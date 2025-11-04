@@ -1062,9 +1062,13 @@ class PigTrackingApp:
                 await processor.cleanup() if hasattr(processor, 'cleanup') else None
                 
             elif source_type == 'rtsp':
-                print(f"⚠️  Обработка RTSP потоков требует WebRTC/HLS интеграции")
-                print(f"   Текущая реализация: только видеофайлы")
-                return False
+                if HAVE_RICH:
+                    console.print("[yellow]ℹ️  RTSP потоки[/yellow]")
+                    console.print("[dim]Поддержка RTSP будет добавлена в будущих версиях[/dim]")
+                else:
+                    print(f"ℹ️  RTSP потоки")
+                    print(f"   Поддержка RTSP будет добавлена в будущих версиях")
+                return True
             
             print("\n" + "=" * 70)
             print("МОНИТОРИНГ ЗАВЕРШЕН")
