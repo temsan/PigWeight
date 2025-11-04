@@ -1101,105 +1101,165 @@ def main():
         ))
         console.print()
     
-    parser = argparse.ArgumentParser(
-        description='Система автоматического отслеживания свиней',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Примеры использования:
-  python console_app.py                           # Интерактивный выбор видео
-  python console_app.py --video uploads/test.mp4 # Обработка конкретного файла
-  
-Перед запуском убедитесь что Supabase запущен:
-  docker-compose up -d
-        """
-    )
+    # Главное меню с выбором режима работы
+    print("=" * 70)
+    print("ВЫБОР РЕЖИМА РАБОТЫ")
+    print("=" * 70)
     
-    parser.add_argument(
-        '--video',
-        type=str,
-        help='Путь к видеофайлу для обработки'
-    )
+    if HAVE_QUESTIONARY:
+        # Интерактивное меню со стрелками
+        mode_choice = questionary.select(
+            "Выберите режим работы:",
+            choices=[
+                "Обработка видео/камеры (по одному)",
+                "Фоновый мониторинг (непрерывный)",
+                "Тестовый режим (с Excel проверкой)",
+                "Справка и примеры",
+                "Выход"
+            ],
+            pointer="→ ",
+            use_arrow_keys=True
+        ).ask()
+        
+        if mode_choice is None or "Выход" in mode_choice:
+            print("\nДо свидания!")
+            return 0
+        elif "Справка" in mode_choice:
+            # Показать справку
+            import subprocess
+            subprocess.run([sys.executable, "console_app.py", "--help"])
+            return 0
+        elif "Обработка видео" in mode_choice:
+            # Обработка одного видео
+            mode = "process"
+        elif "Фоновый" in mode_choice:
+            # Фоновый мониторинг
+            mode = "monitor"
+        else:
+            # Тестовый режим
+            mode = "test"
+    else:
+        # Fallback на простое меню
+        print("\nДоступные режимы:")
+        print("1. Обработка видео/камеры (по одному)")
+        print("2. Фоновый мониторинг (непрерывный)")
+        print("3. Тестовый режим (с Excel проверкой)")
+        print("4. Справка")
+        print("5. Выход")
+        
+        choice = input("\nВыберите режим (1-5): ").strip()
+        
+        if choice == "1":
+            mode = "process"
+        elif choice == "2":
+            mode = "monitor"
+        elif choice == "3":
+            mode = "test"
+        elif choice == "4":
+            import subprocess
+            subprocess.run([sys.executable, "console_app.py", "--help"])
+            return 0
+        elif choice == "5":
+            print("\nДо свидания!")
+            return 0
+        else:
+            print("Неверный выбор")
+            return 1
     
-    parser.add_argument(
-        '--mode',
-        choices=['process', 'test', 'monitor'],
-        default='process',
-        help='Режим работы: process (обычная), test (с проверкой), monitor (фоновый мониторинг)'
-    )
+    # После выбора режима - меню параметров
+    print("\n" + "=" * 70)
+    print("НАСТРОЙКА ПАРАМЕТРОВ")
+    print("=" * 70)
     
-    parser.add_argument(
-        '--excel-reference',
-        type=str,
-        help='Путь к Excel файлу с эталонными данными (для тестового режима)'
-    )
+    # Выбор источника
+    print("\nВыбор источника видео/камеры:")
     
-    parser.add_argument(
-        '--output',
-        type=str,
-        help='Папка для сохранения результатов (по умолчанию: records)'
-    )
+    app = PigTrackingApp()
+    source = app.video_selector.select_source_interactive()
     
-    # Параметры фонового мониторинга
-    parser.add_argument(
-        '--rtsp',
-        type=str,
-        help='RTSP URL камеры для фонового мониторинга'
-    )
+    if not source:
+        print("\nИсточник не выбран")
+        return 0
     
-    parser.add_argument(
-        '--continuous',
-        action='store_true',
-        help='Непрерывный режим: повторная обработка видео'
-    )
+    # Для режима monitor - дополнительные параметры
+    if mode == "monitor":
+        print("\nПараметры детектирования:")
+        
+        if HAVE_QUESTIONARY:
+            # Интерактивный выбор параметров
+            confidence = questionary.confirm(
+                "Использовать стандартные параметры? (уверенность 0.5, мин.свиней 3, интервал 30сек)",
+                default=True
+            ).ask()
+            
+            if not confidence:
+                try:
+                    conf_str = input("Порог уверенности (0.0-1.0, default 0.5): ").strip()
+                    confidence_val = float(conf_str) if conf_str else 0.5
+                except:
+                    confidence_val = 0.5
+                
+                try:
+                    pigs_str = input("Минимум свиней для акта (default 3): ").strip()
+                    min_pigs = int(pigs_str) if pigs_str else 3
+                except:
+                    min_pigs = 3
+                
+                try:
+                    interval_str = input("Макс интервал между свиньями (сек, default 30): ").strip()
+                    max_interval = float(interval_str) if interval_str else 30.0
+                except:
+                    max_interval = 30.0
+            else:
+                confidence_val = 0.5
+                min_pigs = 3
+                max_interval = 30.0
+        else:
+            # Использовать стандартные
+            confidence_val = 0.5
+            min_pigs = 3
+            max_interval = 30.0
+        
+        print(f"\n  Уверенность: {confidence_val}")
+        print(f"  Минимум свиней: {min_pigs}")
+        print(f"  Интервал: {max_interval}с")
+        
+        continuous = questionary.confirm(
+            "Непрерывный режим (повторная обработка видео)?",
+            default=False
+        ).ask() if HAVE_QUESTIONARY else False
+    else:
+        confidence_val = 0.5
+        min_pigs = 3
+        max_interval = 30.0
+        continuous = False
     
-    parser.add_argument(
-        '--confidence',
-        type=float,
-        default=0.5,
-        help='Порог уверенности для детектирования (0.0-1.0, по умолчанию: 0.5)'
-    )
+    # Конфигурируем args вручную
+    class Args:
+        pass
     
-    parser.add_argument(
-        '--min-pigs',
-        type=int,
-        default=3,
-        help='Минимум свиней для начала акта (по умолчанию: 3)'
-    )
+    args = Args()
+    args.mode = mode
+    args.debug = False
+    args.output = "records"
+    args.confidence = confidence_val
+    args.min_pigs = min_pigs
+    args.max_interval = max_interval
+    args.continuous = continuous
+    args.rtsp = None
+    args.excel_reference = None
     
-    parser.add_argument(
-        '--max-interval',
-        type=float,
-        default=30.0,
-        help='Макс интервал между свиньями в секундах (по умолчанию: 30)'
-    )
-    
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Включить отладочный режим'
-    )
-    
-    args = parser.parse_args()
-    
-    # Настройка уровня логирования
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-        logger.debug("🐛 Отладочный режим включен")
-    
-    # Загрузка переменных окружения
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-        logger.debug("📄 Переменные окружения загружены из .env")
-    except ImportError:
-        logger.warning("⚠️ python-dotenv не установлен, переменные окружения не загружены")
-    
-    # Проверка переменных окружения (опционально для БД)
-    if not os.getenv('SUPABASE_KEY'):
-        logger.info("ℹ️ SUPABASE_KEY не найден - работаем без БД (только JSON)")
-        logger.info("   Для сохранения в БД: скопируйте .env.example в .env")
+    # Если source - это видеофайл или камера, устанавливаем параметры
+    if source.get('type') == 'file':
+        args.video = str(source['path'])
+    elif source.get('type') == 'camera':
+        args.rtsp = source['url']
     
     # Запуск приложения
+    print("\n" + "=" * 70)
+    print("ЗАПУСК ПРИЛОЖЕНИЯ")
+    print("=" * 70 + "\n")
+    
     app = PigTrackingApp()
     success = app.run(args)
     
