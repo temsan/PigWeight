@@ -504,10 +504,7 @@ class VideoSelector:
         # Выбор источника
         while True:
             try:
-                choice = Prompt.ask(
-                    f"[bold cyan]Выберите источник[/bold cyan] [dim](1-{len(sources)} или q для выхода)[/dim]",
-                    default="1"
-                )
+                choice = input(f"\nВыберите источник (1-{len(sources)} или q для выхода): ").strip()
                 
                 if choice.lower() == 'q':
                     console.print("[yellow]Выход...[/yellow]")
