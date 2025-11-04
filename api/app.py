@@ -143,9 +143,31 @@ def cameras_from_env() -> Dict[str, str]:
       - If no CAM_CH* are present, fallback to CAM_URL or CAM_DEFAULT as cam101
     Returns mapping like {"cam101": "rtsp://...", ...} ordered by channel number.
     """
-    # ВРЕМЕННО: Отключаем все камеры для тестирования масок
-    logger.info("🚫 ВРЕМЕННО: Все камеры отключены для тестирования масок")
-    return {}
+    import os
+    
+    cameras = {}
+    
+    # Собираем все переменные CAM_CH*
+    for key, value in os.environ.items():
+        if key.startswith('CAM_CH') and value:
+            # CAM_CH101 -> cam101
+            cam_id = 'cam' + key.replace('CAM_CH', '')
+            cameras[cam_id] = value
+            logger.info(f"📹 Найдена камера из .env: {cam_id} = {value}")
+    
+    # Если нет CAM_CH*, ищем альтернативы
+    if not cameras:
+        cam_url = os.getenv('CAM_URL') or os.getenv('CAM_DEFAULT')
+        if cam_url:
+            cameras['cam101'] = cam_url
+            logger.info(f"📹 Используется CAM_URL/CAM_DEFAULT: {cam_url}")
+    
+    if cameras:
+        logger.info(f"✅ Загружено {len(cameras)} камер из переменных окружения")
+    else:
+        logger.warning("⚠️ Камеры не найдены в переменных окружения (CAM_CH*, CAM_URL, CAM_DEFAULT)")
+    
+    return cameras
 
 def encode_jpeg(frame, quality: int = None) -> bytes:
     q = quality or config.JPEG_QUALITY
