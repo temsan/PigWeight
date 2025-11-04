@@ -777,7 +777,17 @@ class PigTrackingApp:
             logger.error(f"❌ Ошибка обработки видео: {e}", exc_info=True)
             raise
     
-    async def run_test_mode(self, args):
+    def run_test_mode(self, args):
+        """Тестовый режим с автоматической сверкой"""
+        import asyncio
+        return asyncio.run(self._run_test_mode_async(args))
+    
+    def run(self, args):
+        """Основной метод запуска приложения (синхронная обертка)"""
+        import asyncio
+        return asyncio.run(self.run_async(args))
+    
+    async def _run_test_mode_async(self, args):
         """Тестовый режим с автоматической сверкой"""
         print("\n🧪 ТЕСТОВЫЙ РЕЖИМ")
         print("=" * 60)
@@ -903,7 +913,7 @@ class PigTrackingApp:
             
             # Проверяем режим работы
             if args.mode == 'test':
-                return await self.run_test_mode(args)
+                return await self._run_test_mode_async(args)
             
             if args.mode == 'monitor':
                 return await self.run_monitor_mode(args)
