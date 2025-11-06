@@ -710,7 +710,8 @@
         // Fetch metrics
         async function fetchMetrics() {
             try {
-                const response = await fetch(`${API_URL}/metrics/current`);
+                // Используем новый endpoint по спецификации
+                const response = await fetch(`${API_URL}/stats/current`);
                 const data = await response.json();
 
                 if (data.current_count !== undefined) {
