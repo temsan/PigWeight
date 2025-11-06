@@ -797,22 +797,47 @@ class PigTrackingApp:
     def run_test_mode(self, args):
         """Тестовый режим с автоматической сверкой"""
         import asyncio
-        return asyncio.run(self._run_test_mode_async(args))
+        
+        # Проверяем, есть ли уже запущенный event loop
+        try:
+            loop = asyncio.get_running_loop()
+            logger.warning("⚠️ Event loop уже запущен, используем существующий")
+            raise RuntimeError("Консольное приложение не должно запускаться в существующем event loop")
+        except RuntimeError:
+            # Нет запущенного loop - создаем новый (нормальный случай)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(self._run_test_mode_async(args))
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
     
     def run(self, args):
         """Основной метод запуска приложения (синхронная обертка)"""
         import asyncio
         
-        # Всегда создаем новый event loop для избежания конфликтов
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Проверяем, есть ли уже запущенный event loop
         try:
-            return loop.run_until_complete(self.run_async(args))
-        finally:
+            loop = asyncio.get_running_loop()
+            # Если loop уже запущен, создаем задачу
+            logger.warning("⚠️ Event loop уже запущен, используем существующий")
+            # В этом случае нужно использовать create_task или ensure_future
+            # Но для консольного приложения это не должно происходить
+            raise RuntimeError("Консольное приложение не должно запускаться в существующем event loop")
+        except RuntimeError:
+            # Нет запущенного loop - создаем новый (нормальный случай)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                loop.close()
-            except Exception:
-                pass
+                return loop.run_until_complete(self.run_async(args))
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
     
     async def _run_test_mode_async(self, args):
         """Тестовый режим с автоматической сверкой"""
