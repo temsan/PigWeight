@@ -453,14 +453,8 @@ class VideoSelector:
         """Интерактивный выбор источника с Rich (fallback если нет questionary)"""
         video_files = self.get_video_files()
         
-        # Создаем таблицу источников
-        table = Table(title="🐷 PigWeight - Выбор источника", box=box.ROUNDED, show_header=True, header_style="bold magenta")
-        table.add_column("№", style="cyan", width=4)
-        table.add_column("Тип", style="green", width=10)
-        table.add_column("Название", style="white")
-        table.add_column("Детали", style="yellow")
-        
         sources = []
+        choices = []
         
         # Добавляем камеры
         if self.cameras:
@@ -471,12 +465,7 @@ class VideoSelector:
                     'name': cam_info['name'],
                     'url': cam_info['url']
                 })
-                table.add_row(
-                    str(len(sources)),
-                    "🎥 Камера",
-                    cam_info['name'],
-                    "RTSP поток"
-                )
+                choices.append(f"🎥 {cam_info['name']} (RTSP поток)")
         
         # Добавляем видеофайлы
         for video_file in video_files:
@@ -485,12 +474,7 @@ class VideoSelector:
                 'type': 'file',
                 'path': video_file
             })
-            table.add_row(
-                str(len(sources)),
-                "📁 Файл",
-                video_file.name,
-                f"{info['size']} • {info['duration']}"
-            )
+            choices.append(f"📁 {video_file.name} ({info['size']} • {info['duration']})")
         
         if not sources:
             console.print(Panel(
@@ -501,6 +485,60 @@ class VideoSelector:
                 border_style="red"
             ))
             return None
+        
+        # Пытаемся использовать questionary если доступен
+        if HAVE_QUESTIONARY:
+            try:
+                console.print()
+                console.print(Panel(
+                    "[bold magenta]🐷 PigWeight - Выбор источника[/bold magenta]\n"
+                    "[dim]Используйте стрелки ↑↓ для навигации, Enter для выбора[/dim]",
+                    border_style="magenta"
+                ))
+                
+                answer = questionary.select(
+                    "Выберите источник для обработки:",
+                    choices=choices,
+                    pointer="→ ",
+                    use_shortcuts=True,
+                    use_arrow_keys=True,
+                    use_pointers=True
+                ).ask()
+                
+                if answer is None:
+                    console.print("[yellow]Выход...[/yellow]")
+                    return None
+                
+                index = choices.index(answer)
+                source = sources[index]
+                
+                if source['type'] == 'camera':
+                    console.print(f"[green]✅ Выбрана камера:[/green] [bold]{source['name']}[/bold]")
+                else:
+                    console.print(f"[green]✅ Выбран файл:[/green] [bold]{source['path'].name}[/bold]")
+                
+                return source
+                
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[yellow]Выход...[/yellow]")
+                return None
+            except Exception:
+                # Fallback на числовой ввод
+                pass
+        
+        # Fallback: показываем таблицу и просим ввести номер
+        table = Table(title="🐷 PigWeight - Выбор источника", box=box.ROUNDED, show_header=True, header_style="bold magenta")
+        table.add_column("№", style="cyan", width=4)
+        table.add_column("Тип", style="green", width=10)
+        table.add_column("Название", style="white")
+        table.add_column("Детали", style="yellow")
+        
+        for i, source in enumerate(sources, 1):
+            if source['type'] == 'camera':
+                table.add_row(str(i), "🎥 Камера", source['name'], "RTSP поток")
+            else:
+                info = self.get_file_info(source['path'])
+                table.add_row(str(i), "📁 Файл", source['path'].name, f"{info['size']} • {info['duration']}")
         
         console.print(table)
         console.print()
@@ -974,27 +1012,60 @@ class PigTrackingApp:
                 RichFormatter.print_error("Видеофайлы не найдены в папке uploads/")
                 return False
             
-            print(f"\nДоступные видеофайлы:")
+            # Формируем список выборов для questionary
+            choices = []
             for i, vf in enumerate(video_files, 1):
                 info = sel.get_file_info(vf)
-                print(f"  {i}. {vf.name} ({info['size']} • {info['duration']})")
+                choices.append(f"📁 {vf.name} ({info['size']} • {info['duration']})")
             
-            choice = questionary.select(
-                "Выберите номер (1-N) для запуска мониторинга:",
-                choices=[f"{i+1}. {vf.name}" for i, vf in enumerate(video_files)],
-                pointer="→ "
-            ).ask()
+            if HAVE_RICH:
+                console.print()
+                console.print(Panel(
+                    "[bold magenta]🔄 Выбор видео для мониторинга[/bold magenta]\n"
+                    "[dim]Используйте стрелки ↑↓ для навигации, Enter для выбора[/dim]",
+                    border_style="magenta"
+                ))
             
-            try:
-                idx = int(choice.split('.')[0]) - 1
-                if not (0 <= idx < len(video_files)):
-                    RichFormatter.print_error("Неверный выбор")
+            if HAVE_QUESTIONARY:
+                try:
+                    choice = questionary.select(
+                        "Выберите видеофайл для мониторинга:",
+                        choices=choices,
+                        pointer="→ ",
+                        use_shortcuts=True,
+                        use_arrow_keys=True,
+                        use_pointers=True
+                    ).ask()
+                    
+                    if choice is None:
+                        RichFormatter.print_error("Выбор отменен")
+                        return False
+                    
+                    idx = choices.index(choice)
+                    source = str(video_files[idx])
+                    source_type = 'video'
+                    
+                except (KeyboardInterrupt, EOFError):
+                    RichFormatter.print_error("\nВыбор отменен")
                     return False
-                source = str(video_files[idx])
-                source_type = 'video'
-            except ValueError:
-                RichFormatter.print_error("Введите число")
-                return False
+            else:
+                # Fallback на числовой ввод
+                print(f"\nДоступные видеофайлы:")
+                for i, vf in enumerate(video_files, 1):
+                    info = sel.get_file_info(vf)
+                    print(f"  {i}. {vf.name} ({info['size']} • {info['duration']})")
+                
+                try:
+                    choice_num = input(f"\nВыберите номер (1-{len(video_files)}): ").strip()
+                    idx = int(choice_num) - 1
+                    if not (0 <= idx < len(video_files)):
+                        RichFormatter.print_error("Неверный выбор")
+                        return False
+                    source = str(video_files[idx])
+                    source_type = 'video'
+                except (ValueError, KeyboardInterrupt):
+                    RichFormatter.print_error("Выбор отменен")
+                    return False
         
         # Параметры обработки
         print(f"\n⚙️ Параметры детектирования:")
@@ -1255,27 +1326,86 @@ def main():
             print("\nПараметры детектирования:")
         
         # Вопрос о стандартных параметрах
-        use_default_answer = input("\nИспользовать стандартные параметры? (y/n, default=y): ").strip().lower()
-        use_default = use_default_answer != 'n'
+        if HAVE_QUESTIONARY:
+            try:
+                use_default = questionary.confirm(
+                    "Использовать стандартные параметры?",
+                    default=True
+                ).ask()
+                
+                if use_default is None:
+                    use_default = True
+            except (KeyboardInterrupt, EOFError):
+                use_default = True
+        else:
+            use_default_answer = input("\nИспользовать стандартные параметры? (y/n, default=y): ").strip().lower()
+            use_default = use_default_answer != 'n'
         
         if not use_default:
-            try:
-                conf_str = input("Порог уверенности (0.0-1.0, default 0.5): ").strip()
-                confidence_val = float(conf_str) if conf_str else 0.5
-            except:
-                confidence_val = 0.5
-            
-            try:
-                pigs_str = input("Минимум свиней для акта (default 3): ").strip()
-                min_pigs = int(pigs_str) if pigs_str else 3
-            except:
-                min_pigs = 3
-            
-            try:
-                interval_str = input("Макс интервал между свиньями (сек, default 30): ").strip()
-                max_interval = float(interval_str) if interval_str else 30.0
-            except:
-                max_interval = 30.0
+            if HAVE_QUESTIONARY:
+                try:
+                    # Порог уверенности
+                    conf_choices = ["0.3 (низкий)", "0.5 (средний)", "0.7 (высокий)", "0.9 (очень высокий)"]
+                    conf_choice = questionary.select(
+                        "Выберите порог уверенности:",
+                        choices=conf_choices,
+                        pointer="→ "
+                    ).ask()
+                    
+                    if conf_choice:
+                        confidence_val = float(conf_choice.split()[0])
+                    else:
+                        confidence_val = 0.5
+                    
+                    # Минимум свиней
+                    pigs_choices = ["1 свинья", "2 свиньи", "3 свиньи", "5 свиней", "10 свиней"]
+                    pigs_choice = questionary.select(
+                        "Минимум свиней для акта:",
+                        choices=pigs_choices,
+                        pointer="→ "
+                    ).ask()
+                    
+                    if pigs_choice:
+                        min_pigs = int(pigs_choice.split()[0])
+                    else:
+                        min_pigs = 3
+                    
+                    # Интервал
+                    interval_choices = ["10 секунд", "20 секунд", "30 секунд", "60 секунд", "120 секунд"]
+                    interval_choice = questionary.select(
+                        "Максимальный интервал между свиньями:",
+                        choices=interval_choices,
+                        pointer="→ "
+                    ).ask()
+                    
+                    if interval_choice:
+                        max_interval = float(interval_choice.split()[0])
+                    else:
+                        max_interval = 30.0
+                        
+                except (KeyboardInterrupt, EOFError):
+                    confidence_val = 0.5
+                    min_pigs = 3
+                    max_interval = 30.0
+            else:
+                # Fallback на текстовый ввод
+                try:
+                    conf_str = input("Порог уверенности (0.0-1.0, default 0.5): ").strip()
+                    confidence_val = float(conf_str) if conf_str else 0.5
+                except:
+                    confidence_val = 0.5
+                
+                try:
+                    pigs_str = input("Минимум свиней для акта (default 3): ").strip()
+                    min_pigs = int(pigs_str) if pigs_str else 3
+                except:
+                    min_pigs = 3
+                
+                try:
+                    interval_str = input("Макс интервал между свиньями (сек, default 30): ").strip()
+                    max_interval = float(interval_str) if interval_str else 30.0
+                except:
+                    max_interval = 30.0
         else:
             confidence_val = 0.5
             min_pigs = 3
@@ -1296,8 +1426,20 @@ def main():
             print(f"  Интервал: {max_interval}с")
         
         # Вопрос о непрерывном режиме
-        continuous_answer = input("\nНепрерывный режим (повторная обработка видео)? (y/n, default=n): ").strip().lower()
-        continuous = continuous_answer == 'y'
+        if HAVE_QUESTIONARY:
+            try:
+                continuous = questionary.confirm(
+                    "Непрерывный режим (повторная обработка видео)?",
+                    default=False
+                ).ask()
+                
+                if continuous is None:
+                    continuous = False
+            except (KeyboardInterrupt, EOFError):
+                continuous = False
+        else:
+            continuous_answer = input("\nНепрерывный режим (повторная обработка видео)? (y/n, default=n): ").strip().lower()
+            continuous = continuous_answer == 'y'
     else:
         confidence_val = 0.5
         min_pigs = 3
@@ -1324,6 +1466,87 @@ def main():
         args.video = str(source['path'])
     elif source.get('type') == 'camera':
         args.rtsp = source['url']
+    
+    # Для тестового режима - выбор Excel файла
+    if mode == "test":
+        if HAVE_RICH:
+            console.print("\n[bold white]Выбор эталонного Excel файла:[/bold white]")
+        else:
+            print("\nВыбор эталонного Excel файла:")
+        
+        # Ищем Excel файлы в docs/
+        docs_dir = Path("docs")
+        excel_files = []
+        if docs_dir.exists():
+            excel_files = list(docs_dir.glob("*.xlsx")) + list(docs_dir.glob("*.xls"))
+        
+        if not excel_files:
+            if HAVE_RICH:
+                console.print("[red]❌ Excel файлы не найдены в папке docs/[/red]")
+            else:
+                print("❌ Excel файлы не найдены в папке docs/")
+            return 0
+        
+        # Формируем список выборов
+        excel_choices = [f"📊 {f.name}" for f in excel_files]
+        
+        if HAVE_QUESTIONARY:
+            try:
+                if HAVE_RICH:
+                    console.print()
+                    console.print(Panel(
+                        "[bold magenta]📊 Выбор эталонного Excel файла[/bold magenta]\n"
+                        "[dim]Используйте стрелки ↑↓ для навигации, Enter для выбора[/dim]",
+                        border_style="magenta"
+                    ))
+                
+                excel_choice = questionary.select(
+                    "Выберите эталонный файл для сверки:",
+                    choices=excel_choices,
+                    pointer="→ ",
+                    use_shortcuts=True,
+                    use_arrow_keys=True,
+                    use_pointers=True
+                ).ask()
+                
+                if excel_choice is None:
+                    if HAVE_RICH:
+                        console.print("[red]Выбор отменен[/red]")
+                    else:
+                        print("Выбор отменен")
+                    return 0
+                
+                idx = excel_choices.index(excel_choice)
+                args.excel_reference = str(excel_files[idx])
+                
+                if HAVE_RICH:
+                    console.print(f"[green]✅ Выбран файл:[/green] [bold]{excel_files[idx].name}[/bold]")
+                else:
+                    print(f"✅ Выбран файл: {excel_files[idx].name}")
+                    
+            except (KeyboardInterrupt, EOFError):
+                if HAVE_RICH:
+                    console.print("\n[yellow]Выбор отменен[/yellow]")
+                else:
+                    print("\nВыбор отменен")
+                return 0
+        else:
+            # Fallback на числовой ввод
+            print("\nДоступные Excel файлы:")
+            for i, f in enumerate(excel_files, 1):
+                print(f"  {i}. {f.name}")
+            
+            try:
+                choice_num = input(f"\nВыберите номер (1-{len(excel_files)}): ").strip()
+                idx = int(choice_num) - 1
+                if not (0 <= idx < len(excel_files)):
+                    print("❌ Неверный выбор")
+                    return 0
+                args.excel_reference = str(excel_files[idx])
+                print(f"✅ Выбран файл: {excel_files[idx].name}")
+            except (ValueError, KeyboardInterrupt):
+                print("Выбор отменен")
+                return 0
     
     # Запуск приложения
     console.print() if HAVE_RICH else print()
