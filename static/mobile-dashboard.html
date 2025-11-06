@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PigWeight Mobile Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            height: 100%;
+            max-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* Liquid Glass Effect */
+        .glass {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            transition: all 0.3s ease;
+        }
+
+        .glass:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.5);
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            color: white;
+            padding-bottom: 10px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 5px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .header .status {
+            font-size: 12px;
+            opacity: 0.9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .metric-card {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            min-height: 100px;
+        }
+
+        .metric-icon {
+            font-size: 32px;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+        }
+
+        .metric-value {
+            font-size: 36px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            opacity: 0.85;
+            text-align: center;
+        }
+
+        /* Full Width Cards */
+        .metric-full {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+        }
+
+        .metric-full-item {
+            flex: 1;
+            text-align: center;
+            color: white;
+        }
+
+        .metric-full-item .value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .metric-full-item .label {
+            font-size: 11px;
+            opacity: 0.85;
+        }
+
+        .metric-full-item .divider {
+            width: 1px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.2);
+            margin: 0 20px;
+            flex-shrink: 0;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            flex: 1;
+            min-width: 100px;
+            padding: 14px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-auto {
+            background: rgba(255, 255, 255, 0.25);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .btn-auto:active {
+            background: rgba(255, 255, 255, 0.35);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+        }
+
+        .btn-auto.active {
+            background: rgba(74, 222, 128, 0.3);
+            border: 2px solid rgba(74, 222, 128, 0.6);
+            color: #4ade80;
+        }
+
+        .btn-fix {
+            background: rgba(248, 113, 113, 0.3);
+            color: #f87171;
+            border: 2px solid rgba(248, 113, 113, 0.5);
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-fix.active {
+            background: rgba(248, 113, 113, 0.4);
+            border: 2px solid rgba(248, 113, 113, 0.7);
+            opacity: 1;
+            cursor: pointer;
+        }
+
+        .btn-fix:active {
+            background: rgba(248, 113, 113, 0.5);
+            transform: scale(0.98);
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: white;
+            font-size: 13px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.3);
+            transition: 0.3s;
+            border-radius: 24px;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: rgba(74, 222, 128, 0.5);
+            border: 2px solid rgba(74, 222, 128, 0.8);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Footer Info */
+        .footer-info {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 11px;
+            padding: 8px 0;
+        }
+
+        /* Loading State */
+        .loading {
+            text-align: center;
+            color: white;
+            padding: 40px 20px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid white;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-height: 600px) {
+            .metric-card {
+                min-height: 80px;
+            }
+
+            .metric-value {
+                font-size: 28px;
+            }
+        }
+
+        @media (max-height: 500px) {
+            .metrics-grid {
+                gap: 8px;
+            }
+
+            .glass {
+                padding: 16px;
+            }
+
+            .metric-card {
+                min-height: 70px;
+                gap: 4px;
+            }
+
+            .metric-icon {
+                font-size: 24px;
+            }
+
+            .metric-value {
+                font-size: 24px;
+            }
+
+            .metric-label {
+                font-size: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header glass">
+            <h1>🐷 PigWeight</h1>
+            <div class="status">
+                <div class="status-indicator"></div>
+                <span id="status-text">Подключение...</span>
+            </div>
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="glass" style="flex: 1; overflow-y: auto; padding: 16px;">
+            <div class="metrics-grid">
+                <!-- Текущее количество -->
+                <div class="metric-card">
+                    <div class="metric-icon">🐷</div>
+                    <div class="metric-value" id="current-count">0</div>
+                    <div class="metric-label">Текущих свиней</div>
+                </div>
+
+                <!-- Средний вес -->
+                <div class="metric-card">
+                    <div class="metric-icon">⚖️</div>
+                    <div class="metric-value" id="avg-weight">0.0</div>
+                    <div class="metric-label">Средний вес</div>
+                </div>
+
+                <!-- Полная информация -->
+                <div class="glass metric-full" style="background: rgba(255, 255, 255, 0.08);">
+                    <div class="metric-full-item">
+                        <div class="value" id="total-weight">0.0</div>
+                        <div class="label">Общий вес (кг)</div>
+                    </div>
+                    <div class="metric-full-item" style="padding: 0 10px;">
+                        <div class="divider"></div>
+                    </div>
+                    <div class="metric-full-item">
+                        <div class="value" id="total-count">0</div>
+                        <div class="label">Всего проходов</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auto/Manual Toggle -->
+        <div class="glass toggle-switch">
+            <span>📍 Режим фиксации:</span>
+            <label class="switch">
+                <input type="checkbox" id="auto-toggle" checked>
+                <span class="slider"></span>
+            </label>
+            <span id="mode-text" style="font-weight: 600;">АВТО</span>
+        </div>
+
+        <!-- Controls -->
+        <div class="glass">
+            <div class="controls">
+                <button class="btn btn-auto active" id="auto-btn">
+                    <span>🔄</span>
+                    <span>АВТО</span>
+                </button>
+                <button class="btn btn-fix" id="fix-btn">
+                    <span>📌</span>
+                    <span>ФИКСИРОВАТЬ</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Footer Info -->
+        <div class="footer-info">
+            <span id="update-time">Обновление: --:--:--</span>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api';
+        let autoMode = true;
+        let activeAct = false;
+
+        // Elements
+        const statusText = document.getElementById('status-text');
+        const currentCount = document.getElementById('current-count');
+        const avgWeight = document.getElementById('avg-weight');
+        const totalWeight = document.getElementById('total-weight');
+        const totalCount = document.getElementById('total-count');
+        const autoToggle = document.getElementById('auto-toggle');
+        const modeText = document.getElementById('mode-text');
+        const autoBtn = document.getElementById('auto-btn');
+        const fixBtn = document.getElementById('fix-btn');
+        const updateTime = document.getElementById('update-time');
+
+        // Initialize
+        console.log('🚀 PigWeight Mobile Dashboard инициализирован');
+
+        // Event Listeners
+        autoToggle.addEventListener('change', (e) => {
+            autoMode = e.target.checked;
+            modeText.textContent = autoMode ? 'АВТО' : 'РУЧНОЙ';
+            autoBtn.classList.toggle('active', autoMode);
+            fixBtn.classList.toggle('active', !autoMode && activeAct);
+            toggleAutoMode();
+        });
+
+        autoBtn.addEventListener('click', () => {
+            if (!autoMode) {
+                autoToggle.checked = true;
+                autoMode = true;
+                modeText.textContent = 'АВТО';
+                autoBtn.classList.add('active');
+                fixBtn.classList.remove('active');
+                toggleAutoMode();
+            }
+        });
+
+        fixBtn.addEventListener('click', () => {
+            if (!autoMode && activeAct) {
+                fixCurrentAct();
+            }
+        });
+
+        // Fetch metrics
+        async function fetchMetrics() {
+            try {
+                const response = await fetch(`${API_URL}/metrics/current`);
+                const data = await response.json();
+
+                if (data.current_count !== undefined) {
+                    currentCount.textContent = data.current_count;
+                    totalCount.textContent = (data.left_count || 0) + (data.right_count || 0);
+                    avgWeight.textContent = (data.avg_weight || 0).toFixed(1);
+                    totalWeight.textContent = (data.total_weight || 0).toFixed(1);
+
+                    // Check if active act
+                    activeAct = !!data.active_act;
+                    fixBtn.classList.toggle('active', !autoMode && activeAct);
+
+                    statusText.textContent = data.stream_id || 'Готово';
+                } else {
+                    statusText.textContent = 'Нет данных';
+                }
+
+                updateTime.textContent = new Date().toLocaleTimeString('ru-RU');
+            } catch (error) {
+                console.error('❌ Ошибка загрузки метрик:', error);
+                statusText.textContent = 'Ошибка подключения';
+            }
+        }
+
+        // Toggle auto mode
+        async function toggleAutoMode() {
+            try {
+                const response = await fetch(`${API_URL}/metrics/toggle-auto-fix?enabled=${autoMode}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                console.log('✅ Режим изменён:', data.auto_manual);
+            } catch (error) {
+                console.error('❌ Ошибка смены режима:', error);
+            }
+        }
+
+        // Fix current act
+        async function fixCurrentAct() {
+            try {
+                const response = await fetch(`${API_URL}/metrics/manual-fix`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                console.log('✅ Акт зафиксирован:', data.act_fixed);
+                activeAct = false;
+                fixBtn.classList.remove('active');
+                
+                // Refresh metrics
+                await fetchMetrics();
+            } catch (error) {
+                console.error('❌ Ошибка фиксации акта:', error);
+            }
+        }
+
+        // Update every 1 second
+        fetchMetrics();
+        setInterval(fetchMetrics, 1000);
+
+        console.log('✅ Система инициализирована и готова');
+    </script>
+</body>
+</html>
+

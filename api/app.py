@@ -1455,7 +1455,7 @@ setup_request_logging(app)
 setup_security_headers(app)
 
 # Подключаем эндпоинты из модулей
-from api.endpoints import video, stream, health, files, diagnostics, events, records, verification, system, validation
+from api.endpoints import video, stream, health, files, diagnostics, events, records, verification, system, validation, metrics
 app.include_router(health.router, tags=["health"])
 app.include_router(video.router, tags=["video"])
 app.include_router(stream.router, tags=["stream"])
@@ -1466,6 +1466,7 @@ app.include_router(records.router, tags=["records"])
 app.include_router(system.router, tags=["system"])
 app.include_router(verification.router, tags=["verification"])
 app.include_router(validation.router, tags=["validation"], prefix="/api")
+app.include_router(metrics.router, tags=["metrics"])
 
 # Include WebRTC routes
 from api import webrtc
@@ -1492,6 +1493,11 @@ async def read_root():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def read_dashboard():
     return FileResponse(STATIC_DIR / "dashboard.html")
+
+@app.get("/mobile", response_class=HTMLResponse)
+async def read_mobile_dashboard():
+    """Мобильный дашборд для смартфона - показатели в реальном времени"""
+    return FileResponse(STATIC_DIR / "mobile-dashboard.html")
 
 @app.get("/monitoring", response_class=HTMLResponse)
 async def read_monitoring():
