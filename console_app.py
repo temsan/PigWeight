@@ -1443,13 +1443,16 @@ def main():
     args.max_interval = max_interval
     args.continuous = continuous
     args.rtsp = None
+    args.video = None
     args.excel_reference = None
     
     # Если source - это видеофайл или камера, устанавливаем параметры
     if source.get('type') == 'file':
         args.video = str(source['path'])
+        args.rtsp = None
     elif source.get('type') == 'camera':
         args.rtsp = source['url']
+        args.video = None
     
     # Для тестового режима - выбор Excel файла
     if mode == "test":
