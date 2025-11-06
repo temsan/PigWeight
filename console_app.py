@@ -802,7 +802,18 @@ class PigTrackingApp:
     def run(self, args):
         """Основной метод запуска приложения (синхронная обертка)"""
         import asyncio
-        return asyncio.run(self.run_async(args))
+        
+        try:
+            # Пытаемся запустить через asyncio.run()
+            return asyncio.run(self.run_async(args))
+        except RuntimeError as e:
+            if "cannot be called from a running event loop" in str(e):
+                # Event loop уже запущен - используем альтернативный подход
+                logger.error("Event loop уже запущен. Попробуйте запустить из чистого Python окружения.")
+                logger.error("Если используете Jupyter/IPython, используйте: await app.run_async(args)")
+                return False
+            else:
+                raise
     
     async def _run_test_mode_async(self, args):
         """Тестовый режим с автоматической сверкой"""
