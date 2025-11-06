@@ -36,3 +36,21 @@ def init_dependencies(stream_manager,
         RECORDS_DIR = records_dir
     if database_manager is not None:
         DATABASE_MANAGER = database_manager
+
+
+def get_database_manager():
+    """Get DatabaseManager instance"""
+    if DATABASE_MANAGER is None:
+        # Lazy initialization
+        import os
+        from pig_tracking.database_manager import DatabaseManager
+        
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_KEY")
+        
+        if not supabase_url or not supabase_key:
+            raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in environment")
+        
+        return DatabaseManager(supabase_url=supabase_url, supabase_key=supabase_key)
+    
+    return DATABASE_MANAGER

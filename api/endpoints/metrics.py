@@ -10,8 +10,8 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-# Import stream manager
-from api.dependencies import STREAM_MANAGER
+# Import dependencies
+from api.dependencies import STREAM_MANAGER, get_database_manager
 
 router = APIRouter(prefix="/api", tags=["metrics"])
 logger = logging.getLogger(__name__)
@@ -264,3 +264,69 @@ async def manual_fix_act(stream_id: Optional[str] = None):
             status_code=500
         )
 
+
+
+@router.get("/metrics/latest-act")
+async def get_latest_act():
+    """
+    Получить последний завершенный акт взвешивания из БД
+    
+    Response:
+    {
+        "act": {
+            "id": 1,
+            "started_at": "2025-11-06T12:30:00",
+            "ended_at": "2025-11-06T12:45:30",
+            "duration_sec": 930,
+            "left_count": 25,
+            "right_count": 23,
+            "peak_count": 14,
+            "total_weight": 1850.5,
+            "avg_weight": 132.2
+        },
+        "timestamp": "2025-11-06T13:00:00"
+    }
+    """
+    try:
+        db = get_database_manager()
+        
+        # Получаем последний акт
+        acts = db.get_acts_by_period(
+            start_date=datetime.now().replace(hour=0, minute=0, second=0),
+            end_date=datetime.now(),
+            limit=1
+        )
+        
+        if not acts:
+            return JSONResponse(
+                {
+                    "act": None,
+                    "message": "No acts found today",
+                    "timestamp": datetime.now().isoformat()
+                },
+                status_code=200
+            )
+        
+        act = acts[0]
+        
+        return {
+            "act": {
+                "id": act.get("id"),
+                "started_at": act.get("started_at"),
+                "ended_at": act.get("ended_at"),
+                "duration_sec": act.get("duration_sec", 0),
+                "left_count": act.get("left_count", 0),
+                "right_count": act.get("right_count", 0),
+                "peak_count": act.get("peak_count", 0),
+                "total_weight": round(act.get("total_weight", 0.0), 1),
+                "avg_weight": round(act.get("avg_weight", 0.0), 2)
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting latest act: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=500
+        )
