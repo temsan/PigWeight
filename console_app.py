@@ -1219,65 +1219,7 @@ def main():
         else:
             print("\nДо свидания!")
         return 0
-
-
-def _show_text_menu():
-    """Текстовое меню для несовместимых систем"""
-    if HAVE_RICH:
-        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
-        console.print("[bold cyan]ВЫБОР РЕЖИМА РАБОТЫ[/bold cyan]")
-        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
-    else:
-        print("=" * 70)
-        print("ВЫБОР РЕЖИМА РАБОТЫ")
-        print("=" * 70)
     
-    if HAVE_RICH:
-        table = Table(box=box.ROUNDED, show_header=False, padding=(0, 2))
-        table.add_column("№", style="cyan", width=3)
-        table.add_column("Режим", style="white")
-        table.add_row("1", "🎬 Обработка видео/камеры (по одному)")
-        table.add_row("2", "🔄 Фоновый мониторинг (непрерывный)")
-        table.add_row("3", "✅ Тестовый режим (с Excel проверкой)")
-        table.add_row("4", "📖 Справка и примеры")
-        table.add_row("5", "❌ Выход")
-        console.print(table)
-    else:
-        print("\n1. 🎬 Обработка видео/камеры (по одному)")
-        print("2. 🔄 Фоновый мониторинг (непрерывный)")
-        print("3. ✅ Тестовый режим (с Excel проверкой)")
-        print("4. 📖 Справка и примеры")
-        print("5. ❌ Выход")
-    
-    # Ввод выбора
-    while True:
-        try:
-            choice = input("\nВыберите режим (1-5): ").strip()
-            if choice == "1":
-                return "process"
-            elif choice == "2":
-                return "monitor"
-            elif choice == "3":
-                return "test"
-            elif choice == "4":
-                return "help"
-            elif choice == "5":
-                return "exit"
-            else:
-                if HAVE_RICH:
-                    console.print("[red]Неверный выбор, попробуйте снова[/red]")
-                else:
-                    print("Неверный выбор, попробуйте снова (1-5)")
-        except (KeyboardInterrupt, EOFError):
-            return "exit"
-        except Exception as e:
-            if HAVE_RICH:
-                console.print(f"[red]Ошибка: {e}[/red]")
-            else:
-                print(f"Ошибка: {e}")
-            return "exit"
-
-
     # После выбора режима - меню параметров
     console.print() if HAVE_RICH else print()
     if HAVE_RICH:
@@ -1400,6 +1342,63 @@ def _show_text_menu():
     success = app.run(args)
     
     return 0 if success else 1
+
+
+def _show_text_menu():
+    """Текстовое меню для несовместимых систем"""
+    if HAVE_RICH:
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+        console.print("[bold cyan]ВЫБОР РЕЖИМА РАБОТЫ[/bold cyan]")
+        console.print("[bold magenta]═" * 35 + "[/bold magenta]")
+    else:
+        print("=" * 70)
+        print("ВЫБОР РЕЖИМА РАБОТЫ")
+        print("=" * 70)
+    
+    if HAVE_RICH:
+        table = Table(box=box.ROUNDED, show_header=False, padding=(0, 2))
+        table.add_column("№", style="cyan", width=3)
+        table.add_column("Режим", style="white")
+        table.add_row("1", "🎬 Обработка видео/камеры (по одному)")
+        table.add_row("2", "🔄 Фоновый мониторинг (непрерывный)")
+        table.add_row("3", "✅ Тестовый режим (с Excel проверкой)")
+        table.add_row("4", "📖 Справка и примеры")
+        table.add_row("5", "❌ Выход")
+        console.print(table)
+    else:
+        print("\n1. 🎬 Обработка видео/камеры (по одному)")
+        print("2. 🔄 Фоновый мониторинг (непрерывный)")
+        print("3. ✅ Тестовый режим (с Excel проверкой)")
+        print("4. 📖 Справка и примеры")
+        print("5. ❌ Выход")
+    
+    # Ввод выбора
+    while True:
+        try:
+            choice = input("\nВыберите режим (1-5): ").strip()
+            if choice == "1":
+                return "process"
+            elif choice == "2":
+                return "monitor"
+            elif choice == "3":
+                return "test"
+            elif choice == "4":
+                return "help"
+            elif choice == "5":
+                return "exit"
+            else:
+                if HAVE_RICH:
+                    console.print("[red]Неверный выбор, попробуйте снова[/red]")
+                else:
+                    print("Неверный выбор, попробуйте снова (1-5)")
+        except (KeyboardInterrupt, EOFError):
+            return "exit"
+        except Exception as e:
+            if HAVE_RICH:
+                console.print(f"[red]Ошибка: {e}[/red]")
+            else:
+                print(f"Ошибка: {e}")
+            return "exit"
 
 if __name__ == "__main__":
     sys.exit(main())
