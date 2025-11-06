@@ -1,0 +1,114 @@
+HAR ANALYSIS RESULTS
+================================================================================
+
+Total requests: 80
+Total errors: 40
+Slow requests: 51
+
+API URLs:
+  http://localhost:8000/api/cameras
+  http://localhost:8000/api/cameras
+  http://localhost:8000/api/cameras
+  http://localhost:8000/api/cameras
+  http://localhost:8000/api/diagnostics/quick
+  http://localhost:8000/api/events/cam102?limit=100
+  http://localhost:8000/api/events/cam102/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/webrtc/offer
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/stream/cam101/info
+  http://localhost:8000/api/events/cam101?limit=100
+  http://localhost:8000/api/events/cam101/stats
+  http://localhost:8000/api/stream/cam101/info
+
+ERROR DETAILS:
+  [404] http://localhost:8000/api/events/cam102?limit=100
+  [404] http://localhost:8000/api/events/cam102/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
+  [404] http://localhost:8000/api/events/cam101?limit=100
+  [404] http://localhost:8000/api/events/cam101/stats
