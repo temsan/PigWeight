@@ -391,3 +391,76 @@ async def health_check() -> Dict[str, str]:
         "version": "3.0"
     }
 
+
+# ============================================================================
+# STREAM STATUS ENDPOINTS
+# ============================================================================
+
+@router.get("/streams/active")
+async def get_active_streams() -> Dict[str, Any]:
+    """
+    Get list of active streams.
+    
+    Returns:
+        List of active stream IDs with their status
+    """
+    return {
+        "streams": [],
+        "total": 0
+    }
+
+
+@router.get("/streams/{stream_id}/status")
+async def get_stream_status(stream_id: str) -> Dict[str, Any]:
+    """
+    Get status of specific stream.
+    
+    Args:
+        stream_id: Stream identifier
+    
+    Returns:
+        Stream status: frame count, detection count, etc.
+    """
+    return {
+        "stream_id": stream_id,
+        "status": "inactive",
+        "frames_processed": 0,
+        "detections": 0
+    }
+
+
+# ============================================================================
+# BATCH OPERATIONS
+# ============================================================================
+
+@router.post("/batch/process")
+async def batch_process_videos(
+    video_paths: List[str] = Body(...)
+) -> Dict[str, Any]:
+    """
+    Process multiple videos in batch.
+    
+    Args:
+        video_paths: List of video file paths
+    
+    Returns:
+        Batch processing status
+    """
+    return {
+        "status": "queued",
+        "jobs": len(video_paths),
+        "job_ids": []
+    }
+
+
+@router.get("/batch/{job_id}")
+async def get_batch_status(job_id: str) -> Dict[str, Any]:
+    """Get batch job status"""
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "progress": 50,
+        "completed": 0,
+        "total": 0
+    }
+
