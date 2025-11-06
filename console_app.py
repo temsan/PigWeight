@@ -1239,11 +1239,13 @@ def main():
     if HAVE_RICH:
         console.clear()
         console.print()
-        console.print(Panel.fit(
+        console.print(Panel(
             "[bold cyan]🐷 PigWeight v3.0[/bold cyan]\n"
             "[white]Система автоматического отслеживания и взвешивания свиней[/white]",
             border_style="cyan",
-            box=box.DOUBLE
+            box=box.DOUBLE,
+            expand=False,
+            width=63
         ))
         console.print()
     
