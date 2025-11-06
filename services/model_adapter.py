@@ -11,11 +11,8 @@ from core.type_utils import TypeSafetyManager, safe_tensor_conversion, ensure_fl
 try:
     import onnxruntime as ort
     _HAVE_ONNX = True
-    print("ONNX Runtime доступен для CPU inference")
 except Exception as e:
     _HAVE_ONNX = False
-    print(f"ONNX Runtime не доступен: {e}")
-    print("   Для CPU оптимизации установите: pip install onnxruntime")
 
 try:
     import torch

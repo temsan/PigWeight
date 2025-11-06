@@ -351,8 +351,10 @@ class VideoSelector:
     
     def select_source_interactive(self) -> Optional[dict]:
         """Интерактивный выбор источника (видео или камера) с красивым TUI"""
-        # Всегда используем Rich вместо questionary для Windows совместимости
-        if HAVE_RICH:
+        # Приоритет: questionary (стрелки) > Rich (таблица) > simple (текст)
+        if HAVE_QUESTIONARY:
+            return self._select_source_questionary()
+        elif HAVE_RICH:
             return self._select_source_rich()
         else:
             return self._select_source_simple()
@@ -643,16 +645,7 @@ class PigTrackingApp:
         """Инициализация подключения к базе данных (опционально)"""
         try:
             self.db = DatabaseManager()
-            logger.info("✅ Подключение к базе данных успешно")
-            
-            # Показываем статистику
-            stats = self.db.get_stats()
-            logger.info(f"📊 В базе: {stats['total_acts']} актов, {stats['total_crossings']} проходов")
-            
         except Exception as e:
-            logger.info(f"ℹ️ База данных недоступна (это нормально)")
-            logger.info("   Результаты будут сохранены в JSON файл")
-            logger.info("   Для сохранения в БД: запустите docker-compose up -d")
             self.db = None
     
     async def process_video(self, video_path: Path):

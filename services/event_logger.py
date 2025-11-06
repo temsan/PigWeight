@@ -24,7 +24,6 @@ try:
     HAVE_DATABASE = True
 except ImportError:
     HAVE_DATABASE = False
-    logger.warning("DatabaseManager недоступен, события будут сохраняться только в файлы")
 
 @dataclass
 class EventData:

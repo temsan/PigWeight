@@ -109,7 +109,7 @@ class Config:
                     try:
                         setattr(self, f, field_type(env_value))
                     except (ValueError, TypeError):
-                        logger.warning(f"Could not cast env var {f.upper()} to {field_type}. Using default.")
+                        pass  # Используем значение по умолчанию
         
         # Auto-detect device if set to "auto"
         if self.DEVICE == "auto":
