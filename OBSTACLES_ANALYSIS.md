@@ -95,7 +95,7 @@ HAVE_UNIFIED_PROCESSOR = True
 
 ---
 
-### 3. 🟠 **WebSocket БЕЗ THROTTLE - ПЕРЕГРУЗ СЕРВЕРА**
+### 3. 🟢 **WebSocket THROTTLE — ИСПРАВЛЕНО**
 
 **Проблема:**
 ```python
@@ -113,7 +113,7 @@ async def websocket_endpoint(ws: WebSocket, id: str = Query(...)):
 - ❌ Сервер повиснет при 10+ клиентов
 - ❌ Мобильный клиент разряжает батарею
 
-**ДЕЙСТВИЕ:** Добавить throttling
+**РЕШЕНИЕ:** Добавлен throttling 10 FPS и глобальный лимит 10 подключений (код 1008 при превышении)
 ```python
 # Максимум 10 fps для WebSocket
 WEBSOCKET_MAX_FPS = 10
@@ -131,13 +131,14 @@ async def websocket_endpoint(ws: WebSocket):
             await asyncio.sleep(0.01)
 ```
 
-**Время:** 15-20 минут
+**Коммит:** e73bc49  
+**Статус:** ✅ ГОТОВО
 
 ---
 
 ## 🟠 ВЫСОКИЕ ПРЕПЯТСТВИЯ (БОЛЬШОЙ РИСК)
 
-### 4. 🟠 **WebSocket - БЕЗ ЛИМИТА КЛИЕНТОВ**
+### 4. 🟢 **WebSocket — ЛИМИТ КЛИЕНТОВ ДОБАВЛЕН**
 
 **Проблема:**
 ```python
@@ -154,7 +155,7 @@ max_subscribers_per_stream: int = 10
 - ❌ Slow client attack уязвимость
 - ❌ DoS возможен (подключи 1000 клиентов)
 
-**ДЕЙСТВИЕ:** 
+**РЕШЕНИЕ:** Глобальный лимит 10 соединений, корректный декремент
 ```python
 # Добавить глобальный лимит в api/app.py
 MAX_WEBSOCKET_CONNECTIONS = 10
@@ -173,7 +174,8 @@ async def websocket_endpoint(ws: WebSocket):
         current_ws_connections -= 1
 ```
 
-**Время:** 10-15 минут
+**Коммит:** e73bc49  
+**Статус:** ✅ ГОТОВО
 
 ---
 
@@ -213,7 +215,7 @@ Logs показывают:
 
 ## 🟡 СРЕДНИЕ ПРЕПЯТСТВИЯ (УЛУЧШЕНИЕ КАЧЕСТВА)
 
-### 6. 🟡 **ModelAdapter - СЛАБАЯ ОБРАБОТКА ОШИБОК**
+### 6. 🟢 **ModelAdapter — FALLBACK НА BBOX ДОБАВЛЕН**
 
 **Проблема:**
 ```
@@ -229,7 +231,7 @@ YOLO может вернуть masks=None → система работает с
 - ⚠️ Silent failures (система работает но неправильно)
 - ⚠️ Трудно отладить в production
 
-**ДЕЙСТВИЕ:**
+**РЕШЕНИЕ:** Выставляется `use_bbox_only`, постпроцессинг для ONNX/Ultralytics
 ```python
 # Добавить fallback logic
 def infer(self, imgs):
@@ -242,11 +244,12 @@ def infer(self, imgs):
     return results
 ```
 
-**Время:** 20-30 минут
+**Коммит:** f01f8a6  
+**Статус:** ✅ ГОТОВО
 
 ---
 
-### 7. 🟡 **FrameBroker - BACKPRESSURE НЕ РАБОТАЕТ**
+### 7. 🟢 **FrameBroker — BACKPRESSURE РАБОТАЕТ (ВАЛИДАЦИЯ)**
 
 **Проблема:**
 ```python
@@ -262,7 +265,7 @@ _backpressure_threshold = 0.8  # Начать DROP кадры при 80%
 - ⚠️ Очереди растут бесконечно
 - ⚠️ OOM через несколько часов
 
-**ДЕЙСТВИЕ:** Найти/добавить drop logic
+**СТАТУС:** Логика дропа присутствует (`_should_drop_frame`), дроп при threshold>=0.8
 ```python
 async def publish(self, stream_id: str, frame_id: int, ts: float, jpeg: bytes):
     # Check backpressure
@@ -275,11 +278,12 @@ async def publish(self, stream_id: str, frame_id: int, ts: float, jpeg: bytes):
     return await self._publish_to_subscribers(stream_id, frame_id, ts, jpeg)
 ```
 
-**Время:** 15-20 минут
+**Коммит:** N/A (валидация)  
+**Статус:** ✅ ГОТОВО
 
 ---
 
-### 8. 🟡 **DynamicBatcher - ПАРАМЕТРЫ ДЛЯ GPU ОПТИМИЗИРОВАНЫ**
+### 8. 🟢 **DynamicBatcher — АДАПТИВ ДЛЯ CPU/GPU**
 
 **Проблема:**
 ```python
@@ -299,7 +303,7 @@ batcher_config = BatcherConfig(
 - ⚠️ Низкая производительность на CPU
 - ⚠️ Задержки обработки >1 сек
 
-**ДЕЙСТВИЕ:** Адаптивная конфигурация
+**РЕШЕНИЕ:** GPU: (16, 50ms) / CPU: (4, 100ms) дефолты; учитывает CONFIG
 ```python
 import torch
 
@@ -316,7 +320,8 @@ batcher_config = BatcherConfig(
 )
 ```
 
-**Время:** 10-15 минут
+**Коммит:** f01f8a6  
+**Статус:** ✅ ГОТОВО
 
 ---
 
@@ -358,14 +363,14 @@ from api.models.tracker import SimpleTracker
 
 | # | Проблема | Тип | Приоритет | Время | Статус |
 |---|----------|-----|-----------|-------|--------|
-| 1 | DatabaseManager (2 версии) | 🔴 | CRITICAL | 15м | ⏳ PENDING |
+| 1 | DatabaseManager (2 версии) | 🔴 | CRITICAL | 15м | ✅ DONE |
 | 2 | Processor (2 версии) | 🔴 | CRITICAL | 30м | ⏳ PENDING |
-| 3 | WebSocket без throttle | 🟠 | HIGH | 20м | ⏳ PENDING |
-| 4 | WebSocket без лимита клиентов | 🟠 | HIGH | 15м | ⏳ PENDING |
+| 3 | WebSocket без throttle | 🟠 | HIGH | 20м | ✅ DONE |
+| 4 | WebSocket без лимита клиентов | 🟠 | HIGH | 15м | ✅ DONE |
 | 5 | av_worker timeouts | 🟠 | HIGH | 1-2ч | ⏳ PENDING |
-| 6 | ModelAdapter error handling | 🟡 | MEDIUM | 30м | ⏳ PENDING |
-| 7 | FrameBroker backpressure | 🟡 | MEDIUM | 20м | ⏳ PENDING |
-| 8 | DynamicBatcher CPU tuning | 🟡 | MEDIUM | 15м | ⏳ PENDING |
+| 6 | ModelAdapter error handling | 🟡 | MEDIUM | 30м | ✅ DONE |
+| 7 | FrameBroker backpressure | 🟡 | MEDIUM | 20м | ✅ DONE |
+| 8 | DynamicBatcher CPU tuning | 🟡 | MEDIUM | 15м | ✅ DONE |
 | 9 | Extract classes from api/app.py | 🟡 | MEDIUM | 40м | ⏳ PENDING |
 
 **ИТОГО:** 2:45 часов работы для полной стабилизации

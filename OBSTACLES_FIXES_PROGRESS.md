@@ -1,9 +1,9 @@
 # ✅ OBSTACLES FIXES - PROGRESS TRACKING
 
 **Session:** November 7, 2025  
-**Status:** IN PROGRESS - 1/9 Fixed, 8 Remaining  
-**Time Invested:** ~1 hour  
-**Expected Total:** 2:45 hours
+**Status:** IN PROGRESS - 5/9 Fixed, 4 Remaining  
+**Time Invested:** ~1h 40m  
+**Expected Total:** ~1h remaining
 
 ---
 
@@ -23,9 +23,54 @@
 
 ---
 
+### 2. ✅ **WebSocket Throttling & Global Limit** (HIGH)
+**Time:** 20 minutes  
+**What:** Added fps throttle (10 FPS) and global connections limit (10)  
+**Changes:**
+- ✅ `api/endpoints/websocket.py` — троттлинг и лимит, корректный декремент соединений
+- ✅ Код 1008 при превышении лимита
+- ✅ Безопасная задержка отправки (sleep)
+
+**Result:** Protected against overload and DoS  
+**Commit:** e73bc49
+
+---
+
+### 3. ✅ **DynamicBatcher CPU/GPU Tuning** (MEDIUM)
+**Time:** 10 minutes  
+**What:** Adaptive defaults GPU vs CPU  
+**Changes:**
+- ✅ `core/processor.py` — GPU: (16, 50ms), CPU: (4, 100ms); respects CONFIG overrides
+
+**Result:** Better real-time on CPU  
+**Commit:** f01f8a6
+
+---
+
+### 4. ✅ **ModelAdapter bbox fallback** (MEDIUM)
+**Time:** 15 minutes  
+**What:** Safe fallback when masks are empty  
+**Changes:**
+- ✅ `services/model_adapter.py` — выставляем `use_bbox_only`, ONNX/Ultralytics постпроцессинг
+
+**Result:** No silent failures; consistent outputs  
+**Commit:** f01f8a6
+
+---
+
+### 5. ✅ **FrameBroker backpressure verification** (MEDIUM)
+**Time:** 0 minutes (verification)  
+**What:** Backpressure dropping is present and active  
+**Changes:**
+- ✅ `core/frame_broker.py` — `_should_drop_frame` проверяет qsize/maxsize с threshold=0.8
+
+**Result:** Frames are dropped under pressure; avoids OOM
+
+---
+
 ## ⏳ TODO - CRITICAL PHASE
 
-### 2. 🔴 **Video Processor Consolidation** (CRITICAL)
+### 6. 🔴 **Video Processor Consolidation** (CRITICAL)
 **Priority:** HIGH  
 **Time Estimate:** 20-30 minutes  
 **Status:** 📋 PENDING
@@ -49,17 +94,13 @@
 
 ## ⏳ TODO - HIGH PRIORITY PHASE
 
-### 3. 🟠 **WebSocket Rate Limiting** (HIGH)
-**Time:** 20 minutes  
-**Status:** 📋 PENDING
-**Impact:** Prevent server overload on frame broadcasting
+### 7. 🟠 **WebSocket Rate Limiting** (HIGH)
+Status: ✅ DONE (see above)
 
-### 4. 🟠 **WebSocket Client Connection Limit** (HIGH)
-**Time:** 15 minutes  
-**Status:** 📋 PENDING
-**Impact:** Prevent DoS attacks, limit memory usage
+### 8. 🟠 **WebSocket Client Connection Limit** (HIGH)
+Status: ✅ DONE (see above)
 
-### 5. 🟠 **av_worker Timeout Diagnostics** (HIGH)
+### 9. 🟠 **av_worker Timeout Diagnostics** (HIGH)
 **Time:** 1-2 hours  
 **Status:** 📋 PENDING
 **Impact:** Identify why file operations timeout
@@ -68,20 +109,14 @@
 
 ## ⏳ TODO - MEDIUM PRIORITY PHASE
 
-### 6. 🟡 **ModelAdapter Error Handling** (MEDIUM)
-**Time:** 30 minutes  
-**Status:** 📋 PENDING
-**Impact:** Add fallback logic for empty masks
+### 10. 🟡 **ModelAdapter Error Handling** (MEDIUM)
+Status: ✅ DONE (see above)
 
-### 7. 🟡 **FrameBroker Backpressure** (MEDIUM)
-**Time:** 20 minutes  
-**Status:** 📋 PENDING
-**Impact:** Implement frame dropping on memory pressure
+### 11. 🟡 **FrameBroker Backpressure** (MEDIUM)
+Status: ✅ DONE (verified)
 
-### 8. 🟡 **DynamicBatcher CPU Tuning** (MEDIUM)
-**Time:** 15 minutes  
-**Status:** 📋 PENDING
-**Impact:** Optimize batch sizes for CPU vs GPU
+### 12. 🟡 **DynamicBatcher CPU Tuning** (MEDIUM)
+Status: ✅ DONE (see above)
 
 ### 9. 🟡 **Extract Classes from api/app.py** (MEDIUM)
 **Time:** 40 minutes  
@@ -95,9 +130,9 @@
 | Phase | Status | Time Spent | Time Remaining |
 |-------|--------|-----------|----------------|
 | **CRITICAL** | 50% (1/2) | 15m | 30m |
-| **HIGH** | 0% (0/3) | 0m | 50m |
-| **MEDIUM** | 0% (0/4) | 0m | 105m |
-| **TOTAL** | 11% (1/9) | 15m | 185m |
+| **HIGH** | 67% (2/3) | 20m | 30m |
+| **MEDIUM** | 75% (3/4) | 65m | 20m |
+| **TOTAL** | 56% (5/9) | 100m | 80m |
 
 ---
 
