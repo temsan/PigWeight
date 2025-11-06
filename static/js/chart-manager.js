@@ -100,6 +100,9 @@ export class ChartManager extends EventEmitter {
                     mode: 'index'
                 },
                 plugins: {
+                    filler: {
+                        propagate: true
+                    },
                     legend: {
                         display: true,
                         position: 'top',
