@@ -543,6 +543,14 @@ class ModelAdapter:
                         logger.warning(f"ONNX inference error for image: {e}")
                         results.append({'detections': 0, 'confidence': 0.0, 'masks': [], 'bboxes': [], 'centroids': []})
 
+                # Fallback flag for bbox-only mode
+                for r in results:
+                    try:
+                        if (not r.get('masks')) and r.get('bboxes'):
+                            r['use_bbox_only'] = True
+                    except Exception:
+                        pass
+
                 out = results
                 
                 # Track performance metrics for ONNX
@@ -664,7 +672,8 @@ class ModelAdapter:
                         'confidence': current_confidence,
                         'masks': current_masks,
                         'bboxes': current_bboxes,
-                        'centroids': current_centroids
+                        'centroids': current_centroids,
+                        'use_bbox_only': True if (not current_masks and current_bboxes) else False
                     })
                 
                 # Track performance metrics for Ultralytics

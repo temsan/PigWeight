@@ -96,9 +96,19 @@ class UnifiedVideoProcessor:
             self.batcher = None
         else:
             self.is_active = True
+            # Adaptive defaults based on device
+            try:
+                import torch as _t
+                is_cuda = _t.cuda.is_available()
+            except Exception:
+                is_cuda = False
+
+            default_max_batch = 16 if is_cuda else 4
+            default_latency_ms = 50.0 if is_cuda else 100.0
+
             batcher_config = BatcherConfig(
-                max_batch_size=getattr(CONFIG, "MAX_BATCH_SIZE", 16),
-                target_latency_ms=getattr(CONFIG, "TARGET_LATENCY_MS", 50.0)
+                max_batch_size=getattr(CONFIG, "MAX_BATCH_SIZE", default_max_batch),
+                target_latency_ms=getattr(CONFIG, "TARGET_LATENCY_MS", default_latency_ms)
             )
             self.batcher = DynamicBatcher[BatchItem](batcher_config, self._execute_batch)
             logger.info(f"[{self.stream_id}] Унифицированный процессор активен. Backend: {self.model_adapter.backend}")
