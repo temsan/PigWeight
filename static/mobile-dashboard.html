@@ -222,6 +222,18 @@
             transform: scale(0.98);
         }
 
+        .btn-action {
+            background: rgba(59, 130, 246, 0.3);
+            color: #60a5fa;
+            border: 2px solid rgba(59, 130, 246, 0.5);
+        }
+
+        .btn-action:active {
+            background: rgba(59, 130, 246, 0.4);
+            border: 2px solid rgba(59, 130, 246, 0.7);
+            transform: scale(0.98);
+        }
+
         /* Toggle Switch */
         .toggle-switch {
             display: flex;
@@ -419,6 +431,20 @@
             </div>
         </div>
 
+        <!-- Action Buttons -->
+        <div class="glass">
+            <div class="controls">
+                <button class="btn btn-action" id="export-btn" title="Экспортировать результаты в Excel">
+                    <span>📥</span>
+                    <span>ЭКСПОРТ</span>
+                </button>
+                <button class="btn btn-action" id="compare-btn" title="Сверить с ручными записями">
+                    <span>⚖️</span>
+                    <span>СВЕРКА</span>
+                </button>
+            </div>
+        </div>
+
         <!-- Footer Info -->
         <div class="footer-info">
             <span id="update-time">Обновление: --:--:--</span>
@@ -440,6 +466,8 @@
         const modeText = document.getElementById('mode-text');
         const autoBtn = document.getElementById('auto-btn');
         const fixBtn = document.getElementById('fix-btn');
+        const exportBtn = document.getElementById('export-btn');
+        const compareBtn = document.getElementById('compare-btn');
         const updateTime = document.getElementById('update-time');
 
         // Initialize
@@ -469,6 +497,14 @@
             if (!autoMode && activeAct) {
                 fixCurrentAct();
             }
+        });
+
+        exportBtn.addEventListener('click', () => {
+            exportToExcel();
+        });
+
+        compareBtn.addEventListener('click', () => {
+            showCompareDialog();
         });
 
         // Fetch metrics
@@ -527,6 +563,44 @@
                 await fetchMetrics();
             } catch (error) {
                 console.error('❌ Ошибка фиксации акта:', error);
+            }
+        }
+
+        // Export to Excel
+        async function exportToExcel() {
+            try {
+                exportBtn.disabled = true;
+                exportBtn.textContent = '⏳ ЭКСПОРТ...';
+                
+                // Можно интегрировать с реальным API когда будет готово
+                alert('📥 Экспорт в Excel\n\nФункция будет доступна после интеграции с backend API.\n\nПока результаты автоматически сохраняются в БД.');
+                
+                exportBtn.disabled = false;
+                exportBtn.textContent = '📥 ЭКСПОРТ';
+            } catch (error) {
+                console.error('❌ Ошибка экспорта:', error);
+                alert('❌ Ошибка при экспорте');
+                exportBtn.disabled = false;
+                exportBtn.textContent = '📥 ЭКСПОРТ';
+            }
+        }
+
+        // Compare with manual records
+        function showCompareDialog() {
+            try {
+                compareBtn.disabled = true;
+                compareBtn.textContent = '⏳ СВЕРКА...';
+                
+                // Можно интегрировать с реальным API когда будет готово
+                alert('⚖️ Сверка с ручными записями\n\nФункция будет доступна после интеграции с backend API.\n\nПока система автоматически логирует все акты для последующей сверки.');
+                
+                compareBtn.disabled = false;
+                compareBtn.textContent = '⚖️ СВЕРКА';
+            } catch (error) {
+                console.error('❌ Ошибка сверки:', error);
+                alert('❌ Ошибка при сверке');
+                compareBtn.disabled = false;
+                compareBtn.textContent = '⚖️ СВЕРКА';
             }
         }
 
