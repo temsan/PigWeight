@@ -90,6 +90,160 @@
             50% { opacity: 0.5; }
         }
 
+        /* 🚦 Traffic Light Status */
+        .traffic-light {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 15px 0;
+        }
+
+        .light {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .light.red {
+            background: linear-gradient(135deg, #ff4757 0%, #ff6348 100%);
+            box-shadow: 0 0 20px rgba(255, 71, 87, 0.6);
+        }
+
+        .light.yellow {
+            background: linear-gradient(135deg, #ffa502 0%, #ffb700 100%);
+            box-shadow: 0 0 20px rgba(255, 165, 2, 0.6);
+            animation: blink 0.6s infinite;
+        }
+
+        .light.green {
+            background: linear-gradient(135deg, #2ed573 0%, #26de81 100%);
+            box-shadow: 0 0 20px rgba(46, 213, 115, 0.6);
+            animation: glow 1s infinite;
+        }
+
+        .light.gray {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        @keyframes glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(46, 213, 115, 0.6); }
+            50% { box-shadow: 0 0 30px rgba(46, 213, 115, 0.9); }
+        }
+
+        .status-text {
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            margin-top: 8px;
+        }
+
+        /* Stabilization Progress Bar */
+        .stabilization-bar {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            margin: 10px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .stabilization-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4757 0%, #ffa502 50%, #2ed573 100%);
+            width: 0%;
+            transition: width 0.5s ease;
+            border-radius: 10px;
+        }
+
+        /* Weight Balance Indicator */
+        .weight-balance {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 12px 0;
+            font-size: 12px;
+        }
+
+        .balance-label {
+            color: rgba(255, 255, 255, 0.7);
+            flex: 0 0 auto;
+        }
+
+        .balance-scale {
+            flex: 1;
+            display: flex;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .balance-indicator {
+            position: absolute;
+            width: 3px;
+            height: 100%;
+            background: white;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .balance-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4757, #2ed573);
+            border-radius: 3px;
+        }
+
+        .balance-value {
+            color: rgba(255, 255, 255, 0.8);
+            flex: 0 0 auto;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        /* Recommendation Box */
+        .recommendation {
+            background: rgba(255, 255, 255, 0.1);
+            border-left: 4px solid #2ed573;
+            padding: 12px 15px;
+            border-radius: 10px;
+            font-size: 13px;
+            color: white;
+            font-weight: 500;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .recommendation.waiting {
+            border-left-color: #ffa502;
+            background: rgba(255, 165, 2, 0.1);
+        }
+
+        .recommendation.unstable {
+            border-left-color: #ff4757;
+            background: rgba(255, 71, 87, 0.1);
+        }
+
+        .recommendation.ready {
+            border-left-color: #2ed573;
+            background: rgba(46, 213, 115, 0.1);
+        }
+
         /* Metrics Grid */
         .metrics-grid {
             display: grid;
@@ -373,6 +527,36 @@
             </div>
         </div>
 
+        <!-- 🚦 Traffic Light Status (Stabilization) -->
+        <div class="glass">
+            <div class="traffic-light">
+                <div id="light-red" class="light gray" title="Нестабильно"></div>
+                <div id="light-yellow" class="light gray" title="Стабилизация"></div>
+                <div id="light-green" class="light gray" title="Готово"></div>
+            </div>
+            <div class="status-text" id="stability-status">⏳ Инициализация...</div>
+            
+            <!-- Stabilization Progress -->
+            <div class="stabilization-bar">
+                <div class="stabilization-fill" id="stabilization-fill" style="width: 0%;"></div>
+            </div>
+            
+            <!-- Weight Balance -->
+            <div class="weight-balance">
+                <span class="balance-label">⚖️ Баланс</span>
+                <div class="balance-scale">
+                    <div class="balance-fill" id="balance-fill"></div>
+                    <div class="balance-indicator"></div>
+                </div>
+                <span class="balance-value" id="balance-value">0%</span>
+            </div>
+            
+            <!-- Recommendation -->
+            <div class="recommendation ready" id="recommendation">
+                ✅ Система готова
+            </div>
+        </div>
+
         <!-- Metrics Grid -->
         <div class="glass" style="flex: 1; overflow-y: auto; padding: 16px;">
             <div class="metrics-grid">
@@ -469,6 +653,22 @@
         const exportBtn = document.getElementById('export-btn');
         const compareBtn = document.getElementById('compare-btn');
         const updateTime = document.getElementById('update-time');
+        
+        // Traffic Light Elements
+        const lightRed = document.getElementById('light-red');
+        const lightYellow = document.getElementById('light-yellow');
+        const lightGreen = document.getElementById('light-green');
+        const stabilityStatus = document.getElementById('stability-status');
+        const stabilizationFill = document.getElementById('stabilization-fill');
+        const balanceFill = document.getElementById('balance-fill');
+        const balanceValue = document.getElementById('balance-value');
+        const recommendation = document.getElementById('recommendation');
+        
+        // Stabilization tracking
+        let weightHistory = [];
+        let countHistory = [];
+        const HISTORY_SIZE = 30; // последних 30 измерений
+        const STABILITY_THRESHOLD = 5; // % отклонения для стабилизации
 
         // Initialize
         console.log('🚀 PigWeight Mobile Dashboard инициализирован');
@@ -524,6 +724,9 @@
                     fixBtn.classList.toggle('active', !autoMode && activeAct);
 
                     statusText.textContent = data.stream_id || 'Готово';
+                    
+                    // 🚦 Update stabilization status
+                    updateStabilizationStatus(data.current_count || 0, data.avg_weight || 0);
                 } else {
                     statusText.textContent = 'Нет данных';
                 }
@@ -546,6 +749,85 @@
             } catch (error) {
                 console.error('❌ Ошибка смены режима:', error);
             }
+        }
+
+        // 🚦 Update Traffic Light Status
+        function updateStabilizationStatus(count, weight) {
+            // Добавляем в историю
+            countHistory.push(count);
+            weightHistory.push(weight);
+            
+            // Ограничиваем размер истории
+            if (countHistory.length > HISTORY_SIZE) countHistory.shift();
+            if (weightHistory.length > HISTORY_SIZE) weightHistory.shift();
+            
+            // Если недостаточно данных
+            if (countHistory.length < 5) {
+                setTrafficLight('gray', '⏳ Инициализация...', 20);
+                recommendation.className = 'recommendation waiting';
+                recommendation.innerHTML = '⏳ Собираем данные...';
+                return;
+            }
+            
+            // Анализируем стабильность
+            const countVariation = calculateVariation(countHistory);
+            const weightVariation = calculateVariation(weightHistory);
+            
+            // Вычисляем стабилизацию (0-100%)
+            const stabilization = Math.max(0, 100 - (countVariation + weightVariation) / 2);
+            stabilizationFill.style.width = stabilization + '%';
+            
+            // Вычисляем баланс веса (отклонение от среднего)
+            const avgW = weightHistory[weightHistory.length - 1];
+            const avgHistorical = weightHistory.reduce((a, b) => a + b, 0) / weightHistory.length;
+            const balancePercent = Math.abs(avgW - avgHistorical) / avgHistorical * 100;
+            const balanceFillPercent = Math.max(0, 100 - balancePercent * 2);
+            balanceFill.style.width = balanceFillPercent + '%';
+            balanceValue.textContent = balancePercent.toFixed(1) + '%';
+            
+            // Определяем статус светофора
+            if (stabilization >= 80 && countVariation < STABILITY_THRESHOLD && weightVariation < STABILITY_THRESHOLD) {
+                // 🟢 GREEN - Готово к взвешиванию
+                setTrafficLight('green', '✅ ГОТОВО К ВЗВЕШИВАНИЮ', stabilization);
+                recommendation.className = 'recommendation ready';
+                recommendation.innerHTML = '✅ Свиньи стабилизированы - можно фиксировать акт!';
+            } else if (stabilization >= 40) {
+                // 🟡 YELLOW - Стабилизация в процессе
+                setTrafficLight('yellow', '⏳ СТАБИЛИЗАЦИЯ...', stabilization);
+                recommendation.className = 'recommendation waiting';
+                recommendation.innerHTML = '⏳ Ждите стабилизации...';
+            } else {
+                // 🔴 RED - Нестабильно, помощь нужна
+                setTrafficLight('red', '❌ НЕСТАБИЛЬНО', stabilization);
+                recommendation.className = 'recommendation unstable';
+                recommendation.innerHTML = '❌ Слишком много движений - подождите или помогите стабилизировать';
+            }
+        }
+        
+        function calculateVariation(values) {
+            if (values.length === 0) return 0;
+            const avg = values.reduce((a, b) => a + b, 0) / values.length;
+            const variance = values.reduce((sum, val) => sum + Math.pow((val - avg), 2), 0) / values.length;
+            const stdDev = Math.sqrt(variance);
+            return (stdDev / avg) * 100; // % variation
+        }
+        
+        function setTrafficLight(color, status, percent) {
+            // Reset all lights
+            lightRed.className = 'light gray';
+            lightYellow.className = 'light gray';
+            lightGreen.className = 'light gray';
+            
+            // Set active light
+            if (color === 'red') {
+                lightRed.className = 'light red';
+            } else if (color === 'yellow') {
+                lightYellow.className = 'light yellow';
+            } else if (color === 'green') {
+                lightGreen.className = 'light green';
+            }
+            
+            stabilityStatus.textContent = status + ` (${Math.round(percent)}%)`;
         }
 
         // Fix current act
