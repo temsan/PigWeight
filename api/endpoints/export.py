@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import os
-import tempfile
 
 from pig_tracking.database_manager import DatabaseManager
 from pig_tracking.excel_exporter import ExcelExporter
@@ -62,9 +61,10 @@ async def export_to_excel(
                 detail="Нет актов за указанный период"
             )
         
-        # Создать временный файл
-        temp_dir = Path(tempfile.gettempdir())
-        output_path = temp_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        # Создать файл в uploads/
+        uploads_dir = Path("uploads")
+        uploads_dir.mkdir(exist_ok=True)
+        output_path = uploads_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         # Экспорт
         exporter = ExcelExporter()
@@ -111,9 +111,10 @@ async def compare_with_excel(
                 detail="Неверный формат файла. Ожидается .xlsx или .xls"
             )
         
-        # Сохранить загруженный файл
-        temp_dir = Path(tempfile.gettempdir())
-        input_path = temp_dir / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
+        # Сохранить загруженный файл в uploads/
+        uploads_dir = Path("uploads")
+        uploads_dir.mkdir(exist_ok=True)
+        input_path = uploads_dir / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
         
         with open(input_path, 'wb') as f:
             content = await file.read()
@@ -147,8 +148,8 @@ async def compare_with_excel(
         comparator = ExcelComparator(time_tolerance_minutes=tolerance_minutes)
         comparison = comparator.compare(auto_acts, manual_acts)
         
-        # Создать отчет
-        output_path = temp_dir / f"comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        # Создать отчет в uploads/
+        output_path = uploads_dir / f"comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         comparator.generate_report(comparison, str(output_path))
         
         # Вернуть метрики и ссылку на отчет
@@ -175,11 +176,11 @@ async def compare_with_excel(
 @router.get("/download/{filename}")
 async def download_file(filename: str):
     """
-    Скачать сгенерированный файл
+    Скачать сгенерированный файл из uploads/
     """
     try:
-        temp_dir = Path(tempfile.gettempdir())
-        file_path = temp_dir / filename
+        uploads_dir = Path("uploads")
+        file_path = uploads_dir / filename
         
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Файл не найден")
