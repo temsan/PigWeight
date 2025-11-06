@@ -1975,25 +1975,6 @@ async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Bod
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-            'stream_id': data.get('stream_id', ''),
-            'created_at': datetime.now().isoformat()
-        }
-        
-        # Загружаем существующие акты
-        acts = load_weighing_acts()
-        acts.append(act)
-        
-        # Сохраняем
-        if save_weighing_acts(acts):
-            logger.info(f"Saved weighing act: {act['group']} on {act['date']}")
-            return {"status": "success", "id": act['id']}
-        else:
-            return JSONResponse({"error": "Failed to save act"}, status_code=500)
-            
-    except Exception as e:
-        logger.error(f"Error saving weighing act: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
 @app.get("/api/weighing/logs")
 async def get_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
     """Получение журнала актов взвешивания за период"""

@@ -66,6 +66,11 @@
 
 **Назначение:** Получение кадров из различных источников
 
+**Обоснование дизайна:**
+- Единый интерфейс для работы с видеофайлами и камерами упрощает переключение между источниками
+- Отслеживание прогресса необходимо для выполнения Требования 1.2 (отображение прогресса в консоли)
+- Временные метки кадров критичны для Требования 2 (обнаружение актов по времени)
+
 **Интерфейс:**
 ```python
 class VideoCapture:
@@ -73,19 +78,49 @@ class VideoCapture:
         """
         source: путь к файлу или URL камеры
         mode: "realtime", "file", "test"
+        
+        Требования: 1.1 (загрузка видеофайла)
         """
         pass
     
     def read_frame(self) -> Optional[np.ndarray]:
-        """Читает следующий кадр"""
+        """
+        Читает следующий кадр
+        
+        Требования: 1.1 (обработка кадров)
+        """
         pass
     
     def get_progress(self) -> float:
-        """Возвращает прогресс обработки (0.0-1.0)"""
+        """
+        Возвращает прогресс обработки (0.0-1.0)
+        
+        Требования: 1.2 (отображение прогресса)
+        """
         pass
     
     def get_timestamp(self) -> datetime:
-        """Возвращает временную метку текущего кадра"""
+        """
+        Возвращает временную метку текущего кадра
+        
+        Требования: 1.5, 2.1, 2.3 (временные метки для проходов и актов)
+        """
+        pass
+    
+    def get_total_frames(self) -> int:
+        """
+        Возвращает общее количество кадров в видео
+        
+        Требования: 1.2 (расчет процента выполнения)
+        """
+        pass
+    
+    def get_current_frame_number(self) -> int:
+        """
+        Возвращает номер текущего кадра
+        
+        Требования: 1.2 (отображение количества обработанных кадров)
+        """
         pass
 ```
 
@@ -197,6 +232,12 @@ tracked_pigs = tracker.update(detections)
 
 **Назначение:** Подсчет проходов через вертикальные линии
 
+**Обоснование дизайна:**
+- Cooldown механизм предотвращает двойной подсчет (Требование 6.1, 6.2)
+- Интерполяция Y-координаты обеспечивает точное определение позиции прохода (Требование 6.5)
+- Отслеживание направления необходимо для Требования 1.5 и 6.4
+- Использование уникальных ID треков обеспечивает различение свиней (Требование 6.3)
+
 **Используем существующую логику:**
 - `api/app.py` → `VideoStream._update_line_counters()` - подсчет проходов
 
@@ -204,22 +245,22 @@ tracked_pigs = tracker.update(detections)
 
 ```python
 # Из core/config.py
-LINE_LEFT_X = 0.25  # Позиция левой линии (0.0-1.0)
-LINE_RIGHT_X = 0.75  # Позиция правой линии (0.0-1.0)
-CROSS_COOLDOWN_SEC = 1.0  # Cooldown между проходами одной свиньи
+LINE_LEFT_X = 0.25  # Позиция левой линии (0.0-1.0) - Требование 8.3
+LINE_RIGHT_X = 0.75  # Позиция правой линии (0.0-1.0) - Требование 8.3
+CROSS_COOLDOWN_SEC = 1.0  # Cooldown между проходами одной свиньи - Требование 6.1
 
 # Алгоритм из api/app.py VideoStream._update_line_counters():
 # 1. Для каждого трека сохраняем предыдущую позицию (prev_x, prev_y)
 # 2. Определяем, был ли трек внутри зоны (между линиями) ранее
 # 3. Определяем, находится ли трек внутри зоны сейчас
-# 4. Детектируем события:
+# 4. Детектируем события (Требование 6.4):
 #    - Вход слева: prev < LINE_LEFT_X <= current (left_in++)
 #    - Вход справа: prev > LINE_RIGHT_X >= current (right_in++)
 #    - Выход слева: prev >= LINE_LEFT_X > current (left_flow--)
 #    - Выход справа: prev <= LINE_RIGHT_X < current (right_flow--)
-# 5. Интерполяция Y-координаты в точке пересечения линии
-# 6. Проверка cooldown: не считать проход, если прошло < CROSS_COOLDOWN_SEC
-# 7. Логирование события с временной меткой и координатами
+# 5. Интерполяция Y-координаты в точке пересечения линии (Требование 6.5)
+# 6. Проверка cooldown: не считать проход, если прошло < CROSS_COOLDOWN_SEC (Требование 6.2)
+# 7. Логирование события с временной меткой и координатами (Требование 1.5)
 ```
 
 **Интерфейс (адаптируем из существующего):**
@@ -229,6 +270,9 @@ class CrossingCounter:
                  left_line_x: float = 0.25, 
                  right_line_x: float = 0.75, 
                  cooldown_sec: float = 1.0):
+        """
+        Требования: 6.1 (cooldown), 8.3 (конфигурируемые позиции линий)
+        """
         self.left_line_x = left_line_x
         self.right_line_x = right_line_x
         self.cooldown_sec = cooldown_sec
@@ -238,6 +282,11 @@ class CrossingCounter:
         self._track_last_cross_time = {}  # track_id -> timestamp
     
     def process_tracks(self, tracks, current_time) -> List[CrossingEvent]:
+        """
+        Обрабатывает треки и возвращает события пересечения линий
+        
+        Требования: 1.5 (регистрация проходов), 6.1-6.5 (предотвращение двойного подсчета)
+        """
         # Реализация на основе VideoStream._update_line_counters()
         pass
 ```
@@ -245,6 +294,12 @@ class CrossingCounter:
 #### 1.5 Модуль обнаружения актов (ActDetector)
 
 **Назначение:** Автоматическое обнаружение начала и конца актов взвешивания
+
+**Обоснование дизайна:**
+- Порог в 3 свиньи отфильтровывает одиночные проходы (Требование 2.1, 2.4)
+- Интервал без активности 30 секунд определяет естественное завершение акта (Требование 2.3)
+- Накопление статистики во время акта необходимо для Требования 2.2
+- Вычисление длительности требуется для Требования 2.5 и сохранения в БД (Требование 3.2)
 
 **Интерфейс:**
 ```python
@@ -254,9 +309,11 @@ class ActDetector:
                  max_interval_sec: float = 30.0,
                  min_duration_sec: float = 10.0):
         """
-        min_pigs_threshold: минимум свиней для начала акта
-        max_interval_sec: макс интервал без активности для завершения акта
+        min_pigs_threshold: минимум свиней для начала акта (Требование 2.1)
+        max_interval_sec: макс интервал без активности для завершения акта (Требование 2.3)
         min_duration_sec: минимальная длительность акта
+        
+        Требования: 2.1, 2.3, 8.4 (конфигурируемые параметры)
         """
         pass
     
@@ -264,17 +321,45 @@ class ActDetector:
         """
         Обновляет состояние, возвращает событие акта (start/end)
         ActEvent: {type: "start"|"end", timestamp, act_id}
+        
+        Требования: 2.1 (начало акта), 2.3 (завершение акта)
         """
         pass
     
     def get_current_act(self) -> Optional[WeighingAct]:
-        """Возвращает текущий активный акт или None"""
+        """
+        Возвращает текущий активный акт или None
+        
+        Требования: 2.2 (накопление статистики), 9.2 (текущая статистика для API)
+        """
+        pass
+    
+    def accumulate_statistics(self, crossing: CrossingEvent):
+        """
+        Накапливает статистику по проходам во время активного акта
+        
+        Требования: 2.2 (проходы слева, справа, пиковое количество, уникальные свиньи)
+        """
+        pass
+    
+    def calculate_duration(self) -> float:
+        """
+        Вычисляет длительность акта в секундах
+        
+        Требования: 2.5 (вычисление длительности)
+        """
         pass
 ```
 
 #### 1.6 Модуль базы данных (DatabaseManager для Supabase)
 
 **Назначение:** Сохранение данных в локальный Supabase
+
+**Обоснование дизайна:**
+- Supabase выбран как современная альтернатива PostgreSQL с встроенным REST API (Требование 3.1)
+- Разделение на таблицы weighing_acts и crossings обеспечивает нормализацию данных (Требование 3.2, 3.3)
+- Graceful degradation при недоступности БД обеспечивает непрерывность работы (Требование 3.4)
+- SQL миграции обеспечивают автоматическое создание схемы (Требование 3.5)
 
 **Используем:**
 - `supabase-py` - официальный Python клиент для Supabase
@@ -289,57 +374,106 @@ class DatabaseManager:
         """
         supabase_url: URL локального Supabase (http://localhost:54321)
         supabase_key: Anon key из Supabase
+        
+        Требования: 3.1 (подключение к БД)
         """
         self.client: Client = create_client(supabase_url, supabase_key)
     
     def save_crossing(self, crossing: CrossingEvent) -> int:
-        """Сохраняет проход через supabase.table('crossings').insert()"""
-        result = self.client.table('crossings').insert({
-            'act_id': crossing.act_id,
-            'pig_id': crossing.pig_id,
-            'direction': crossing.direction,
-            'crossed_at': crossing.timestamp.isoformat(),
-            'line_x': crossing.line_x,
-            'line_y': crossing.line_y,
-            'weight_estimate': crossing.weight_estimate
-        }).execute()
-        return result.data[0]['id']
+        """
+        Сохраняет проход через supabase.table('crossings').insert()
+        
+        Требования: 3.3 (сохранение проходов с полями act_id, pig_id, direction, crossed_at, line_x, line_y)
+        """
+        try:
+            result = self.client.table('crossings').insert({
+                'act_id': crossing.act_id,
+                'pig_id': crossing.pig_id,
+                'direction': crossing.direction,
+                'crossed_at': crossing.timestamp.isoformat(),
+                'line_x': crossing.line_x,
+                'line_y': crossing.line_y,
+                'weight_estimate': crossing.weight_estimate
+            }).execute()
+            return result.data[0]['id']
+        except Exception as e:
+            # Требование 3.4: логирование ошибки и продолжение работы
+            logger.error(f"Failed to save crossing: {e}")
+            return -1
     
     def save_weighing_act(self, act: WeighingAct) -> int:
-        """Сохраняет акт взвешивания"""
-        result = self.client.table('weighing_acts').insert({
-            'started_at': act.started_at.isoformat(),
-            'ended_at': act.ended_at.isoformat(),
-            'duration_sec': act.duration_sec,
-            'left_count': act.left_count,
-            'right_count': act.right_count,
-            'peak_count': act.peak_count,
-            'total_weight': act.total_weight,
-            'avg_weight': act.avg_weight,
-            'stream_id': act.stream_id,
-            'video_file': act.video_file
-        }).execute()
-        return result.data[0]['id']
+        """
+        Сохраняет акт взвешивания
+        
+        Требования: 3.2 (сохранение актов с полями started_at, ended_at, duration_sec, 
+                    left_count, right_count, peak_count, stream_id, video_file)
+        """
+        try:
+            result = self.client.table('weighing_acts').insert({
+                'started_at': act.started_at.isoformat(),
+                'ended_at': act.ended_at.isoformat(),
+                'duration_sec': act.duration_sec,
+                'left_count': act.left_count,
+                'right_count': act.right_count,
+                'peak_count': act.peak_count,
+                'total_weight': act.total_weight,
+                'avg_weight': act.avg_weight,
+                'stream_id': act.stream_id,
+                'video_file': act.video_file
+            }).execute()
+            return result.data[0]['id']
+        except Exception as e:
+            # Требование 3.4: логирование ошибки и продолжение работы
+            logger.error(f"Failed to save weighing act: {e}")
+            return -1
     
     def get_acts_by_period(self, start: datetime, end: datetime) -> List[WeighingAct]:
-        """Получает акты за период через Supabase query"""
+        """
+        Получает акты за период через Supabase query
+        
+        Требования: 4.2 (получение актов за период для экспорта), 9.1 (API для получения актов)
+        """
         result = self.client.table('weighing_acts')\
             .select('*')\
             .gte('started_at', start.isoformat())\
             .lte('started_at', end.isoformat())\
             .execute()
         return [WeighingAct(**row) for row in result.data]
+    
+    def get_current_stats(self) -> dict:
+        """
+        Получает текущую статистику для веб-интерфейса
+        
+        Требования: 9.2 (текущая статистика: количество свиней, проходы, активный акт)
+        """
+        # Реализация получения последнего активного акта и статистики
+        pass
+    
+    def run_migrations(self):
+        """
+        Выполняет SQL миграции для создания таблиц
+        
+        Требования: 3.5 (автоматическое создание таблиц при первом запуске)
+        """
+        # Выполнение SQL миграций из supabase/migrations/
+        pass
 ```
 
 ### 2. Веб-интерфейс
 
 #### 2.1 REST API (FastAPI)
 
+**Обоснование дизайна:**
+- REST API обеспечивает доступ к данным для веб-интерфейса (Требование 9)
+- Разделение на эндпоинты по функциональности упрощает поддержку
+- Использование FastAPI обеспечивает автоматическую документацию и валидацию
+
 **Эндпоинты:**
 
 ```python
 # Получение текущих показателей
-GET /api/stats/current
+# Требования: 9.2 (текущая статистика)
+GET /api/weighing/stats
 Response: {
     "current_count": int,
     "left_count": int,
@@ -350,22 +484,33 @@ Response: {
 }
 
 # Получение истории актов
-GET /api/acts?start_date=...&end_date=...
+# Требования: 9.1 (список актов за период)
+GET /api/weighing/acts?start_date=...&end_date=...
 Response: List[WeighingAct]
 
 # Экспорт в Excel
-POST /api/export/excel
+# Требования: 9.3 (экспорт с возможностью скачивания)
+POST /api/weighing/export
 Body: {"start_date": "...", "end_date": "..."}
 Response: Excel файл (download)
 
 # Сверка с Excel
+# Требования: 5.1 (загрузка файла для сверки)
 POST /api/compare/excel
 Body: {"file": UploadFile}
 Response: {
     "matches": int,
     "discrepancies": int,
     "accuracy": float,
-    "report_url": str
+    "report_url": str,
+    "metrics": {
+        "recall": float,
+        "precision": float,
+        "f1_score": float,
+        "mae": float,
+        "mape": float,
+        "correlation": float
+    }
 }
 
 # Получение списка видео
@@ -377,11 +522,21 @@ Response: List[{"filename": str, "duration": float, "acts_count": int}]
 
 **Назначение:** Экспорт данных в Excel с точным воспроизведением формата
 
+**Обоснование дизайна:**
+- Анализ шаблона обеспечивает точное воспроизведение формата (Требование 4.1, 4.4)
+- Группировка по датам необходима для Требования 4.3
+- Сохранение стилей обеспечивает профессиональный вид отчетов (Требование 4.4)
+- Имя файла с датой упрощает организацию отчетов (Требование 4.5)
+
 **Интерфейс:**
 ```python
 class ExcelExporter:
     def __init__(self, template_path: str = "docs/Замеры 20.07 по 03.09.xlsx"):
-        """Анализирует шаблон и сохраняет схему"""
+        """
+        Анализирует шаблон и сохраняет схему
+        
+        Требования: 4.1 (анализ структуры шаблона)
+        """
         pass
     
     def analyze_template(self) -> ExcelSchema:
@@ -391,33 +546,243 @@ class ExcelExporter:
         - Находит пары (вес, количество)
         - Определяет столбцы итогов: общий вес, количество, средний вес
         - Извлекает форматирование и стили
+        
+        Требования: 4.1 (определение формата столбцов и стилей)
         """
         pass
     
     def parse_excel_row(self, row: List) -> ExcelRow:
-        """Парсит строку Excel в структурированный объект"""
+        """
+        Парсит строку Excel в структурированный объект
+        
+        Требования: 4.1 (анализ структуры)
+        """
         pass
     
     def export(self, acts: List[WeighingAct], output_path: str, section: str = "6B"):
         """
         Экспортирует акты в Excel по схеме шаблона
         Группирует акты по дате, суммирует показатели
+        
+        Требования: 4.2 (получение актов), 4.3 (группировка по дате и суммирование),
+                    4.4 (структура и стили), 4.5 (сохранение с датой)
+        """
+        pass
+    
+    def group_acts_by_date(self, acts: List[WeighingAct]) -> Dict[date, List[WeighingAct]]:
+        """
+        Группирует акты по дате
+        
+        Требования: 4.3 (группировка по дате)
+        """
+        pass
+    
+    def summarize_by_date(self, acts: List[WeighingAct]) -> dict:
+        """
+        Суммирует метрики для актов за один день
+        
+        Требования: 4.3 (суммирование количества проходов, общего веса, среднего веса)
         """
         pass
     
     def convert_act_to_excel_row(self, acts_by_date: List[WeighingAct], section: str) -> ExcelRow:
-        """Конвертирует акты за день в строку Excel"""
+        """
+        Конвертирует акты за день в строку Excel
+        
+        Требования: 4.3, 4.4 (форматирование данных)
+        """
+        pass
+    
+    def generate_filename_with_date(self, base_path: str) -> str:
+        """
+        Генерирует имя файла с датой экспорта
+        
+        Требования: 4.5 (имя файла с датой)
+        """
         pass
 ```
 
-#### 2.3 Модуль сверки (ExcelComparator)
+#### 2.3 Веб-страница для мониторинга
+
+**Назначение:** Адаптивный веб-интерфейс для мониторинга системы с мобильных устройств
+
+**Обоснование дизайна:**
+- Адаптивный дизайн обеспечивает удобство использования на смартфонах (Требование 9.4)
+- Автоматическое обновление каждые 5 секунд обеспечивает актуальность данных (Требование 9.5)
+- Минималистичный интерфейс без видео снижает нагрузку на сеть
+- Использование WebSocket или polling для real-time обновлений
+
+**Компоненты интерфейса:**
+
+```html
+<!-- Требования: 9.4 (адаптивный дизайн для мобильных устройств) -->
+<div class="mobile-dashboard">
+    <!-- Текущие показатели -->
+    <div class="stats-panel">
+        <div class="stat-card">
+            <h3>Текущее количество</h3>
+            <span id="current-count">0</span>
+        </div>
+        <div class="stat-card">
+            <h3>Проходы слева</h3>
+            <span id="left-count">0</span>
+        </div>
+        <div class="stat-card">
+            <h3>Проходы справа</h3>
+            <span id="right-count">0</span>
+        </div>
+        <div class="stat-card">
+            <h3>Средний вес</h3>
+            <span id="avg-weight">0.0</span> кг
+        </div>
+    </div>
+    
+    <!-- Активный акт взвешивания -->
+    <div class="active-act" id="active-act">
+        <h3>Активный акт</h3>
+        <p>Начало: <span id="act-start">-</span></p>
+        <p>Длительность: <span id="act-duration">-</span></p>
+        <p>Пиковое количество: <span id="peak-count">-</span></p>
+    </div>
+    
+    <!-- История актов -->
+    <div class="acts-history">
+        <h3>История актов</h3>
+        <div id="acts-list"></div>
+    </div>
+</div>
+```
+
+**JavaScript для автообновления:**
+
+```javascript
+// Требования: 9.5 (автоматическое обновление каждые 5 секунд)
+class DashboardUpdater {
+    constructor(updateInterval = 5000) {
+        this.updateInterval = updateInterval;
+        this.intervalId = null;
+    }
+    
+    start() {
+        // Первое обновление сразу
+        this.updateStats();
+        
+        // Периодическое обновление
+        this.intervalId = setInterval(() => {
+            this.updateStats();
+        }, this.updateInterval);
+    }
+    
+    async updateStats() {
+        try {
+            // Требование 9.2: получение текущей статистики
+            const response = await fetch('/api/weighing/stats');
+            const data = await response.json();
+            
+            // Обновление UI
+            document.getElementById('current-count').textContent = data.current_count;
+            document.getElementById('left-count').textContent = data.left_count;
+            document.getElementById('right-count').textContent = data.right_count;
+            document.getElementById('avg-weight').textContent = data.avg_weight.toFixed(1);
+            
+            // Обновление активного акта
+            if (data.active_act) {
+                this.updateActiveAct(data.active_act);
+            }
+        } catch (error) {
+            console.error('Failed to update stats:', error);
+        }
+    }
+    
+    updateActiveAct(act) {
+        document.getElementById('act-start').textContent = 
+            new Date(act.started_at).toLocaleTimeString();
+        document.getElementById('act-duration').textContent = 
+            `${Math.floor(act.duration_sec / 60)} мин`;
+        document.getElementById('peak-count').textContent = act.peak_count;
+    }
+    
+    stop() {
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+        }
+    }
+}
+
+// Запуск при загрузке страницы
+document.addEventListener('DOMContentLoaded', () => {
+    const updater = new DashboardUpdater(5000); // 5 секунд
+    updater.start();
+});
+```
+
+**CSS для адаптивного дизайна:**
+
+```css
+/* Требования: 9.4 (адаптивный дизайн) */
+.mobile-dashboard {
+    max-width: 100%;
+    padding: 1rem;
+}
+
+.stats-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+.stat-card h3 {
+    font-size: 0.875rem;
+    color: #666;
+    margin-bottom: 0.5rem;
+}
+
+.stat-card span {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #333;
+}
+
+/* Адаптация для маленьких экранов */
+@media (max-width: 480px) {
+    .stats-panel {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .stat-card span {
+        font-size: 1.5rem;
+    }
+}
+```
+
+#### 2.4 Модуль сверки (ExcelComparator)
 
 **Назначение:** Сравнение автоматических результатов с ручными записями
+
+**Обоснование дизайна:**
+- Допуск ±5 минут учитывает возможные расхождения в синхронизации времени (Требование 5.2)
+- Четыре листа отчета обеспечивают полную картину сверки (Требование 5.5)
+- Цветовое выделение упрощает визуальный анализ (Требование 5.5)
+- Метрики точности позволяют количественно оценить работу системы (Требование 5.4, 7.4)
 
 **Интерфейс:**
 ```python
 class ExcelComparator:
     def __init__(self, time_tolerance_minutes: int = 5):
+        """
+        time_tolerance_minutes: допуск для сопоставления по времени
+        
+        Требования: 5.2 (допуск ±5 минут)
+        """
         pass
     
     def compare(self, 
@@ -425,6 +790,10 @@ class ExcelComparator:
                 manual_excel: str) -> ComparisonReport:
         """
         Сравнивает данные, возвращает отчет
+        
+        Требования: 5.1 (загрузка ручных записей), 5.2 (сопоставление по времени),
+                    5.3 (сравнение количества и веса), 5.4 (вычисление метрик)
+        
         ComparisonReport: {
             "matches": List[Match],
             "discrepancies": List[Discrepancy],
@@ -433,17 +802,65 @@ class ExcelComparator:
             "metrics": {
                 "recall": float,
                 "precision": float,
+                "f1_score": float,  # Требование 7.4
                 "mae_count": float,
                 "mape_count": float,
                 "mae_weight": float,
-                "mape_weight": float
+                "mape_weight": float,
+                "correlation": float  # Требование 5.4
             }
         }
         """
         pass
     
+    def load_manual_records(self, excel_path: str) -> List[WeighingAct]:
+        """
+        Загружает ручные записи из Excel
+        
+        Требования: 5.1 (загрузка ручных записей)
+        """
+        pass
+    
+    def match_acts_by_time(self, auto_acts: List[WeighingAct], 
+                           manual_acts: List[WeighingAct]) -> List[tuple]:
+        """
+        Сопоставляет акты по времени с допуском
+        
+        Требования: 5.2 (сопоставление с допуском ±5 минут)
+        """
+        pass
+    
+    def compare_metrics(self, auto_act: WeighingAct, manual_act: WeighingAct) -> dict:
+        """
+        Сравнивает метрики двух актов
+        
+        Требования: 5.3 (сравнение количества проходов и веса)
+        """
+        pass
+    
+    def calculate_accuracy_metrics(self, comparison: ComparisonReport) -> dict:
+        """
+        Вычисляет метрики точности
+        
+        Требования: 5.4 (Recall, Precision, MAE, MAPE, корреляция), 7.4 (F1-score)
+        """
+        pass
+    
     def generate_report(self, comparison: ComparisonReport, output_path: str):
-        """Создает Excel отчет с цветовым выделением"""
+        """
+        Создает Excel отчет с цветовым выделением
+        
+        Требования: 5.5 (четыре листа: совпадения зеленый, расхождения желтый/красный,
+                    пропущенные серый, метрики точности), 5.6 (сохранение в test_results)
+        """
+        pass
+    
+    def generate_filename_with_timestamp(self, base_path: str) -> str:
+        """
+        Генерирует имя файла с датой и временем
+        
+        Требования: 5.6 (имя файла с датой и временем)
+        """
         pass
 ```
 
@@ -607,34 +1024,45 @@ class ExcelSchema(BaseModel):
 
 ## Стратегия тестирования
 
+**Обоснование дизайна:**
+- Автоматическое тестирование обеспечивает быструю оценку точности (Требование 7)
+- Сохранение результатов позволяет отслеживать улучшения со временем (Требование 7.5)
+- Вывод метрик в консоль обеспечивает быструю обратную связь (Требование 7.4)
+- JSON файл с метриками позволяет автоматизировать анализ (Требование 7.5)
+
 ### Тестовый режим
 
 **Команда запуска:**
 ```bash
+# Требования: 7.1 (активация тестового режима)
 python console_app.py --mode test \
     --video uploads/video.mp4 \
-    --start-time "2024-07-20 10:00:00" \
-    --end-time "2024-09-03 18:00:00" \
     --excel-reference "docs/Замеры 20.07 по 03.09.xlsx" \
     --output test_results/run_001
 ```
 
 **Процесс:**
-1. Загрузка видео и модели
-2. Обработка видео с выводом прогресса
-3. Сохранение всех актов в базу
-4. Автоматическая сверка с Excel
-5. Генерация отчета с метриками
-6. Сохранение результатов в `test_results/`
+1. Загрузка видео и модели (Требование 7.1)
+2. Обработка видео с выводом прогресса (Требование 7.2)
+3. Сохранение всех актов в базу (Требование 7.2)
+4. Автоматическая сверка с Excel (Требование 7.3)
+5. Генерация отчета с метриками (Требование 7.3)
+6. Вывод метрик в консоль (Требование 7.4)
+7. Сохранение результатов в `test_results/` (Требование 7.5)
 
-**Метрики точности:**
+**Метрики точности (Требования 7.4, 5.4):**
 - Recall (полнота): % правильно обнаруженных актов
 - Precision (точность): % актов без ложных срабатываний
+- F1-score: гармоническое среднее Recall и Precision (Требование 7.4)
 - MAE (средняя абсолютная ошибка) по количеству
 - MAPE (средняя процентная ошибка) по количеству
 - MAE по весу
 - MAPE по весу
 - Корреляция Пирсона между авто и ручными подсчетами
+
+**Выходные файлы (Требование 7.5):**
+- `comparison_report_YYYY-MM-DD_HH-MM-SS.xlsx` - отчет сверки с цветовым выделением
+- `metrics_YYYY-MM-DD_HH-MM-SS.json` - метрики точности в JSON формате
 
 ### Юнит-тесты
 
@@ -749,46 +1177,116 @@ MIN_ACT_DURATION_SEC = 10.0  # Минимальная длительность �
 
 ## Конфигурация
 
+**Обоснование дизайна:**
+- Файл .env обеспечивает простую настройку без изменения кода (Требование 8.1)
+- Все критические параметры вынесены в конфигурацию (Требования 8.2, 8.3, 8.4)
+- Автоопределение устройства упрощает развертывание (Требование 8.5)
+- Комментарии в файле помогают администраторам понять назначение параметров
+
 ### Файл .env (расширенный с извлеченными параметрами)
 
 ```env
 # База данных Supabase (локально через Docker)
+# Требования: 3.1 (подключение к БД)
 SUPABASE_URL=http://localhost:54321
 SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
 
 # Модель YOLO (из существующей системы)
+# Требования: 1.3 (детекция с YOLO), 8.1 (загрузка из конфигурации)
 MODEL_PATH=models/pig_yolo11-seg.v4.pt
 DETECTION_MODE=pig-only
 PIG_CLASS_ID=0
+
+# Порог уверенности детекции
+# Требования: 1.3 (порог 0.30), 8.2 (конфигурируемый порог)
 CONF_THRESHOLD=0.30
 
 # Устройство и производительность (из существующей системы)
-DEVICE=auto  # auto, cuda, cpu
+# Требования: 8.5 (автоопределение устройства)
+DEVICE=auto  # auto, cuda, cpu - автоматический выбор оптимального устройства
 USE_HALF=true
 IMG_SIZE=960
 BATCH_SIZE=4
 MAX_WAIT_MS=50
 
 # Трекинг (из SimpleTracker)
+# Требования: 1.4 (трекинг с уникальными ID), 6.3 (использование ID треков)
 IOU_THRESHOLD=0.3
 MAX_AGE=30
 DIST_WEIGHT=0.2
 
 # Линии детекции (из существующей системы)
-LINE_LEFT_X=0.25
-LINE_RIGHT_X=0.75
+# Требования: 8.3 (конфигурируемые позиции линий)
+LINE_LEFT_X=0.25  # Позиция левой линии (0.0-1.0)
+LINE_RIGHT_X=0.75  # Позиция правой линии (0.0-1.0)
+
+# Cooldown для предотвращения двойного подсчета
+# Требования: 6.1 (период ожидания 1.0 секунды)
 CROSS_COOLDOWN_SEC=1.0
 
 # Параметры актов взвешивания (новые)
-MIN_PIGS_FOR_ACT=3
-MAX_INTERVAL_SEC=30.0
-MIN_ACT_DURATION_SEC=10.0
+# Требования: 8.4 (конфигурируемые параметры актов)
+MIN_PIGS_FOR_ACT=3  # Минимум свиней для начала акта (Требование 2.1)
+MAX_INTERVAL_SEC=30.0  # Макс интервал без активности для завершения (Требование 2.3)
+MIN_ACT_DURATION_SEC=10.0  # Минимальная длительность акта
 
 # Excel шаблон
+# Требования: 4.1 (анализ структуры шаблона)
 EXCEL_TEMPLATE=docs/Замеры 20.07 по 03.09.xlsx
 
 # Сверка
+# Требования: 5.2 (допуск ±5 минут)
 TIME_TOLERANCE_MINUTES=5
+```
+
+### Загрузка конфигурации
+
+```python
+# Требования: 8.1 (загрузка параметров из .env при запуске)
+from dotenv import load_dotenv
+import os
+
+class Config:
+    def __init__(self):
+        load_dotenv()
+        
+        # База данных
+        self.supabase_url = os.getenv('SUPABASE_URL')
+        self.supabase_key = os.getenv('SUPABASE_KEY')
+        
+        # Модель
+        self.model_path = os.getenv('MODEL_PATH')
+        self.conf_threshold = float(os.getenv('CONF_THRESHOLD', 0.30))
+        
+        # Устройство (Требование 8.5: автоопределение)
+        self.device = self._determine_device(os.getenv('DEVICE', 'auto'))
+        self.use_half = os.getenv('USE_HALF', 'true').lower() == 'true'
+        self.img_size = int(os.getenv('IMG_SIZE', 960))
+        
+        # Линии детекции (Требование 8.3)
+        self.line_left_x = float(os.getenv('LINE_LEFT_X', 0.25))
+        self.line_right_x = float(os.getenv('LINE_RIGHT_X', 0.75))
+        self.cross_cooldown_sec = float(os.getenv('CROSS_COOLDOWN_SEC', 1.0))
+        
+        # Параметры актов (Требование 8.4)
+        self.min_pigs_for_act = int(os.getenv('MIN_PIGS_FOR_ACT', 3))
+        self.max_interval_sec = float(os.getenv('MAX_INTERVAL_SEC', 30.0))
+        self.min_act_duration_sec = float(os.getenv('MIN_ACT_DURATION_SEC', 10.0))
+        
+        # Excel
+        self.excel_template = os.getenv('EXCEL_TEMPLATE')
+        self.time_tolerance_minutes = int(os.getenv('TIME_TOLERANCE_MINUTES', 5))
+    
+    def _determine_device(self, device_config: str) -> str:
+        """
+        Автоматически определяет оптимальное устройство
+        
+        Требования: 8.5 (автоопределение CUDA GPU или CPU)
+        """
+        if device_config == 'auto':
+            import torch
+            return 'cuda' if torch.cuda.is_available() else 'cpu'
+        return device_config
 ```
 
 ## Развертывание
@@ -856,6 +1354,70 @@ python console_app.py --mode realtime --source camera
 3. **Асинхронная запись в БД** - очередь для неблокирующей записи
 4. **Кэширование схемы Excel** - загружать один раз при старте
 5. **Индексы БД** - на временные метки и video_file для быстрых запросов
+
+## Покрытие требований
+
+Эта таблица показывает, как каждое требование из документа требований реализовано в дизайне:
+
+| Требование | Компоненты дизайна | Статус |
+|------------|-------------------|--------|
+| **1. Обработка видеофайлов** | | |
+| 1.1 Загрузка видео с --video | VideoCapture.__init__() | ✅ |
+| 1.2 Отображение прогресса | VideoCapture.get_progress(), get_current_frame_number() | ✅ |
+| 1.3 Детекция с YOLO (порог 0.30) | UnifiedVideoProcessor, CONF_THRESHOLD | ✅ |
+| 1.4 Трекинг с уникальными ID | SimpleTracker | ✅ |
+| 1.5 Регистрация проходов | CrossingCounter.process_tracks() | ✅ |
+| **2. Обнаружение актов** | | |
+| 2.1 Начало акта (≥3 свиньи) | ActDetector.update(), MIN_PIGS_FOR_ACT | ✅ |
+| 2.2 Накопление статистики | ActDetector.accumulate_statistics() | ✅ |
+| 2.3 Завершение акта (30 сек) | ActDetector.update(), MAX_INTERVAL_SEC | ✅ |
+| 2.4 Игнорирование <3 проходов | ActDetector логика фильтрации | ✅ |
+| 2.5 Вычисление длительности | ActDetector.calculate_duration() | ✅ |
+| **3. Хранение в БД** | | |
+| 3.1 Подключение к Supabase | DatabaseManager.__init__() | ✅ |
+| 3.2 Сохранение актов | DatabaseManager.save_weighing_act() | ✅ |
+| 3.3 Сохранение проходов | DatabaseManager.save_crossing() | ✅ |
+| 3.4 Graceful degradation | try/except в DatabaseManager | ✅ |
+| 3.5 SQL миграции | DatabaseManager.run_migrations(), SQL схемы | ✅ |
+| **4. Экспорт в Excel** | | |
+| 4.1 Анализ шаблона | ExcelExporter.analyze_template() | ✅ |
+| 4.2 Получение актов за период | DatabaseManager.get_acts_by_period() | ✅ |
+| 4.3 Группировка и суммирование | ExcelExporter.group_acts_by_date(), summarize_by_date() | ✅ |
+| 4.4 Структура и стили | ExcelExporter.export() | ✅ |
+| 4.5 Имя файла с датой | ExcelExporter.generate_filename_with_date() | ✅ |
+| **5. Сверка с Excel** | | |
+| 5.1 Загрузка ручных записей | ExcelComparator.load_manual_records() | ✅ |
+| 5.2 Сопоставление (±5 мин) | ExcelComparator.match_acts_by_time() | ✅ |
+| 5.3 Сравнение метрик | ExcelComparator.compare_metrics() | ✅ |
+| 5.4 Вычисление метрик точности | ExcelComparator.calculate_accuracy_metrics() | ✅ |
+| 5.5 Отчет с 4 листами | ExcelComparator.generate_report() | ✅ |
+| 5.6 Сохранение в test_results | ExcelComparator.generate_filename_with_timestamp() | ✅ |
+| **6. Предотвращение двойного подсчета** | | |
+| 6.1 Cooldown 1.0 сек | CrossingCounter.cooldown_sec, CROSS_COOLDOWN_SEC | ✅ |
+| 6.2 Игнорирование в cooldown | CrossingCounter.process_tracks() логика | ✅ |
+| 6.3 Использование ID треков | SimpleTracker, CrossingCounter | ✅ |
+| 6.4 Определение направления | CrossingCounter алгоритм детекции | ✅ |
+| 6.5 Интерполяция Y-координаты | CrossingCounter алгоритм интерполяции | ✅ |
+| **7. Тестовый режим** | | |
+| 7.1 Активация с --mode test | Консольное приложение CLI | ✅ |
+| 7.2 Полная обработка и сохранение | Интеграция всех компонентов | ✅ |
+| 7.3 Автоматическая сверка | ExcelComparator.compare() | ✅ |
+| 7.4 Вывод метрик в консоль | Консольное приложение, Rich UI | ✅ |
+| 7.5 Сохранение результатов | Excel отчет + JSON метрики | ✅ |
+| **8. Конфигурирование** | | |
+| 8.1 Загрузка из .env | Config класс, load_dotenv() | ✅ |
+| 8.2 CONF_THRESHOLD | Config.conf_threshold | ✅ |
+| 8.3 LINE_LEFT_X, LINE_RIGHT_X | Config.line_left_x, line_right_x | ✅ |
+| 8.4 MIN_PIGS_FOR_ACT, MAX_INTERVAL_SEC | Config.min_pigs_for_act, max_interval_sec | ✅ |
+| 8.5 Автоопределение устройства | Config._determine_device() | ✅ |
+| **9. Веб-интерфейс** | | |
+| 9.1 GET /api/weighing/acts | REST API endpoint | ✅ |
+| 9.2 GET /api/weighing/stats | REST API endpoint | ✅ |
+| 9.3 POST /api/weighing/export | REST API endpoint | ✅ |
+| 9.4 Адаптивная веб-страница | HTML/CSS mobile-dashboard | ✅ |
+| 9.5 Автообновление каждые 5 сек | DashboardUpdater JavaScript | ✅ |
+
+**Итого: 47/47 требований покрыто дизайном (100%)**
 
 ## Следующие шаги
 
