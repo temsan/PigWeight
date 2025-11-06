@@ -1177,7 +1177,52 @@ def main():
         ))
         console.print()
     
-    # Главное меню с выбором режима работы
+    # Главное меню со стрелками (questionary)
+    if HAVE_QUESTIONARY:
+        try:
+            mode_map = {
+                "🎬 Обработка видео/камеры (по одному)": "process",
+                "🔄 Фоновый мониторинг (непрерывный)": "monitor",
+                "✅ Тестовый режим (с Excel проверкой)": "test",
+                "📖 Справка и примеры": "help",
+                "❌ Выход": "exit"
+            }
+            
+            mode_choice = questionary.select(
+                "Выберите режим работы (стрелки ↑↓, Enter):",
+                choices=list(mode_map.keys()),
+                pointer="→"
+            ).ask()
+            
+            if not mode_choice:
+                return 0
+            
+            mode = mode_map[mode_choice]
+        except Exception as e:
+            if HAVE_RICH:
+                console.print(f"[red]Ошибка при выборе режима: {e}[/red]")
+            else:
+                print(f"Ошибка при выборе режима: {e}")
+            # Fallback на текстовое меню
+            mode = _show_text_menu()
+    else:
+        mode = _show_text_menu()
+    
+    # Обработка специальных режимов
+    if mode == "help":
+        import subprocess
+        subprocess.run([sys.executable, "console_app.py", "--help"])
+        return 0
+    elif mode == "exit":
+        if HAVE_RICH:
+            console.print("[yellow]До свидания! 👋[/yellow]")
+        else:
+            print("\nДо свидания!")
+        return 0
+
+
+def _show_text_menu():
+    """Текстовое меню для несовместимых систем"""
     if HAVE_RICH:
         console.print("[bold magenta]═" * 35 + "[/bold magenta]")
         console.print("[bold cyan]ВЫБОР РЕЖИМА РАБОТЫ[/bold cyan]")
@@ -1187,64 +1232,50 @@ def main():
         print("ВЫБОР РЕЖИМА РАБОТЫ")
         print("=" * 70)
     
-    # Простое меню на Rich - совместимо с Windows
     if HAVE_RICH:
         table = Table(box=box.ROUNDED, show_header=False, padding=(0, 2))
         table.add_column("№", style="cyan", width=3)
         table.add_column("Режим", style="white")
-        table.add_row("1", "Обработка видео/камеры (по одному)")
-        table.add_row("2", "Фоновый мониторинг (непрерывный)")
-        table.add_row("3", "Тестовый режим (с Excel проверкой)")
-        table.add_row("4", "Справка и примеры")
-        table.add_row("5", "Выход")
+        table.add_row("1", "🎬 Обработка видео/камеры (по одному)")
+        table.add_row("2", "🔄 Фоновый мониторинг (непрерывный)")
+        table.add_row("3", "✅ Тестовый режим (с Excel проверкой)")
+        table.add_row("4", "📖 Справка и примеры")
+        table.add_row("5", "❌ Выход")
         console.print(table)
     else:
-        print("\n1. Обработка видео/камеры (по одному)")
-        print("2. Фоновый мониторинг (непрерывный)")
-        print("3. Тестовый режим (с Excel проверкой)")
-        print("4. Справка и примеры")
-        print("5. Выход")
+        print("\n1. 🎬 Обработка видео/камеры (по одному)")
+        print("2. 🔄 Фоновый мониторинг (непрерывный)")
+        print("3. ✅ Тестовый режим (с Excel проверкой)")
+        print("4. 📖 Справка и примеры")
+        print("5. ❌ Выход")
     
     # Ввод выбора
     while True:
         try:
             choice = input("\nВыберите режим (1-5): ").strip()
             if choice == "1":
-                mode = "process"
-                break
+                return "process"
             elif choice == "2":
-                mode = "monitor"
-                break
+                return "monitor"
             elif choice == "3":
-                mode = "test"
-                break
+                return "test"
             elif choice == "4":
-                import subprocess
-                subprocess.run([sys.executable, "console_app.py", "--help"])
-                return 0
+                return "help"
             elif choice == "5":
-                if HAVE_RICH:
-                    console.print("[yellow]До свидания![/yellow]")
-                else:
-                    print("\nДо свидания!")
-                return 0
+                return "exit"
             else:
                 if HAVE_RICH:
                     console.print("[red]Неверный выбор, попробуйте снова[/red]")
                 else:
                     print("Неверный выбор, попробуйте снова (1-5)")
         except (KeyboardInterrupt, EOFError):
-            if HAVE_RICH:
-                console.print("\n[yellow]Прервано[/yellow]")
-            else:
-                print("\n\nПрервано")
-            return 0
+            return "exit"
         except Exception as e:
             if HAVE_RICH:
                 console.print(f"[red]Ошибка: {e}[/red]")
             else:
                 print(f"Ошибка: {e}")
-            return 1
+            return "exit"
 
 
     # После выбора режима - меню параметров
