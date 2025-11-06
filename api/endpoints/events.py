@@ -32,7 +32,7 @@ async def get_stream_events(
     """Получить журнал событий для потока"""
     try:
         if not HAVE_EVENT_LOGGER:
-            return JSONResponse({"error": "Система журналирования недоступна"}, status_code=503)
+            return JSONResponse({"success": False, "error": "Система журналирования недоступна"}, status_code=503)
         
         event_logger = get_event_logger()
         events = event_logger.get_events(
@@ -52,6 +52,7 @@ async def get_stream_events(
         stats = event_logger.get_stream_stats(stream_id)
         
         return {
+            "success": True,
             "stream_id": stream_id,
             "events": events_data,
             "total": len(events_data),
@@ -60,7 +61,7 @@ async def get_stream_events(
         
     except Exception as e:
         logger.error(f"Error getting events: {e}", exc_info=True)
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 @router.get("/events/{stream_id}/stats")
@@ -68,19 +69,20 @@ async def get_stream_stats(stream_id: str):
     """Получить статистику по потоку"""
     try:
         if not HAVE_EVENT_LOGGER:
-            return JSONResponse({"error": "Система журналирования недоступна"}, status_code=503)
+            return JSONResponse({"success": False, "error": "Система журналирования недоступна"}, status_code=503)
         
         event_logger = get_event_logger()
         stats = event_logger.get_stream_stats(stream_id)
         
         return {
+            "success": True,
             "stream_id": stream_id,
             "stats": stats
         }
         
     except Exception as e:
         logger.error(f"Error getting stats: {e}", exc_info=True)
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 @router.get("/events/{stream_id}/grouped")
@@ -91,7 +93,7 @@ async def get_grouped_events(
     """Получить события, сгруппированные по дате и актам"""
     try:
         if not HAVE_EVENT_LOGGER:
-            return JSONResponse({"error": "Система журналирования недоступна"}, status_code=503)
+            return JSONResponse({"success": False, "error": "Система журналирования недоступна"}, status_code=503)
         
         event_logger = get_event_logger()
         
@@ -134,6 +136,7 @@ async def get_grouped_events(
         result = sorted(grouped.values(), key=lambda x: x['date'], reverse=True)
         
         return {
+            "success": True,
             "stream_id": stream_id,
             "filter_date": date,
             "groups": result,
@@ -142,7 +145,7 @@ async def get_grouped_events(
         
     except Exception as e:
         logger.error(f"Error grouping events: {e}", exc_info=True)
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 @router.get("/events/{stream_id}/export")
@@ -154,7 +157,7 @@ async def export_events(
     """Экспорт событий в JSON или CSV"""
     try:
         if not HAVE_EVENT_LOGGER:
-            return JSONResponse({"error": "Система журналирования недоступна"}, status_code=503)
+            return JSONResponse({"success": False, "error": "Система журналирования недоступна"}, status_code=503)
         
         event_logger = get_event_logger()
         events = event_logger.get_events(stream_id=stream_id)
@@ -204,6 +207,7 @@ async def export_events(
                 e['timestamp_str'] = datetime.fromtimestamp(e['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
             
             return {
+                "success": True,
                 "stream_id": stream_id,
                 "filter_date": date,
                 "events": events_data,
@@ -212,4 +216,4 @@ async def export_events(
         
     except Exception as e:
         logger.error(f"Error exporting events: {e}", exc_info=True)
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
