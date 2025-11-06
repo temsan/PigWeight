@@ -278,6 +278,130 @@ class DatabaseManager:
             logger.error(f"❌ Ошибка подключения к базе данных: {e}")
             return False
     
+    def get_weighing_acts(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        stream_id: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Получает список актов с пагинацией и фильтрами"""
+        try:
+            query = self.client.table("weighing_acts").select("*")
+            
+            if stream_id:
+                query = query.eq("stream_id", stream_id)
+            if date_from:
+                query = query.gte("started_at", date_from)
+            if date_to:
+                query = query.lte("started_at", date_to)
+            
+            query = query.order("started_at", desc=True).limit(limit).offset(offset)
+            result = query.execute()
+            return result.data if result.data else []
+        except Exception as e:
+            logger.error(f"Error getting weighing acts: {e}")
+            return []
+    
+    def count_weighing_acts(
+        self,
+        stream_id: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
+    ) -> int:
+        """Подсчитывает общее количество актов"""
+        try:
+            query = self.client.table("weighing_acts").select("id", count="exact")
+            
+            if stream_id:
+                query = query.eq("stream_id", stream_id)
+            if date_from:
+                query = query.gte("started_at", date_from)
+            if date_to:
+                query = query.lte("started_at", date_to)
+            
+            result = query.execute()
+            return result.count if hasattr(result, 'count') else 0
+        except Exception as e:
+            logger.error(f"Error counting acts: {e}")
+            return 0
+    
+    def get_weighing_act_by_id(self, act_id: int) -> Optional[Dict[str, Any]]:
+        """Получает акт по ID"""
+        try:
+            result = self.client.table("weighing_acts")\
+                .select("*")\
+                .eq("id", act_id)\
+                .single()\
+                .execute()
+            return result.data if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting act {act_id}: {e}")
+            return None
+    
+    def get_latest_weighing_act(self, stream_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Получает последний акт"""
+        try:
+            query = self.client.table("weighing_acts").select("*")
+            if stream_id:
+                query = query.eq("stream_id", stream_id)
+            
+            result = query.order("started_at", desc=True).limit(1).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting latest act: {e}")
+            return None
+    
+    def get_weighing_stats(
+        self,
+        stream_id: Optional[str] = None,
+        date_from: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Получает статистику по актам"""
+        try:
+            query = self.client.table("weighing_acts").select("*")
+            
+            if stream_id:
+                query = query.eq("stream_id", stream_id)
+            if date_from:
+                query = query.gte("started_at", date_from)
+            
+            result = query.execute()
+            acts = result.data if result.data else []
+            
+            total_acts = len(acts)
+            total_pigs = sum(act.get("left_count", 0) + act.get("right_count", 0) for act in acts)
+            total_weight = sum(act.get("total_weight", 0) for act in acts)
+            avg_weight = total_weight / total_pigs if total_pigs > 0 else 0
+            avg_duration = sum(act.get("duration", 0) for act in acts) / total_acts if total_acts > 0 else 0
+            
+            # Группировка по часам
+            acts_by_hour = {}
+            for act in acts:
+                if act.get("started_at"):
+                    hour = datetime.fromisoformat(act["started_at"]).strftime("%H")
+                    acts_by_hour[hour] = acts_by_hour.get(hour, 0) + 1
+            
+            return {
+                "total_acts": total_acts,
+                "total_pigs": total_pigs,
+                "total_weight": round(total_weight, 1),
+                "avg_weight": round(avg_weight, 2),
+                "avg_duration_sec": round(avg_duration, 1),
+                "acts_by_hour": acts_by_hour
+            }
+        except Exception as e:
+            logger.error(f"Error getting stats: {e}")
+            return {
+                "total_acts": 0,
+                "total_pigs": 0,
+                "total_weight": 0.0,
+                "avg_weight": 0.0,
+                "avg_duration_sec": 0.0,
+                "acts_by_hour": {}
+            }
+    
     def create_tables_if_not_exist(self):
         """
         Создает таблицы, если они не существуют.
@@ -296,6 +420,7 @@ class DatabaseManager:
             peak_count INTEGER DEFAULT 0,
             seen_total INTEGER DEFAULT 0,
             duration FLOAT,
+            total_weight FLOAT DEFAULT 0,
             created_at TIMESTAMP DEFAULT NOW()
         );
         
