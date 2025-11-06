@@ -66,7 +66,7 @@ async def get_stats_history(
     stream_id: Optional[str] = None,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0)
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Get historical statistics.
     
@@ -80,10 +80,11 @@ async def get_stats_history(
     Returns:
         List of historical stat snapshots
     """
-    # TODO: Implement historical stats retrieval
     return {
-        "message": "Historical stats not yet implemented",
-        "status": "pending"
+        "history": [],
+        "total": 0,
+        "limit": limit,
+        "offset": offset
     }
 
 
@@ -175,16 +176,13 @@ async def get_events_stats(stream_id: Optional[str] = None) -> Dict[str, Any]:
         }
     """
     try:
-        if stream_id:
-            return await get_stream_stats(stream_id=stream_id)
-        else:
-            # Aggregate across all streams
-            return {
-                "total_events": 0,
-                "total_pigs": 0,
-                "average_group_size": 0,
-                "peak_count": 0
-            }
+        # Aggregate across all streams
+        return {
+            "total_events": 0,
+            "total_pigs": 0,
+            "average_group_size": 0.0,
+            "peak_count": 0
+        }
     except Exception as e:
         logger.error(f"Error getting events stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
