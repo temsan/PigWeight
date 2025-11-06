@@ -30,3 +30,39 @@
 2025-11-04 18:58:37,957 - services.model_adapter - INFO - ModelAdapter initialized: path=models/pig_yolo11-seg.v4.pt, backend=ultralytics, device=cpu
 2025-11-04 18:58:37,957 - services.model_adapter - INFO - Type safety manager initialized: {'device': 'cpu', 'optimal_dtype': 'torch.float32', 'cache_size': 0, 'conversions_cached': 0}
 2025-11-04 18:58:37,957 - services.model_adapter - INFO - Optimal inference dtype: torch.float32
+2025-11-04 19:08:49,085 - services.excel_validator - WARNING - openpyxl не установлен. Функция сверки с Excel недоступна.
+2025-11-04 19:09:16,906 - api.av_worker - WARNING - Function _req failed (attempt 1/3): av_worker timeout on open_file after 3.0s. Retrying in 0.10s...
+2025-11-04 19:09:17,312 - services.model_adapter - INFO - 📱 Используем CPU
+2025-11-04 19:09:17,312 - services.model_adapter - INFO - Loading ultralytics model from models/pig_yolo11-seg.v4.pt on device=cpu
+2025-11-04 19:09:17,934 - services.model_adapter - INFO - ModelAdapter initialized: path=models/pig_yolo11-seg.v4.pt, backend=ultralytics, device=cpu
+2025-11-04 19:09:17,934 - services.model_adapter - INFO - Type safety manager initialized: {'device': 'cpu', 'optimal_dtype': 'torch.float32', 'cache_size': 0, 'conversions_cached': 0}
+2025-11-04 19:09:17,934 - services.model_adapter - INFO - Optimal inference dtype: torch.float32
+2025-11-04 19:10:32,755 - api.middleware.error - WARNING - Starlette HTTP 404: Not Found - GET http://localhost:8000/.well-known/appspecific/com.chrome.devtools.json
+2025-11-04 19:11:03,033 - services.excel_validator - WARNING - openpyxl не установлен. Функция сверки с Excel недоступна.
+2025-11-04 19:11:08,439 - api.middleware.error - WARNING - Starlette HTTP 404: Not Found - GET http://localhost:8000/.well-known/appspecific/com.chrome.devtools.json
+2025-11-04 19:11:17,451 - api.av_worker - WARNING - Function _req failed (attempt 1/3): av_worker timeout on open_file after 3.0s. Retrying in 0.11s...
+2025-11-04 19:11:17,744 - services.model_adapter - INFO - 📱 Используем CPU
+2025-11-04 19:11:17,745 - services.model_adapter - INFO - Loading ultralytics model from models/pig_yolo11-seg.v4.pt on device=cpu
+2025-11-04 19:11:18,379 - services.model_adapter - INFO - ModelAdapter initialized: path=models/pig_yolo11-seg.v4.pt, backend=ultralytics, device=cpu
+2025-11-04 19:11:18,379 - services.model_adapter - INFO - Type safety manager initialized: {'device': 'cpu', 'optimal_dtype': 'torch.float32', 'cache_size': 0, 'conversions_cached': 0}
+2025-11-04 19:11:18,379 - services.model_adapter - INFO - Optimal inference dtype: torch.float32
+2025-11-04 19:11:54,246 - api.middleware.error - WARNING - Starlette HTTP 404: Not Found - GET http://localhost:8000/.well-known/appspecific/com.chrome.devtools.json
+2025-11-04 19:13:26,788 - services.excel_validator - WARNING - openpyxl не установлен. Функция сверки с Excel недоступна.
+2025-11-04 19:14:00,339 - api.av_worker - WARNING - Function _req failed (attempt 1/3): av_worker timeout on open_file after 3.0s. Retrying in 0.10s...
+2025-11-04 19:14:00,599 - services.model_adapter - INFO - 📱 Используем CPU
+2025-11-04 19:14:00,599 - services.model_adapter - INFO - Loading ultralytics model from models/pig_yolo11-seg.v4.pt on device=cpu
+2025-11-04 19:14:01,218 - services.model_adapter - INFO - ModelAdapter initialized: path=models/pig_yolo11-seg.v4.pt, backend=ultralytics, device=cpu
+2025-11-04 19:14:01,219 - services.model_adapter - INFO - Type safety manager initialized: {'device': 'cpu', 'optimal_dtype': 'torch.float32', 'cache_size': 0, 'conversions_cached': 0}
+2025-11-04 19:14:01,219 - services.model_adapter - INFO - Optimal inference dtype: torch.float32
+2025-11-04 19:14:26,951 - services.excel_validator - WARNING - openpyxl не установлен. Функция сверки с Excel недоступна.
+2025-11-04 19:14:35,614 - api.av_worker - WARNING - Function _req failed (attempt 1/3): av_worker timeout on open_file after 3.0s. Retrying in 0.11s...
+2025-11-04 19:14:35,985 - services.model_adapter - INFO - 📱 Используем CPU
+2025-11-04 19:14:35,991 - services.model_adapter - INFO - Loading ultralytics model from models/pig_yolo11-seg.v4.pt on device=cpu
+2025-11-04 19:14:36,614 - services.model_adapter - INFO - ModelAdapter initialized: path=models/pig_yolo11-seg.v4.pt, backend=ultralytics, device=cpu
+2025-11-04 19:14:36,614 - services.model_adapter - INFO - Type safety manager initialized: {'device': 'cpu', 'optimal_dtype': 'torch.float32', 'cache_size': 0, 'conversions_cached': 0}
+2025-11-04 19:14:36,614 - services.model_adapter - INFO - Optimal inference dtype: torch.float32
+2025-11-04 19:14:44,968 - api.middleware.error - WARNING - Starlette HTTP 404: Not Found - GET http://localhost:8000/.well-known/appspecific/com.chrome.devtools.json
+2025-11-04 19:55:10,765 - services.excel_validator - WARNING - openpyxl не установлен. Функция сверки с Excel недоступна.
+2025-11-04 19:55:17,228 - api.middleware.error - WARNING - Starlette HTTP 404: Not Found - GET http://localhost:8000/.well-known/appspecific/com.chrome.devtools.json
+2025-11-06 12:42:18,940 - services.excel_validator - WARNING - openpyxl не установлен. Функция сверки с Excel недоступна.
+2025-11-06 12:52:36,242 - services.excel_validator - WARNING - openpyxl не установлен. Функция сверки с Excel недоступна.
