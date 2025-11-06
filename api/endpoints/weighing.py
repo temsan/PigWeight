@@ -56,10 +56,10 @@ async def get_weighing_acts(
         
         # Фильтрация по stream_id если указан
         if stream_id:
-            acts = [a for a in acts if a.stream_id == stream_id]
+            acts = [a for a in acts if a.get('stream_id') == stream_id]
         
         return {
-            "acts": [a.to_dict() for a in acts],
+            "acts": acts,  # Уже словари из БД
             "total": len(acts),
             "period": {
                 "start": start.isoformat(),
