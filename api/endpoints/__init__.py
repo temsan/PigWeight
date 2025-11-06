@@ -8,6 +8,7 @@ from .stream import router as stream_router
 from .websocket import router as websocket_router
 from .files import router as files_router
 from .events import router as events_router
+from .standards import router as standards_router
 
 __all__ = [
     'health_router',
@@ -15,5 +16,6 @@ __all__ = [
     'stream_router',
     'websocket_router',
     'files_router',
-    'events_router'
+    'events_router',
+    'standards_router'
 ]

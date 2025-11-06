@@ -1455,7 +1455,7 @@ setup_request_logging(app)
 setup_security_headers(app)
 
 # Подключаем эндпоинты из модулей
-from api.endpoints import video, stream, health, files, diagnostics, events, records, verification, system, validation, metrics
+from api.endpoints import video, stream, health, files, diagnostics, events, records, verification, system, validation, metrics, standards
 app.include_router(health.router, tags=["health"])
 app.include_router(video.router, tags=["video"])
 app.include_router(stream.router, tags=["stream"])
@@ -1467,6 +1467,7 @@ app.include_router(system.router, tags=["system"])
 app.include_router(verification.router, tags=["verification"])
 app.include_router(validation.router, tags=["validation"], prefix="/api")
 app.include_router(metrics.router, tags=["metrics"])
+app.include_router(standards.router, tags=["standards"])  # Standard spec-compliant endpoints
 
 # Include WebRTC routes
 from api import webrtc
