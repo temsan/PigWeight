@@ -63,6 +63,26 @@ async def get_stream_events(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.get("/events/{stream_id}/stats")
+async def get_stream_stats(stream_id: str):
+    """Получить статистику по потоку"""
+    try:
+        if not HAVE_EVENT_LOGGER:
+            return JSONResponse({"error": "Система журналирования недоступна"}, status_code=503)
+        
+        event_logger = get_event_logger()
+        stats = event_logger.get_stream_stats(stream_id)
+        
+        return {
+            "stream_id": stream_id,
+            "stats": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting stats: {e}", exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/events/{stream_id}/grouped")
 async def get_grouped_events(
     stream_id: str,
