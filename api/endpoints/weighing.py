@@ -29,8 +29,8 @@ def get_db_manager() -> DatabaseManager:
 
 @router.get("/acts")
 async def get_weighing_acts(
-    start_date: str = Query(..., description="Дата начала (ISO format)"),
-    end_date: str = Query(..., description="Дата окончания (ISO format)"),
+    start_date: Optional[str] = Query(None, description="Дата начала (ISO format, по умолчанию сегодня)"),
+    end_date: Optional[str] = Query(None, description="Дата окончания (ISO format, по умолчанию сегодня)"),
     stream_id: Optional[str] = Query(None, description="ID потока")
 ):
     """
@@ -41,8 +41,16 @@ async def get_weighing_acts(
     try:
         db = get_db_manager()
         
-        start = datetime.fromisoformat(start_date)
-        end = datetime.fromisoformat(end_date)
+        # Если даты не указаны, берем сегодня
+        if start_date:
+            start = datetime.fromisoformat(start_date)
+        else:
+            start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        if end_date:
+            end = datetime.fromisoformat(end_date)
+        else:
+            end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
         
         acts = db.get_acts_by_period(start, end)
         
@@ -54,8 +62,8 @@ async def get_weighing_acts(
             "acts": [a.to_dict() for a in acts],
             "total": len(acts),
             "period": {
-                "start": start_date,
-                "end": end_date
+                "start": start.isoformat(),
+                "end": end.isoformat()
             }
         }
         

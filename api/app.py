@@ -553,6 +553,27 @@ class VideoStream(abc.ABC):
                 "timeline": self._act_timeline,
                 "crossings": self._act_crossings,
             }
+            
+            # Сохранение в БД (Задача 2: Интеграция с БД)
+            if db_manager:
+                try:
+                    from pig_tracking.database_manager import WeighingAct
+                    act = WeighingAct(
+                        started_at=datetime.fromtimestamp(summary['started_at']),
+                        ended_at=datetime.fromtimestamp(summary['finished_at']),
+                        duration_sec=summary['duration_sec'],
+                        left_count=summary['flow']['left_in'],
+                        right_count=summary['flow']['right_in'],
+                        peak_count=summary['peak_concurrent'],
+                        total_weight=None,  # Будет добавлено при интеграции с весами
+                        avg_weight=None,
+                        stream_id=self.stream_id,
+                        video_file=None
+                    )
+                    act_id = db_manager.save_weighing_act(act)
+                    logger.info(f"✅ Акт сохранен в БД: {act_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось сохранить акт в БД: {e}")
             with open(RECORDS_DIR / f"{base}.json", "w", encoding="utf-8") as f:
                 json.dump(summary, f, ensure_ascii=False, indent=2)
 
@@ -2004,7 +2025,10 @@ async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Bod
 
 @app.get("/api/weighing/logs")
 async def get_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
-    """Получение журнала актов взвешивания за период"""
+    """
+    DEPRECATED: Используйте /api/weighing/acts вместо этого
+    Получение журнала актов взвешивания за период
+    """
     try:
         acts = load_weighing_acts()
         
@@ -2025,7 +2049,10 @@ async def get_weighing_logs(date_from: str = Query(...), date_to: str = Query(..
 
 @app.get("/api/weighing/export")
 async def export_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
-    """Экспорт журнала актов взвешивания в Excel"""
+    """
+    DEPRECATED: Используйте POST /api/export/excel вместо этого
+    Экспорт журнала актов взвешивания в Excel
+    """
     try:
         acts = load_weighing_acts()
         
