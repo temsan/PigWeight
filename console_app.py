@@ -413,10 +413,7 @@ class VideoSelector:
             answer = questionary.select(
                 "Выберите источник для обработки:",
                 choices=choices,
-                pointer="→ ",
-                use_shortcuts=True,
-                use_arrow_keys=True,
-                use_pointers=True
+                pointer="→ "
             ).ask()
             
             if answer is None:
@@ -501,10 +498,7 @@ class VideoSelector:
                 answer = questionary.select(
                     "Выберите источник для обработки:",
                     choices=choices,
-                    pointer="→ ",
-                    use_shortcuts=True,
-                    use_arrow_keys=True,
-                    use_pointers=True
+                    pointer="→ "
                 ).ask()
                 
                 if answer is None:
@@ -1024,10 +1018,7 @@ class PigTrackingApp:
                     choice = questionary.select(
                         "Выберите видеофайл для мониторинга:",
                         choices=choices,
-                        pointer="→ ",
-                        use_shortcuts=True,
-                        use_arrow_keys=True,
-                        use_pointers=True
+                        pointer="→ "
                     ).ask()
                     
                     if choice is None:
@@ -1496,10 +1487,7 @@ def main():
                 excel_choice = questionary.select(
                     "Выберите эталонный файл для сверки:",
                     choices=excel_choices,
-                    pointer="→ ",
-                    use_shortcuts=True,
-                    use_arrow_keys=True,
-                    use_pointers=True
+                    pointer="→ "
                 ).ask()
                 
                 if excel_choice is None:
