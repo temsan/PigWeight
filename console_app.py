@@ -803,20 +803,16 @@ class PigTrackingApp:
         """Основной метод запуска приложения (синхронная обертка)"""
         import asyncio
         
-        # Сначала проверяем, есть ли уже запущенный loop
+        # Всегда создаем новый event loop для избежания конфликтов
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            running_loop = asyncio.get_running_loop()
-            # Если дошли сюда - loop уже запущен
-            logger.info("Обнаружен запущенный event loop, создаем новый...")
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(self.run_async(args))
+        finally:
             try:
-                return loop.run_until_complete(self.run_async(args))
-            finally:
                 loop.close()
-        except RuntimeError:
-            # Нет запущенного loop - используем asyncio.run()
-            return asyncio.run(self.run_async(args))
+            except Exception:
+                pass
     
     async def _run_test_mode_async(self, args):
         """Тестовый режим с автоматической сверкой"""
@@ -981,7 +977,6 @@ class PigTrackingApp:
             return False
         except Exception as e:
             logger.error(f"❌ Ошибка выполнения: {e}")
-            return False
             return False
     
     async def run_monitor_mode(self, args):
