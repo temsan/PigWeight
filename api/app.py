@@ -1467,7 +1467,7 @@ setup_request_logging(app)
 setup_security_headers(app)
 
 # Подключаем эндпоинты из модулей
-from api.endpoints import video, stream, health, files, diagnostics, events, records, verification, system, validation, metrics, standards, weighing, export
+from api.endpoints import video, stream, health, files, diagnostics, events, records, verification, system, validation, metrics, standards
 app.include_router(health.router, tags=["health"])
 app.include_router(video.router, tags=["video"])
 app.include_router(stream.router, tags=["stream"])
@@ -1480,8 +1480,21 @@ app.include_router(verification.router, tags=["verification"])
 app.include_router(validation.router, tags=["validation"], prefix="/api")
 app.include_router(metrics.router, tags=["metrics"])
 app.include_router(standards.router, tags=["standards"])  # Standard spec-compliant endpoints
-app.include_router(weighing.router, tags=["weighing"])  # Weighing acts CRUD
-app.include_router(export.router, tags=["export"])  # Excel export and comparison
+
+# Новые endpoints по спецификации
+from api.endpoints import stats as stats_router
+from api.endpoints import weighing as weighing_router
+from api.endpoints import export as export_router
+app.include_router(stats_router.router, tags=["stats"])  # /api/stats/current
+app.include_router(weighing_router.router, tags=["weighing"])  # /api/weighing/*
+app.include_router(export_router.router, tags=["export"])  # /api/export/*
+
+# Редиректы для обратной совместимости
+@app.get("/api/metrics/current")
+async def get_current_metrics_legacy():
+    """Редирект на новый endpoint для обратной совместимости"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/api/stats/current", status_code=307)
 
 # Include WebRTC routes
 from api import webrtc

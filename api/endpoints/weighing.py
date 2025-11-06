@@ -1,253 +1,180 @@
 """
-Weighing acts endpoints
-CRUD operations for weighing acts and statistics
+API endpoints для управления актами взвешивания
 """
-
-import logging
-from datetime import datetime, timedelta
-from typing import Optional, List
-
 from fastapi import APIRouter, Query, HTTPException
-from fastapi.responses import JSONResponse
+from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
+import logging
+import os
 
-from api.dependencies import get_database_manager
+from pig_tracking.database_manager import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/weighing", tags=["weighing"])
-logger = logging.getLogger(__name__)
+
+# Глобальный экземпляр DatabaseManager
+_db_manager = None
+
+def get_db_manager() -> DatabaseManager:
+    """Получить экземпляр DatabaseManager"""
+    global _db_manager
+    if _db_manager is None:
+        _db_manager = DatabaseManager(
+            supabase_url=os.getenv("SUPABASE_URL"),
+            supabase_key=os.getenv("SUPABASE_KEY")
+        )
+    return _db_manager
 
 
 @router.get("/acts")
 async def get_weighing_acts(
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-    limit: int = Query(100, ge=1, le=1000, description="Max number of acts to return")
+    start_date: str = Query(..., description="Дата начала (ISO format)"),
+    end_date: str = Query(..., description="Дата окончания (ISO format)"),
+    stream_id: Optional[str] = Query(None, description="ID потока")
 ):
     """
     Получить список актов взвешивания за период
     
-    Query params:
-    - start_date: начальная дата (по умолчанию: сегодня)
-    - end_date: конечная дата (по умолчанию: сегодня)
-    - limit: максимальное количество актов
-    
-    Response:
-    {
-        "acts": [
-            {
-                "id": 1,
-                "started_at": "2025-11-06T12:30:00",
-                "ended_at": "2025-11-06T12:45:30",
-                "duration_sec": 930,
-                "left_count": 25,
-                "right_count": 23,
-                "peak_count": 14,
-                "total_weight": 1850.5,
-                "avg_weight": 132.2
-            }
-        ],
-        "total": 1,
-        "start_date": "2025-11-06",
-        "end_date": "2025-11-06"
-    }
+    Соответствует спецификации: Требование 9.1
     """
     try:
-        db = get_database_manager()
+        db = get_db_manager()
         
-        # Парсим даты
-        if start_date:
-            start_dt = datetime.fromisoformat(start_date)
-        else:
-            start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        start = datetime.fromisoformat(start_date)
+        end = datetime.fromisoformat(end_date)
         
-        if end_date:
-            end_dt = datetime.fromisoformat(end_date)
-        else:
-            end_dt = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
+        acts = db.get_acts_by_period(start, end)
         
-        # Получаем акты из БД
-        acts = db.get_acts_by_period(start_dt, end_dt, limit=limit)
-        
-        # Форматируем ответ
-        formatted_acts = []
-        for act in acts:
-            formatted_acts.append({
-                "id": act.get("id"),
-                "started_at": act.get("started_at"),
-                "ended_at": act.get("ended_at"),
-                "duration_sec": act.get("duration_sec", 0),
-                "left_count": act.get("left_count", 0),
-                "right_count": act.get("right_count", 0),
-                "peak_count": act.get("peak_count", 0),
-                "total_weight": round(act.get("total_weight", 0.0), 1),
-                "avg_weight": round(act.get("avg_weight", 0.0), 2)
-            })
+        # Фильтрация по stream_id если указан
+        if stream_id:
+            acts = [a for a in acts if a.stream_id == stream_id]
         
         return {
-            "acts": formatted_acts,
-            "total": len(formatted_acts),
-            "start_date": start_dt.date().isoformat(),
-            "end_date": end_dt.date().isoformat()
+            "acts": [a.to_dict() for a in acts],
+            "total": len(acts),
+            "period": {
+                "start": start_date,
+                "end": end_date
+            }
         }
         
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Неверный формат даты: {e}")
     except Exception as e:
-        logger.error(f"Error getting weighing acts: {e}", exc_info=True)
+        logger.error(f"Error getting weighing acts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats")
 async def get_weighing_stats(
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)")
+    start_date: Optional[str] = Query(None, description="Дата начала (ISO format)"),
+    end_date: Optional[str] = Query(None, description="Дата окончания (ISO format)"),
+    stream_id: Optional[str] = Query(None, description="ID потока")
 ):
     """
-    Получить статистику по актам взвешивания за период
+    Получить агрегированную статистику актов взвешивания
     
-    Response:
-    {
-        "period": {
-            "start": "2025-11-06",
-            "end": "2025-11-06"
-        },
-        "total_acts": 5,
-        "total_pigs": 240,
-        "total_weight": 9252.5,
-        "avg_weight": 38.6,
-        "avg_duration_sec": 850,
-        "by_day": [
-            {
-                "date": "2025-11-06",
-                "acts": 5,
-                "pigs": 240,
-                "weight": 9252.5
-            }
-        ]
-    }
+    Соответствует спецификации: Требование 9.3
     """
     try:
-        db = get_database_manager()
+        db = get_db_manager()
         
-        # Парсим даты
-        if start_date:
-            start_dt = datetime.fromisoformat(start_date)
+        # Если даты не указаны, берем последние 7 дней
+        if start_date and end_date:
+            start = datetime.fromisoformat(start_date)
+            end = datetime.fromisoformat(end_date)
         else:
-            start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            end = datetime.now()
+            start = end - timedelta(days=7)
         
-        if end_date:
-            end_dt = datetime.fromisoformat(end_date)
-        else:
-            end_dt = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
+        acts = db.get_acts_by_period(start, end)
         
-        # Получаем акты
-        acts = db.get_acts_by_period(start_dt, end_dt)
+        # Фильтрация по stream_id если указан
+        if stream_id:
+            acts = [a for a in acts if a.stream_id == stream_id]
         
-        if not acts:
-            return {
-                "period": {
-                    "start": start_dt.date().isoformat(),
-                    "end": end_dt.date().isoformat()
-                },
-                "total_acts": 0,
-                "total_pigs": 0,
-                "total_weight": 0.0,
-                "avg_weight": 0.0,
-                "avg_duration_sec": 0,
-                "by_day": []
-            }
-        
-        # Вычисляем общую статистику
+        # Вычисление статистики
         total_acts = len(acts)
-        total_pigs = sum(act.get("left_count", 0) + act.get("right_count", 0) for act in acts)
-        total_weight = sum(act.get("total_weight", 0.0) for act in acts)
-        avg_weight = total_weight / total_pigs if total_pigs > 0 else 0.0
-        avg_duration = sum(act.get("duration_sec", 0) for act in acts) / total_acts if total_acts > 0 else 0
-        
-        # Группируем по дням
-        by_day = {}
-        for act in acts:
-            date_str = act.get("started_at", "").split("T")[0]
-            if date_str not in by_day:
-                by_day[date_str] = {
-                    "date": date_str,
-                    "acts": 0,
-                    "pigs": 0,
-                    "weight": 0.0
-                }
-            by_day[date_str]["acts"] += 1
-            by_day[date_str]["pigs"] += act.get("left_count", 0) + act.get("right_count", 0)
-            by_day[date_str]["weight"] += act.get("total_weight", 0.0)
+        total_crossings = sum(a.left_count + a.right_count for a in acts)
+        total_weight = sum(a.total_weight or 0 for a in acts)
+        avg_weight = sum(a.avg_weight or 0 for a in acts) / total_acts if total_acts > 0 else 0
         
         return {
-            "period": {
-                "start": start_dt.date().isoformat(),
-                "end": end_dt.date().isoformat()
-            },
             "total_acts": total_acts,
-            "total_pigs": total_pigs,
+            "total_crossings": total_crossings,
             "total_weight": round(total_weight, 1),
-            "avg_weight": round(avg_weight, 2),
-            "avg_duration_sec": int(avg_duration),
-            "by_day": sorted(by_day.values(), key=lambda x: x["date"])
+            "avg_weight": round(avg_weight, 1),
+            "period": {
+                "start": start.isoformat(),
+                "end": end.isoformat()
+            }
         }
         
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Неверный формат даты: {e}")
     except Exception as e:
-        logger.error(f"Error getting weighing stats: {e}", exc_info=True)
+        logger.error(f"Error getting weighing stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/acts/{act_id}")
-async def get_weighing_act(act_id: int):
+@router.post("/manual/save")
+async def save_manual_weighing(data: Dict[str, Any]):
     """
-    Получить детальную информацию об акте взвешивания
+    Сохранение ручного акта взвешивания
     
-    Response:
-    {
-        "id": 1,
-        "started_at": "2025-11-06T12:30:00",
-        "ended_at": "2025-11-06T12:45:30",
-        "duration_sec": 930,
-        "left_count": 25,
-        "right_count": 23,
-        "peak_count": 14,
-        "total_weight": 1850.5,
-        "avg_weight": 132.2,
-        "crossings": [
-            {
-                "id": 1,
-                "timestamp": "2025-11-06T12:30:05",
-                "direction": "left",
-                "pig_id": 1,
-                "x": 0.25,
-                "y": 0.45
-            }
-        ]
-    }
+    Используется из Live панели для ручного ввода данных
     """
     try:
-        db = get_database_manager()
+        db = get_db_manager()
         
-        # Получаем акт
-        act = db.get_act_by_id(act_id)
-        if not act:
-            raise HTTPException(status_code=404, detail=f"Act {act_id} not found")
+        # Валидация данных
+        required_fields = ['count', 'total_weight']
+        for field in required_fields:
+            if field not in data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Отсутствует обязательное поле: {field}"
+                )
         
-        # Получаем пересечения
-        crossings = db.get_crossings_by_act(act_id)
+        count = int(data['count'])
+        total_weight = float(data['total_weight'])
+        
+        if count <= 0 or total_weight <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Количество и вес должны быть больше нуля"
+            )
+        
+        # Создание акта
+        from pig_tracking.database_manager import WeighingAct
+        
+        act = WeighingAct(
+            started_at=datetime.now(),
+            ended_at=datetime.now(),
+            duration_sec=0,
+            left_count=count,
+            right_count=0,
+            peak_count=count,
+            total_weight=total_weight,
+            avg_weight=round(total_weight / count, 2),
+            stream_id=data.get('stream_id', 'manual'),
+            video_file=None
+        )
+        
+        # Сохранение в БД
+        act_id = db.save_weighing_act(act)
+        
+        logger.info(f"Manual weighing act saved: {act_id}")
         
         return {
-            "id": act.get("id"),
-            "started_at": act.get("started_at"),
-            "ended_at": act.get("ended_at"),
-            "duration_sec": act.get("duration_sec", 0),
-            "left_count": act.get("left_count", 0),
-            "right_count": act.get("right_count", 0),
-            "peak_count": act.get("peak_count", 0),
-            "total_weight": round(act.get("total_weight", 0.0), 1),
-            "avg_weight": round(act.get("avg_weight", 0.0), 2),
-            "crossings": crossings
+            "status": "success",
+            "act_id": act_id,
+            "message": "Акт взвешивания сохранен"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting act {act_id}: {e}", exc_info=True)
+        logger.error(f"Error saving manual weighing: {e}")
         raise HTTPException(status_code=500, detail=str(e))

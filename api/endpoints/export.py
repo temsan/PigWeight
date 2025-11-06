@@ -1,134 +1,197 @@
 """
-Export endpoints
-Excel export and comparison functionality
+API endpoints для экспорта и сверки данных
 """
-
+from fastapi import APIRouter, Query, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
+from typing import Optional
+from datetime import datetime
+from pathlib import Path
 import logging
 import os
-from datetime import datetime
-from typing import Optional
+import tempfile
 
-from fastapi import APIRouter, Query, HTTPException
-from fastapi.responses import FileResponse
-
-from api.dependencies import get_database_manager
+from pig_tracking.database_manager import DatabaseManager
 from pig_tracking.excel_exporter import ExcelExporter
 from pig_tracking.excel_comparator import ExcelComparator
+from pig_tracking.excel_analyzer import ExcelAnalyzer
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/export", tags=["export"])
-logger = logging.getLogger(__name__)
+
+# Глобальный экземпляр DatabaseManager
+_db_manager = None
+
+def get_db_manager() -> DatabaseManager:
+    """Получить экземпляр DatabaseManager"""
+    global _db_manager
+    if _db_manager is None:
+        _db_manager = DatabaseManager(
+            supabase_url=os.getenv("SUPABASE_URL"),
+            supabase_key=os.getenv("SUPABASE_KEY")
+        )
+    return _db_manager
 
 
 @router.post("/excel")
 async def export_to_excel(
-    start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
-    end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
-    output_path: Optional[str] = Query(None, description="Output file path")
+    start_date: str = Query(..., description="Дата начала (ISO format)"),
+    end_date: str = Query(..., description="Дата окончания (ISO format)"),
+    stream_id: Optional[str] = Query(None, description="ID потока")
 ):
     """
     Экспорт актов взвешивания в Excel
     
-    Query params:
-    - start_date: начальная дата (обязательно)
-    - end_date: конечная дата (обязательно)
-    - output_path: путь для сохранения (опционально)
-    
-    Response: Excel файл для скачивания
+    Соответствует спецификации: Требования 4.1-4.5
     """
     try:
-        db = get_database_manager()
+        db = get_db_manager()
         
-        # Парсим даты
-        start_dt = datetime.fromisoformat(start_date)
-        end_dt = datetime.fromisoformat(end_date)
+        start = datetime.fromisoformat(start_date)
+        end = datetime.fromisoformat(end_date)
         
-        # Генерируем имя файла
-        if not output_path:
-            filename = f"weighing_acts_{start_date}_to_{end_date}.xlsx"
-            output_path = os.path.join("exports", filename)
-            os.makedirs("exports", exist_ok=True)
+        # Получить акты
+        acts = db.get_acts_by_period(start, end)
         
-        # Создаем экспортер
-        exporter = ExcelExporter(db)
+        if stream_id:
+            acts = [a for a in acts if a.stream_id == stream_id]
         
-        # Экспортируем
-        result_path = exporter.export_to_excel(
-            start_date=start_dt,
-            end_date=end_dt,
-            output_path=output_path
-        )
+        if not acts:
+            raise HTTPException(
+                status_code=404,
+                detail="Нет актов за указанный период"
+            )
         
-        logger.info(f"📊 Excel exported: {result_path}")
+        # Создать временный файл
+        temp_dir = Path(tempfile.gettempdir())
+        output_path = temp_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
-        # Возвращаем файл
+        # Экспорт
+        exporter = ExcelExporter()
+        exporter.export_to_excel(acts, str(output_path), group_by_date=True)
+        
+        # Имя файла для скачивания
+        filename = f"weighing_acts_{start_date}_{end_date}.xlsx"
+        
         return FileResponse(
-            path=result_path,
-            filename=os.path.basename(result_path),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            path=str(output_path),
+            filename=filename,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
         )
         
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Неверный формат даты: {e}")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error exporting to Excel: {e}", exc_info=True)
+        logger.error(f"Error exporting to Excel: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/compare")
 async def compare_with_excel(
-    manual_excel_path: str = Query(..., description="Path to manual Excel file"),
-    start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
-    end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
-    output_path: Optional[str] = Query(None, description="Output comparison file path")
+    file: UploadFile = File(..., description="Excel файл с ручными записями"),
+    tolerance_minutes: int = Query(5, description="Допуск по времени в минутах")
 ):
     """
     Сверка автоматических результатов с ручными записями из Excel
     
-    Query params:
-    - manual_excel_path: путь к файлу с ручными записями
-    - start_date: начальная дата
-    - end_date: конечная дата
-    - output_path: путь для сохранения отчета (опционально)
-    
-    Response: Excel файл с результатами сверки
+    Соответствует спецификации: Требования 5.1-5.6
     """
     try:
-        db = get_database_manager()
+        db = get_db_manager()
         
-        # Проверяем существование файла
-        if not os.path.exists(manual_excel_path):
-            raise HTTPException(status_code=404, detail=f"File not found: {manual_excel_path}")
+        # Проверить формат файла
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            raise HTTPException(
+                status_code=400,
+                detail="Неверный формат файла. Ожидается .xlsx или .xls"
+            )
         
-        # Парсим даты
-        start_dt = datetime.fromisoformat(start_date)
-        end_dt = datetime.fromisoformat(end_date)
+        # Сохранить загруженный файл
+        temp_dir = Path(tempfile.gettempdir())
+        input_path = temp_dir / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
         
-        # Генерируем имя файла для отчета
-        if not output_path:
-            filename = f"comparison_{start_date}_to_{end_date}.xlsx"
-            output_path = os.path.join("exports", filename)
-            os.makedirs("exports", exist_ok=True)
+        with open(input_path, 'wb') as f:
+            content = await file.read()
+            f.write(content)
         
-        # Создаем компаратор
-        comparator = ExcelComparator(db)
+        # Парсить Excel
+        analyzer = ExcelAnalyzer()
+        manual_acts = analyzer.parse_data(str(input_path))
         
-        # Выполняем сверку
-        result_path = comparator.compare_and_generate_report(
-            manual_excel_path=manual_excel_path,
-            start_date=start_dt,
-            end_date=end_dt,
-            output_path=output_path
-        )
+        if not manual_acts:
+            raise HTTPException(
+                status_code=400,
+                detail="Не удалось извлечь данные из Excel файла"
+            )
         
-        logger.info(f"📊 Comparison report generated: {result_path}")
+        # Определить период из Excel
+        dates = [act.started_at for act in manual_acts]
+        start = min(dates)
+        end = max(dates)
         
-        # Возвращаем файл
+        # Получить автоматические акты за тот же период
+        auto_acts = db.get_acts_by_period(start, end)
+        
+        if not auto_acts:
+            raise HTTPException(
+                status_code=404,
+                detail="Нет автоматических актов за период из Excel файла"
+            )
+        
+        # Сверка
+        comparator = ExcelComparator(time_tolerance_minutes=tolerance_minutes)
+        comparison = comparator.compare(auto_acts, manual_acts)
+        
+        # Создать отчет
+        output_path = temp_dir / f"comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        comparator.generate_report(comparison, str(output_path))
+        
+        # Вернуть метрики и ссылку на отчет
+        return {
+            "status": "success",
+            "metrics": comparison.metrics,
+            "summary": {
+                "matches": len(comparison.matches),
+                "discrepancies": len(comparison.discrepancies),
+                "missing_in_auto": len(comparison.missing_in_auto),
+                "missing_in_manual": len(comparison.missing_in_manual)
+            },
+            "report_file": str(output_path.name),
+            "download_url": f"/api/export/download/{output_path.name}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing with Excel: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/download/{filename}")
+async def download_file(filename: str):
+    """
+    Скачать сгенерированный файл
+    """
+    try:
+        temp_dir = Path(tempfile.gettempdir())
+        file_path = temp_dir / filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Файл не найден")
+        
         return FileResponse(
-            path=result_path,
-            filename=os.path.basename(result_path),
+            path=str(file_path),
+            filename=filename,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error comparing with Excel: {e}", exc_info=True)
+        logger.error(f"Error downloading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))

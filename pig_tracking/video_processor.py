@@ -18,12 +18,22 @@ from pig_tracking.crossing_counter import CrossingCounter, CrossingEvent
 from pig_tracking.act_detector import ActDetector, WeighingAct
 from pig_tracking.weight_estimator import get_weight_estimator
 
-# Импортируем SimpleTracker из api/app.py
+# SimpleTracker будет импортирован лениво, чтобы избежать циклического импорта
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from api.app import SimpleTracker
 
 logger = logging.getLogger(__name__)
+
+# Ленивый импорт SimpleTracker
+_SimpleTracker = None
+
+def _get_simple_tracker():
+    """Ленивый импорт SimpleTracker для избежания циклических импортов"""
+    global _SimpleTracker
+    if _SimpleTracker is None:
+        from api.app import SimpleTracker as ST
+        _SimpleTracker = ST
+    return _SimpleTracker
 
 
 class IntegratedVideoProcessor:
@@ -53,6 +63,7 @@ class IntegratedVideoProcessor:
         
         # Компоненты обработки
         self.processor: Optional[Any] = None
+        SimpleTracker = _get_simple_tracker()
         self.tracker = SimpleTracker(iou_threshold=0.3, max_age=30, dist_weight=0.2)
         self.crossing_counter = CrossingCounter(
             line_left_x=line_left_x,
@@ -368,6 +379,7 @@ class IntegratedVideoProcessor:
     
     def reset(self):
         """Сбрасывает все счетчики и состояние"""
+        SimpleTracker = _get_simple_tracker()
         self.tracker = SimpleTracker(iou_threshold=0.3, max_age=30, dist_weight=0.2)
         self.crossing_counter.reset()
         self.act_detector.reset()
