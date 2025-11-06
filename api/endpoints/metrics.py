@@ -293,9 +293,12 @@ async def get_latest_act():
         # Получаем последний акт
         acts = db.get_acts_by_period(
             start_date=datetime.now().replace(hour=0, minute=0, second=0),
-            end_date=datetime.now(),
-            limit=1
+            end_date=datetime.now()
         )
+        
+        # Берем только последний
+        if acts:
+            acts = [acts[-1]]
         
         if not acts:
             return JSONResponse(
