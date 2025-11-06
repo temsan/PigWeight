@@ -15,6 +15,7 @@ FileStream = None
 perf_logger = None
 av_meta: Optional[Callable[..., Any]] = None
 RECORDS_DIR: Optional[Path] = None
+DATABASE_MANAGER = None
 
 
 def init_dependencies(stream_manager,
@@ -22,9 +23,10 @@ def init_dependencies(stream_manager,
                       file_stream_class,
                       perf_log,
                       av_meta_func,
-                      records_dir: Optional[Path] = None):
+                      records_dir: Optional[Path] = None,
+                      database_manager = None):
     """Initialize shared dependencies"""
-    global STREAM_MANAGER, TARGET_FPS, FileStream, perf_logger, av_meta, RECORDS_DIR
+    global STREAM_MANAGER, TARGET_FPS, FileStream, perf_logger, av_meta, RECORDS_DIR, DATABASE_MANAGER
     STREAM_MANAGER = stream_manager
     TARGET_FPS = target_fps
     FileStream = file_stream_class
@@ -32,3 +34,5 @@ def init_dependencies(stream_manager,
     av_meta = av_meta_func
     if records_dir is not None:
         RECORDS_DIR = records_dir
+    if database_manager is not None:
+        DATABASE_MANAGER = database_manager

@@ -1443,9 +1443,21 @@ async def lifespan(app: FastAPI):
 _DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
 app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
 
+# Initialize DatabaseManager
+db_manager = None
+try:
+    from pig_tracking.database_manager import DatabaseManager
+    db_manager = DatabaseManager(
+        supabase_url=os.getenv("SUPABASE_URL"),
+        supabase_key=os.getenv("SUPABASE_KEY")
+    )
+    logger.info("✅ DatabaseManager инициализирован")
+except Exception as e:
+    logger.warning(f"⚠️ DatabaseManager не инициализирован: {e}")
+
 # Initialize shared dependencies
 from api.dependencies import init_dependencies
-init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta, RECORDS_DIR)
+init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta, RECORDS_DIR, db_manager)
 
 # Setup middleware
 from api.middleware import setup_cors, setup_error_handling, setup_request_logging, setup_security_headers
