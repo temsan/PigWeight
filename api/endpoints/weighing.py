@@ -100,13 +100,13 @@ async def get_weighing_stats(
         
         # Фильтрация по stream_id если указан
         if stream_id:
-            acts = [a for a in acts if a.stream_id == stream_id]
+            acts = [a for a in acts if a.get('stream_id') == stream_id]
         
         # Вычисление статистики
         total_acts = len(acts)
-        total_crossings = sum(a.left_count + a.right_count for a in acts)
-        total_weight = sum(a.total_weight or 0 for a in acts)
-        avg_weight = sum(a.avg_weight or 0 for a in acts) / total_acts if total_acts > 0 else 0
+        total_crossings = sum(a.get('left_count', 0) + a.get('right_count', 0) for a in acts)
+        total_weight = sum(a.get('total_weight') or 0 for a in acts)
+        avg_weight = sum(a.get('avg_weight') or 0 for a in acts) / total_acts if total_acts > 0 else 0
         
         return {
             "total_acts": total_acts,
@@ -185,4 +185,42 @@ async def save_manual_weighing(data: Dict[str, Any]):
         raise
     except Exception as e:
         logger.error(f"Error saving manual weighing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/acts/{act_id}")
+async def get_weighing_act_by_id(act_id: int):
+    """
+    Получить детальную информацию об акте взвешивания
+    
+    Args:
+        act_id: ID акта
+        
+    Returns:
+        Детали акта с пересечениями
+    """
+    try:
+        db = get_db_manager()
+        
+        # Получить акт
+        result = db.client.table("weighing_acts").select("*").eq("id", act_id).execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail=f"Акт {act_id} не найден")
+        
+        act = result.data[0]
+        
+        # Получить пересечения для этого акта
+        crossings_result = db.client.table("crossings").select("*").eq("act_id", act_id).execute()
+        crossings = crossings_result.data if crossings_result.data else []
+        
+        act['crossings'] = crossings
+        
+        return act
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting act {act_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
