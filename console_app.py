@@ -979,6 +979,7 @@ class PigTrackingApp:
         except Exception as e:
             logger.error(f"❌ Ошибка выполнения: {e}")
             return False
+            return False
     
     async def run_monitor_mode(self, args):
         """Режим фонового мониторинга видео или RTSP"""
