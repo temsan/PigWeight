@@ -822,17 +822,29 @@ class PigTrackingApp:
         # Проверяем, есть ли уже запущенный event loop
         try:
             loop = asyncio.get_running_loop()
-            # Если loop уже запущен, создаем задачу
-            logger.warning("⚠️ Event loop уже запущен, используем существующий")
-            # В этом случае нужно использовать create_task или ensure_future
-            # Но для консольного приложения это не должно происходить
-            raise RuntimeError("Консольное приложение не должно запускаться в существующем event loop")
+            # Если мы здесь, значит loop уже запущен
+            logger.error("❌ Event loop уже запущен. Консольное приложение не может работать в существующем event loop")
+            logger.info("💡 Попробуйте запустить приложение в новом терминале")
+            return False
         except RuntimeError:
             # Нет запущенного loop - создаем новый (нормальный случай)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            pass
+        
+        # Создаем новый event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.run_async(args))
+        finally:
             try:
-                return loop.run_until_complete(self.run_async(args))
+                # Отменяем все оставшиеся задачи
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                # Даем задачам время завершиться
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
             finally:
                 try:
                     loop.close()
