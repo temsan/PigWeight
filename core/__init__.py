@@ -12,11 +12,30 @@ from .processor import (
     reset_processors
 )
 
+from .pipeline import (
+    VideoPipeline,
+    VideoCapture,
+    LineAnalyzer,
+    ActDetector,
+    WeighingAct,
+    CrossingEvent,
+    create_pipeline
+)
+
 __all__ = [
+    # Processor
     'UnifiedVideoProcessor',
     'ProcessingOptions', 
     'FrameResult',
     'get_processor',
     'remove_processor',
-    'reset_processors'
+    'reset_processors',
+    # Pipeline
+    'VideoPipeline',
+    'VideoCapture',
+    'LineAnalyzer',
+    'ActDetector',
+    'WeighingAct',
+    'CrossingEvent',
+    'create_pipeline'
 ]
