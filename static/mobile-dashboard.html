@@ -855,14 +855,46 @@
                 exportBtn.disabled = true;
                 exportBtn.textContent = '⏳ ЭКСПОРТ...';
                 
-                // Можно интегрировать с реальным API когда будет готово
-                alert('📥 Экспорт в Excel\n\nФункция будет доступна после интеграции с backend API.\n\nПока результаты автоматически сохраняются в БД.');
+                // Получаем даты для экспорта (последние 7 дней)
+                const endDate = new Date();
+                const startDate = new Date();
+                startDate.setDate(startDate.getDate() - 7);
+                
+                // Вызываем API экспорта
+                const response = await fetch(`${API_URL}/export/excel`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        start_date: startDate.toISOString(),
+                        end_date: endDate.toISOString()
+                    })
+                });
+                
+                if (response.ok) {
+                    // Скачиваем файл
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `acts_${startDate.toISOString().split('T')[0]}_${endDate.toISOString().split('T')[0]}.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    alert('✅ Экспорт завершён!\n\nФайл сохранён в загрузки.');
+                } else {
+                    const error = await response.json();
+                    alert(`❌ Ошибка экспорта:\n${error.detail || error.error || 'Неизвестная ошибка'}`);
+                }
                 
                 exportBtn.disabled = false;
                 exportBtn.textContent = '📥 ЭКСПОРТ';
             } catch (error) {
                 console.error('❌ Ошибка экспорта:', error);
-                alert('❌ Ошибка при экспорте');
+                alert('❌ Ошибка при экспорте:\n' + error.message);
                 exportBtn.disabled = false;
                 exportBtn.textContent = '📥 ЭКСПОРТ';
             }
@@ -874,14 +906,73 @@
                 compareBtn.disabled = true;
                 compareBtn.textContent = '⏳ СВЕРКА...';
                 
-                // Можно интегрировать с реальным API когда будет готово
-                alert('⚖️ Сверка с ручными записями\n\nФункция будет доступна после интеграции с backend API.\n\nПока система автоматически логирует все акты для последующей сверки.');
+                // Создаём input для загрузки файла
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.xlsx,.xls';
                 
-                compareBtn.disabled = false;
-                compareBtn.textContent = '⚖️ СВЕРКА';
+                input.onchange = async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) {
+                        compareBtn.disabled = false;
+                        compareBtn.textContent = '⚖️ СВЕРКА';
+                        return;
+                    }
+                    
+                    try {
+                        // Загружаем файл на сервер
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        const response = await fetch(`${API_URL}/compare/excel`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (response.ok) {
+                            const result = await response.json();
+                            
+                            // Показываем результаты
+                            alert(`✅ Сверка завершена!\n\n` +
+                                  `📊 Совпадений: ${result.matches || 0}\n` +
+                                  `⚠️ Расхождений: ${result.discrepancies || 0}\n` +
+                                  `📈 Точность: ${(result.accuracy * 100).toFixed(1)}%\n\n` +
+                                  `Метрики:\n` +
+                                  `• Recall: ${(result.metrics.recall * 100).toFixed(1)}%\n` +
+                                  `• Precision: ${(result.metrics.precision * 100).toFixed(1)}%\n` +
+                                  `• F1-score: ${(result.metrics.f1_score * 100).toFixed(1)}%\n\n` +
+                                  `Отчёт сохранён: ${result.report_url}`);
+                            
+                            // Скачиваем отчёт
+                            if (result.report_url) {
+                                window.open(result.report_url, '_blank');
+                            }
+                        } else {
+                            const error = await response.json();
+                            alert(`❌ Ошибка сверки:\n${error.detail || error.error || 'Неизвестная ошибка'}`);
+                        }
+                    } catch (error) {
+                        console.error('❌ Ошибка сверки:', error);
+                        alert('❌ Ошибка при сверке:\n' + error.message);
+                    }
+                    
+                    compareBtn.disabled = false;
+                    compareBtn.textContent = '⚖️ СВЕРКА';
+                };
+                
+                input.click();
+                
+                // Если пользователь отменил выбор файла
+                setTimeout(() => {
+                    if (compareBtn.disabled) {
+                        compareBtn.disabled = false;
+                        compareBtn.textContent = '⚖️ СВЕРКА';
+                    }
+                }, 100);
+                
             } catch (error) {
                 console.error('❌ Ошибка сверки:', error);
-                alert('❌ Ошибка при сверке');
+                alert('❌ Ошибка при сверке:\n' + error.message);
                 compareBtn.disabled = false;
                 compareBtn.textContent = '⚖️ СВЕРКА';
             }

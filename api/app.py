@@ -1465,16 +1465,39 @@ _DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
 app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
 
 # Initialize DatabaseManager
+# ОБНОВЛЕНО: 8 ноября 2025 - усиленная проверка критичности БД
 db_manager = None
+DB_REQUIRED = os.getenv("DB_REQUIRED", "true").lower() == "true"
+
 try:
     from pig_tracking.database_manager import DatabaseManager
     db_manager = DatabaseManager(
         supabase_url=os.getenv("SUPABASE_URL"),
         supabase_key=os.getenv("SUPABASE_KEY")
     )
-    logger.info("✅ DatabaseManager инициализирован")
+    
+    # Проверяем подключение
+    if db_manager.test_connection():
+        logger.info("✅ DatabaseManager инициализирован и подключен к БД")
+    else:
+        raise RuntimeError("Не удалось подключиться к базе данных")
+        
 except Exception as e:
-    logger.warning(f"⚠️ DatabaseManager не инициализирован: {e}")
+    error_msg = f"Ошибка инициализации DatabaseManager: {e}"
+    
+    if DB_REQUIRED:
+        # БД критична - останавливаем приложение
+        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: {error_msg}")
+        logger.error("❌ Приложение не может работать без базы данных")
+        logger.error("💡 Проверьте переменные SUPABASE_URL и SUPABASE_KEY в .env")
+        logger.error("💡 Или установите DB_REQUIRED=false для работы без БД")
+        raise RuntimeError(f"Database initialization failed: {e}") from e
+    else:
+        # БД опциональна - продолжаем работу
+        logger.warning(f"⚠️ {error_msg}")
+        logger.warning("⚠️ Приложение продолжит работу без базы данных")
+        logger.warning("⚠️ Функции экспорта и статистики будут недоступны")
+        db_manager = None
 
 # Initialize shared dependencies
 from api.dependencies import init_dependencies
@@ -1502,13 +1525,17 @@ app.include_router(validation.router, tags=["validation"], prefix="/api")
 app.include_router(metrics.router, tags=["metrics"])
 app.include_router(standards.router, tags=["standards"])  # Standard spec-compliant endpoints
 
-# Новые endpoints по спецификации
+# Новые endpoints по спецификации (8 ноября 2025)
 from api.endpoints import stats as stats_router
 from api.endpoints import weighing as weighing_router
 from api.endpoints import export as export_router
+from api.endpoints import export_excel, compare_excel
+
 app.include_router(stats_router.router, tags=["stats"])  # /api/stats/current
 app.include_router(weighing_router.router, tags=["weighing"])  # /api/weighing/*
 app.include_router(export_router.router, tags=["export"])  # /api/export/*
+app.include_router(export_excel.router, tags=["export"])  # /api/export/excel
+app.include_router(compare_excel.router, tags=["compare"])  # /api/compare/excel
 
 # Редиректы для обратной совместимости
 @app.get("/api/metrics/current")

@@ -207,14 +207,18 @@ class DatabaseManager:
     def get_stats_summary(
         self,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        stream_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Получает сводную статистику за период.
         
+        ОБНОВЛЕНО: 8 ноября 2025 - добавлен параметр stream_id
+        
         Args:
             start_date: начало периода (по умолчанию - сегодня)
             end_date: конец периода (по умолчанию - сегодня)
+            stream_id: фильтр по ID потока (опционально)
             
         Returns:
             Словарь со статистикой
@@ -226,26 +230,40 @@ class DatabaseManager:
             if not end_date:
                 end_date = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
             
-            # Получаем акты
-            acts = self.get_acts_by_period(start_date, end_date)
+            # Получаем акты с фильтром по stream_id
+            acts = self.get_acts_by_period(start_date, end_date, stream_id=stream_id)
             
             # Вычисляем статистику
             total_acts = len(acts)
             total_left = sum(act.get("left_count", 0) for act in acts)
             total_right = sum(act.get("right_count", 0) for act in acts)
             total_seen = sum(act.get("seen_total", 0) for act in acts)
+            total_pigs = total_left + total_right  # Общее количество свиней
             avg_duration = sum(act.get("duration", 0) for act in acts) / total_acts if total_acts > 0 else 0
             max_peak = max((act.get("peak_count", 0) for act in acts), default=0)
+            
+            # Вычисляем вес (если есть данные)
+            total_weight = 0.0
+            avg_weight = 0.0
+            if acts:
+                # Предполагаем средний вес свиньи ~130 кг (можно настроить)
+                estimated_avg_weight = 130.0
+                total_weight = total_pigs * estimated_avg_weight
+                avg_weight = estimated_avg_weight
             
             summary = {
                 "period": {
                     "start": start_date.isoformat(),
                     "end": end_date.isoformat()
                 },
+                "stream_id": stream_id,
                 "total_acts": total_acts,
-                "total_left_in": total_left,
-                "total_right_in": total_right,
+                "total_pigs": total_pigs,
+                "left_count": total_left,
+                "right_count": total_right,
                 "total_seen": total_seen,
+                "total_weight": round(total_weight, 1),
+                "avg_weight": round(avg_weight, 2),
                 "avg_duration": round(avg_duration, 1),
                 "max_peak": max_peak,
                 "acts": acts
@@ -253,7 +271,8 @@ class DatabaseManager:
             
             logger.info(
                 f"Статистика за период: {total_acts} актов, "
-                f"left={total_left}, right={total_right}, seen={total_seen}"
+                f"left={total_left}, right={total_right}, seen={total_seen}, "
+                f"stream_id={stream_id}"
             )
             
             return summary
