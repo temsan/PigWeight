@@ -798,22 +798,11 @@ class PigTrackingApp:
         """Тестовый режим с автоматической сверкой"""
         import asyncio
         
-        # Проверяем, есть ли уже запущенный event loop
-        try:
-            loop = asyncio.get_running_loop()
-            logger.warning("⚠️ Event loop уже запущен, используем существующий")
-            raise RuntimeError("Консольное приложение не должно запускаться в существующем event loop")
-        except RuntimeError:
-            # Нет запущенного loop - создаем новый (нормальный случай)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(self._run_test_mode_async(args))
-            finally:
-                try:
-                    loop.close()
-                except Exception:
-                    pass
+        # Тестовый режим должен запускаться через основной метод run()
+        # чтобы избежать проблем с event loop
+        logger.warning("⚠️ Тестовый режим должен запускаться через основной метод run()")
+        logger.info("💡 Используйте: python console_app.py --mode test --video <file> --excel-reference <file>")
+        return False
     
     def run(self, args):
         """Основной метод запуска приложения (синхронная обертка)"""
@@ -821,85 +810,73 @@ class PigTrackingApp:
         import threading
         import queue
         
-        # Проверяем, есть ли уже запущенный event loop
-        try:
-            loop = asyncio.get_running_loop()
-            # Если мы здесь, значит loop уже запущен - это проблема
-            # В этом случае нужно запустить корутину в новом потоке
-            logger.debug("Обнаружен запущенный event loop, создаем новый поток для async кода")
-            
-            result_queue = queue.Queue()
-            exception_queue = queue.Queue()
-            
-            def run_in_thread():
-                """Запускаем async код в новом потоке с новым event loop"""
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    result = new_loop.run_until_complete(self.run_async(args))
-                    result_queue.put(result)
-                except Exception as e:
-                    exception_queue.put(e)
-                finally:
-                    try:
-                        # Отменяем все оставшиеся задачи
-                        pending = asyncio.all_tasks(new_loop)
-                        for task in pending:
-                            task.cancel()
-                        # Даем задачам время завершиться
-                        if pending:
-                            new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                    except Exception:
-                        pass
-                    finally:
-                        try:
-                            new_loop.close()
-                        except Exception:
-                            pass
-            
-            # Запускаем в отдельном потоке
-            thread = threading.Thread(target=run_in_thread, daemon=False)
-            thread.start()
-            thread.join()
-            
-            # Проверяем результат
-            if not exception_queue.empty():
-                exception = exception_queue.get()
-                logger.error(f"❌ Ошибка выполнения: {exception}")
-                # Не поднимаем исключение, а просто возвращаем False
-                # чтобы не прерывать работу приложения
-                import traceback
-                traceback.print_exception(type(exception), exception, exception.__traceback__)
-                return False
-            
-            if not result_queue.empty():
-                return result_queue.get()
-            
-            return False
-            
-        except RuntimeError:
-            # Нет запущенного loop - создаем новый (нормальный случай)
-            # Создаем новый event loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # Всегда запускаем async код в отдельном потоке, чтобы избежать конфликтов
+        # с event loop от questionary или других библиотек
+        result_queue = queue.Queue()
+        exception_queue = queue.Queue()
+        
+        def run_in_thread():
+            """Запускаем async код в новом потоке с новым event loop"""
+            # Создаем новый event loop для этого потока
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
             try:
-                return loop.run_until_complete(self.run_async(args))
+                result = new_loop.run_until_complete(self.run_async(args))
+                result_queue.put(result)
+            except Exception as e:
+                exception_queue.put((e, type(e).__name__))
+                import traceback
+                exception_queue.put(traceback.format_exc())
             finally:
                 try:
                     # Отменяем все оставшиеся задачи
-                    pending = asyncio.all_tasks(loop)
+                    pending = asyncio.all_tasks(new_loop)
                     for task in pending:
                         task.cancel()
                     # Даем задачам время завершиться
                     if pending:
-                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 except Exception:
                     pass
                 finally:
                     try:
-                        loop.close()
+                        new_loop.close()
                     except Exception:
                         pass
+                    finally:
+                        # Очищаем event loop для этого потока
+                        asyncio.set_event_loop(None)
+        
+        # Запускаем в отдельном потоке
+        thread = threading.Thread(target=run_in_thread, daemon=False, name="PigWeightAsyncThread")
+        thread.start()
+        thread.join()
+        
+        # Проверяем результат
+        if not exception_queue.empty():
+            # Получаем исключение и traceback
+            exception_info = []
+            while not exception_queue.empty():
+                item = exception_queue.get()
+                exception_info.append(item)
+            
+            # Форматируем ошибку
+            if len(exception_info) >= 2:
+                exception, exc_type = exception_info[0]
+                traceback_str = exception_info[1] if isinstance(exception_info[1], str) else ""
+                logger.error(f"❌ Ошибка выполнения: {exc_type}: {exception}")
+                if traceback_str:
+                    logger.debug(f"Traceback:\n{traceback_str}")
+            else:
+                exception, exc_type = exception_info[0]
+                logger.error(f"❌ Ошибка выполнения: {exc_type}: {exception}")
+            
+            return False
+        
+        if not result_queue.empty():
+            return result_queue.get()
+        
+        return False
     
     async def _run_test_mode_async(self, args):
         """Тестовый режим с автоматической сверкой"""
@@ -1033,27 +1010,31 @@ class PigTrackingApp:
                 return await self.run_monitor_mode(args)
             
             # Обычный режим обработки
+            # Источник должен быть уже выбран в синхронном коде (в main())
+            # чтобы избежать конфликтов с event loop от questionary
             source = None
+            if hasattr(args, 'source') and args.source is not None:
+                source = args.source
+            elif hasattr(args, 'video') and args.video:
+                # Если передан video, создаем source из него
+                source = {'type': 'file', 'path': Path(args.video)}
+            elif hasattr(args, 'rtsp') and args.rtsp:
+                # Если передан rtsp, создаем source из него
+                source = {'type': 'camera', 'url': args.rtsp, 'name': 'RTSP Camera'}
             
-            if args.video:
-                # Видео указано в аргументах
-                video_path = Path(args.video)
-                if not video_path.exists():
-                    logger.error(f"❌ Видеофайл не найден: {video_path}")
-                    return False
-                source = {'type': 'file', 'path': video_path}
-            else:
-                # Интерактивный выбор источника
-                source = self.video_selector.select_source_interactive()
-                if not source:
-                    return False
+            if source is None:
+                logger.error("❌ Источник не выбран. Это ошибка - источник должен быть выбран до запуска async кода.")
+                return False
             
             # Обработка в зависимости от типа источника
             if source['type'] == 'file':
-                await self.process_video(source['path'])
+                video_path = source.get('path')
+                if isinstance(video_path, str):
+                    video_path = Path(video_path)
+                await self.process_video(video_path)
             elif source['type'] == 'camera':
-                logger.info(f"🎥 Обработка с камеры: {source['name']}")
-                logger.info(f"   URL: {source['url']}")
+                logger.info(f"🎥 Обработка с камеры: {source.get('name', 'Unknown')}")
+                logger.info(f"   URL: {source.get('url', 'Unknown')}")
                 logger.info("ℹ️ Используйте --mode monitor для фонового мониторинга камеры")
                 return False
             
@@ -1385,7 +1366,8 @@ def main():
         print("НАСТРОЙКА ПАРАМЕТРОВ")
         print("=" * 70)
     
-    # Выбор источника
+    # Выбор источника (синхронно, до запуска async кода)
+    # Это важно для избежания конфликтов с event loop от questionary
     if HAVE_RICH:
         console.print("\n[bold white]Выбор источника видео/камеры:[/bold white]")
     else:
@@ -1400,6 +1382,25 @@ def main():
         else:
             print("\nИсточник не выбран")
         return 0
+    
+    # Сохраняем источник в args для передачи в async код
+    # Создаем объект args для передачи в async код
+    # Это нужно чтобы избежать вызова questionary внутри async кода
+    class SimpleArgs:
+        def __init__(self, source_param):
+            self.mode = mode
+            self.source = source_param  # Сохраняем выбранный источник - КРИТИЧНО!
+            self.video = None
+            self.rtsp = None
+            self.excel_reference = None
+            self.continuous = False
+            self.debug = False
+            self.output = "records"
+            self.confidence = 0.5
+            self.min_pigs = 3
+            self.max_interval = 30.0
+    
+    args = SimpleArgs(source)  # Передаем source при создании - ВАЖНО!
     
     # Для режима monitor - дополнительные параметры
     if mode == "monitor":
@@ -1529,21 +1530,14 @@ def main():
         max_interval = 30.0
         continuous = False
     
-    # Конфигурируем args вручную
-    class Args:
-        pass
-    
-    args = Args()
-    args.mode = mode
-    args.debug = False
-    args.output = "records"
+    # Обновляем args дополнительными параметрами (если они были заданы)
+    # НЕ создаем новый объект args, используем существующий с source!
     args.confidence = confidence_val
     args.min_pigs = min_pigs
     args.max_interval = max_interval
     args.continuous = continuous
-    args.rtsp = None
-    args.video = None
-    args.excel_reference = None
+    args.debug = False
+    args.output = "records"
     
     # Если source - это видеофайл или камера, устанавливаем параметры
     if source.get('type') == 'file':

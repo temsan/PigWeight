@@ -708,11 +708,28 @@
             showCompareDialog();
         });
 
-        // Fetch metrics
+        // Состояние подключения
+        let isOnline = true;
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 2000; // 2 секунды
+
+        // Fetch metrics с обработкой ошибок и retry
         async function fetchMetrics() {
             try {
                 // Используем новый endpoint по спецификации
-                const response = await fetch(`${API_URL}/stats/current`);
+                const response = await fetch(`${API_URL}/stats/current`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(5000) // 5 секунд таймаут
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
                 const data = await response.json();
 
                 if (data.current_count !== undefined) {
@@ -729,6 +746,11 @@
                     
                     // 🚦 Update stabilization status
                     updateStabilizationStatus(data.current_count || 0, data.avg_weight || 0);
+                    
+                    // Сбрасываем счетчик ошибок при успешном запросе
+                    retryCount = 0;
+                    isOnline = true;
+                    updateConnectionStatus(true);
                 } else {
                     statusText.textContent = 'Нет данных';
                 }
@@ -736,20 +758,62 @@
                 updateTime.textContent = new Date().toLocaleTimeString('ru-RU');
             } catch (error) {
                 console.error('❌ Ошибка загрузки метрик:', error);
-                statusText.textContent = 'Ошибка подключения';
+                isOnline = false;
+                updateConnectionStatus(false);
+                
+                // Retry с exponential backoff
+                if (retryCount < MAX_RETRIES) {
+                    retryCount++;
+                    const delay = RETRY_DELAY * Math.pow(2, retryCount - 1); // Exponential backoff
+                    console.log(`🔄 Повторная попытка через ${delay}ms (попытка ${retryCount}/${MAX_RETRIES})`);
+                    setTimeout(fetchMetrics, delay);
+                } else {
+                    statusText.textContent = 'Ошибка подключения';
+                    console.error('❌ Превышено максимальное количество попыток');
+                }
             }
         }
 
-        // Toggle auto mode
+        // Обновление статуса подключения
+        function updateConnectionStatus(online) {
+            const statusIndicator = document.querySelector('.status-indicator');
+            if (statusIndicator) {
+                if (online) {
+                    statusIndicator.style.background = '#4ade80';
+                    statusIndicator.style.animation = 'pulse 2s infinite';
+                } else {
+                    statusIndicator.style.background = '#ef4444';
+                    statusIndicator.style.animation = 'none';
+                }
+            }
+        }
+
+        // Toggle auto mode с обработкой ошибок
         async function toggleAutoMode() {
             try {
                 const response = await fetch(`${API_URL}/metrics/toggle-auto-fix?enabled=${autoMode}`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(5000)
                 });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
                 const data = await response.json();
                 console.log('✅ Режим изменён:', data.auto_manual);
             } catch (error) {
                 console.error('❌ Ошибка смены режима:', error);
+                // Показываем пользователю ошибку
+                statusText.textContent = 'Ошибка изменения режима';
+                setTimeout(() => {
+                    if (isOnline) {
+                        statusText.textContent = 'Готово';
+                    }
+                }, 3000);
             }
         }
 
@@ -832,12 +896,24 @@
             stabilityStatus.textContent = status + ` (${Math.round(percent)}%)`;
         }
 
-        // Fix current act
+        // Fix current act с обработкой ошибок
         async function fixCurrentAct() {
             try {
+                fixBtn.disabled = true;
+                fixBtn.textContent = '⏳ ФИКСИРУЕТСЯ...';
+                
                 const response = await fetch(`${API_URL}/metrics/manual-fix`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(10000)
                 });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
                 const data = await response.json();
                 console.log('✅ Акт зафиксирован:', data.act_fixed);
                 activeAct = false;
@@ -847,57 +923,89 @@
                 await fetchMetrics();
             } catch (error) {
                 console.error('❌ Ошибка фиксации акта:', error);
+                statusText.textContent = 'Ошибка фиксации акта';
+                setTimeout(() => {
+                    if (isOnline) {
+                        statusText.textContent = 'Готово';
+                    }
+                }, 3000);
+            } finally {
+                fixBtn.disabled = false;
+                fixBtn.textContent = '📌 ФИКСИРОВАТЬ';
             }
         }
 
-        // Export to Excel
+        // Export to Excel с улучшенной обработкой ошибок
         async function exportToExcel() {
             try {
                 exportBtn.disabled = true;
-                exportBtn.textContent = '⏳ ЭКСПОРТ...';
+                exportBtn.innerHTML = '<span>⏳</span><span>ЭКСПОРТ...</span>';
                 
                 // Получаем даты для экспорта (последние 7 дней)
                 const endDate = new Date();
                 const startDate = new Date();
                 startDate.setDate(startDate.getDate() - 7);
                 
-                // Вызываем API экспорта
-                const response = await fetch(`${API_URL}/export/excel`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        start_date: startDate.toISOString(),
-                        end_date: endDate.toISOString()
-                    })
-                });
+                // Вызываем API экспорта с таймаутом
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 секунд таймаут
                 
-                if (response.ok) {
-                    // Скачиваем файл
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `acts_${startDate.toISOString().split('T')[0]}_${endDate.toISOString().split('T')[0]}.xlsx`;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
+                try {
+                    const response = await fetch(`${API_URL}/export/excel`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            start_date: startDate.toISOString(),
+                            end_date: endDate.toISOString()
+                        }),
+                        signal: controller.signal
+                    });
                     
-                    alert('✅ Экспорт завершён!\n\nФайл сохранён в загрузки.');
-                } else {
-                    const error = await response.json();
-                    alert(`❌ Ошибка экспорта:\n${error.detail || error.error || 'Неизвестная ошибка'}`);
+                    clearTimeout(timeoutId);
+                    
+                    if (response.ok) {
+                        // Скачиваем файл
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `acts_${startDate.toISOString().split('T')[0]}_${endDate.toISOString().split('T')[0]}.xlsx`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
+                        // Показываем уведомление
+                        statusText.textContent = '✅ Экспорт завершён';
+                        setTimeout(() => {
+                            if (isOnline) {
+                                statusText.textContent = 'Готово';
+                            }
+                        }, 3000);
+                    } else {
+                        const error = await response.json().catch(() => ({ error: 'Неизвестная ошибка' }));
+                        throw new Error(error.detail || error.error || 'Ошибка экспорта');
+                    }
+                } catch (fetchError) {
+                    clearTimeout(timeoutId);
+                    if (fetchError.name === 'AbortError') {
+                        throw new Error('Таймаут экспорта (60 секунд)');
+                    }
+                    throw fetchError;
                 }
-                
-                exportBtn.disabled = false;
-                exportBtn.textContent = '📥 ЭКСПОРТ';
             } catch (error) {
                 console.error('❌ Ошибка экспорта:', error);
-                alert('❌ Ошибка при экспорте:\n' + error.message);
+                statusText.textContent = '❌ Ошибка экспорта';
+                setTimeout(() => {
+                    if (isOnline) {
+                        statusText.textContent = 'Готово';
+                    }
+                }, 3000);
+            } finally {
                 exportBtn.disabled = false;
-                exportBtn.textContent = '📥 ЭКСПОРТ';
+                exportBtn.innerHTML = '<span>📥</span><span>ЭКСПОРТ</span>';
             }
         }
 

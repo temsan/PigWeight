@@ -302,13 +302,36 @@ class UnifiedVideoProcessor:
 
 # Глобальный менеджер процессоров
 _PROCESSORS: Dict[str, UnifiedVideoProcessor] = {}
-_PROCESSOR_LOCK = asyncio.Lock()
+_PROCESSOR_LOCK: Optional[asyncio.Lock] = None
+
+def _get_processor_lock() -> asyncio.Lock:
+    """Ленивая инициализация Lock для избежания проблем с event loop"""
+    global _PROCESSOR_LOCK
+    if _PROCESSOR_LOCK is None:
+        try:
+            # Пытаемся получить текущий event loop
+            loop = asyncio.get_running_loop()
+            _PROCESSOR_LOCK = asyncio.Lock()
+        except RuntimeError:
+            # Если event loop не запущен, создаем Lock в новом loop
+            # Это может произойти только при импорте модуля до запуска event loop
+            # В этом случае создадим Lock позже, когда он понадобится
+            _PROCESSOR_LOCK = None
+    return _PROCESSOR_LOCK
 
 async def get_processor(stream_id: str, options: Optional[ProcessingOptions] = None) -> UnifiedVideoProcessor:
     """
     Асинхронная фабричная функция для получения или создания инстанса процессора.
     """
-    async with _PROCESSOR_LOCK:
+    # Получаем или создаем Lock
+    lock = _get_processor_lock()
+    if lock is None:
+        # Если Lock еще не создан, создаем его сейчас
+        lock = asyncio.Lock()
+        global _PROCESSOR_LOCK
+        _PROCESSOR_LOCK = lock
+    
+    async with lock:
         if stream_id not in _PROCESSORS:
             logger.info(f"Создание нового UnifiedVideoProcessor для stream_id: {stream_id}")
             loop = asyncio.get_running_loop()
@@ -321,7 +344,13 @@ async def remove_processor(stream_id: str):
     """
     Удаляет процессор из менеджера и останавливает его.
     """
-    async with _PROCESSOR_LOCK:
+    lock = _get_processor_lock()
+    if lock is None:
+        lock = asyncio.Lock()
+        global _PROCESSOR_LOCK
+        _PROCESSOR_LOCK = lock
+    
+    async with lock:
         if stream_id in _PROCESSORS:
             logger.info(f"Удаление UnifiedVideoProcessor для stream_id: {stream_id}")
             processor = _PROCESSORS.pop(stream_id)
@@ -329,7 +358,13 @@ async def remove_processor(stream_id: str):
 
 async def reset_processors():
     """Сбрасывает все процессоры."""
-    async with _PROCESSOR_LOCK:
+    lock = _get_processor_lock()
+    if lock is None:
+        lock = asyncio.Lock()
+        global _PROCESSOR_LOCK
+        _PROCESSOR_LOCK = lock
+    
+    async with lock:
         logger.info("Сброс всех процессоров UnifiedVideoProcessor")
         for stream_id in list(_PROCESSORS.keys()):
             processor = _PROCESSORS.pop(stream_id)
