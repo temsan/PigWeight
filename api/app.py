@@ -1316,6 +1316,7 @@ class StreamManager:
         self.streams: Dict[str, VideoStream] = {}
         self.websockets: Dict[str, List[WebSocket]] = {}
         self.lock = asyncio.Lock()
+        self._last_broadcast_time: Dict[str, float] = {}  # Для throttling
 
     async def get_or_create_stream(self, stream_id: str, source_uri: str) -> VideoStream:
         async with self.lock:
@@ -1377,30 +1378,76 @@ class StreamManager:
         async with self.lock:
             if stream_id not in self.websockets:
                 self.websockets[stream_id] = []
+            
+            # Ограничение на количество клиентов (максимум 10 на поток)
+            MAX_WEBSOCKET_CLIENTS = 10
+            if len(self.websockets[stream_id]) >= MAX_WEBSOCKET_CLIENTS:
+                logger.warning(f"⚠️ Достигнут лимит WebSocket клиентов для {stream_id} ({MAX_WEBSOCKET_CLIENTS})")
+                await ws.close(code=1008, reason="Maximum clients limit reached")
+                return False
+            
             self.websockets[stream_id].append(ws)
+            logger.info(f"✅ WebSocket клиент подключен к {stream_id} (всего: {len(self.websockets[stream_id])})")
+            return True
 
     async def unregister_websocket(self, stream_id: str, ws: WebSocket):
         async with self.lock:
             if stream_id in self.websockets:
                 self.websockets[stream_id].remove(ws)
 
-    async def broadcast(self, stream_id: str, data: dict):
-        if stream_id in self.websockets:
-            # Отправляем данные асинхронно без блокировки
-            tasks = []
-            for ws in self.websockets[stream_id]:
-                try:
-                    task = asyncio.create_task(ws.send_json(data))
-                    tasks.append(task)
-                except Exception as e:
-                    logger.warning(f"Ошибка отправки WebSocket данных: {e}")
-            
-            # Ждем завершения всех отправок с таймаутом
-            if tasks:
-                try:
-                    await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=0.1)
-                except asyncio.TimeoutError:
-                    logger.warning(f"Таймаут отправки WebSocket данных для {stream_id}")
+    async def broadcast(self, stream_id: str, data: dict, throttle_fps: float = 10.0):
+        """
+        Отправка данных через WebSocket с throttling (rate limiting)
+        
+        Args:
+            stream_id: ID потока
+            data: Данные для отправки
+            throttle_fps: Максимальная частота отправки (кадров в секунду, по умолчанию 10)
+        """
+        if stream_id not in self.websockets:
+            return
+        
+        # Throttling: проверяем время последней отправки
+        current_time = time.time()
+        last_time = self._last_broadcast_time.get(stream_id, 0)
+        min_interval = 1.0 / throttle_fps  # Минимальный интервал между отправками
+        
+        if current_time - last_time < min_interval:
+            # Пропускаем отправку (throttling)
+            return
+        
+        self._last_broadcast_time[stream_id] = current_time
+        
+        # Отправляем данные асинхронно без блокировки
+        tasks = []
+        disconnected_clients = []
+        
+        for i, ws in enumerate(self.websockets[stream_id]):
+            try:
+                # Проверяем состояние соединения
+                if ws.client_state.name == 'DISCONNECTED':
+                    disconnected_clients.append(i)
+                    continue
+                
+                task = asyncio.create_task(ws.send_json(data))
+                tasks.append(task)
+            except Exception as e:
+                logger.warning(f"Ошибка отправки WebSocket данных: {e}")
+                disconnected_clients.append(i)
+        
+        # Удаляем отключенных клиентов
+        if disconnected_clients:
+            async with self.lock:
+                for idx in reversed(disconnected_clients):
+                    if idx < len(self.websockets[stream_id]):
+                        self.websockets[stream_id].pop(idx)
+        
+        # Ждем завершения всех отправок с таймаутом
+        if tasks:
+            try:
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=0.1)
+            except asyncio.TimeoutError:
+                logger.warning(f"Таймаут отправки WebSocket данных для {stream_id}")
 
 STREAM_MANAGER = StreamManager()
 # attach frame broker and start inference workers on-demand

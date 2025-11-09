@@ -338,18 +338,8 @@ async def get_latest_act():
 # ============================================================================
 # НОВЫЕ СТАНДАРТИЗИРОВАННЫЕ ENDPOINTS (8 ноября 2025)
 # ============================================================================
-
-@router.get("/stats/current")
-async def get_current_stats(stream_id: Optional[str] = None):
-    """
-    Стандартизированный endpoint для получения текущей статистики
-    
-    Это новое название для /api/metrics/current согласно спецификации
-    
-    Response: см. get_current_metrics()
-    """
-    # Переиспользуем существующую логику
-    return await get_current_metrics(stream_id=stream_id)
+# ПРИМЕЧАНИЕ: /api/stats/current теперь реализован в api/endpoints/stats.py
+# Этот endpoint удален для избежания дублирования
 
 
 @router.get("/health")

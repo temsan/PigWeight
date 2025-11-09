@@ -13,7 +13,7 @@ All endpoints follow RESTful principles and spec requirements.
 
 import logging
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Query, Body, HTTPException, UploadFile, File
 
 logger = logging.getLogger(__name__)
 
@@ -253,31 +253,28 @@ async def get_export_status(export_id: Optional[str] = Query(None)) -> Dict[str,
 
 @router.post("/verify/compare")
 async def verify_compare(
-    excel_path: str = Body(..., embed=True),
-    stream_id: Optional[str] = Body(None, embed=True)
+    file: UploadFile = File(...),
+    stream_id: Optional[str] = Query(None)
 ) -> Dict[str, Any]:
     """
     Compare system results with manual Excel records.
     
     Spec: POST /api/verify/compare
-    Delegates to: /validation/excel/compare
+    Delegates to: /api/compare/excel
     
     Args:
-        excel_path: Path to Excel file for comparison
-        stream_id: Optional stream filter
+        file: Excel file for comparison (UploadFile)
+        stream_id: Optional stream filter (Query parameter)
     
     Returns:
         Comparison report with accuracy metrics
     """
     try:
-        # Delegate to validation endpoint
-        result = await compare_with_excel(
-            excel_file=excel_path,
-            stream_id=stream_id
-        )
-        return result
+        # Делегируем в /api/compare/excel endpoint
+        from api.endpoints.compare_excel import compare_with_excel as compare_excel_endpoint
+        return await compare_excel_endpoint(file)
     except Exception as e:
-        logger.error(f"Error in verify/compare: {e}")
+        logger.error(f"Error in verify/compare: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

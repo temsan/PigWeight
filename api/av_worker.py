@@ -378,7 +378,7 @@ class AVIsolate:
             return False
     
     @retry_with_backoff(max_retries=2, base_delay=0.1, max_delay=1.0)
-    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 3.0):
+    def _req(self, cmd: str, payload: Dict[str, Any], timeout: float = 15.0):
         # Periodic health check
         current_time = time.time()
         if current_time - self._last_health_check > self._health_check_interval:
@@ -420,12 +420,13 @@ class AVIsolate:
 
     @retry_with_backoff(max_retries=2, base_delay=0.2, max_delay=3.0)
     def open_rtsp(self, sid: str, url: str) -> Dict[str, Any]:
-        return self._req('open_rtsp', {'id': sid, 'url': url})
+        # Увеличенный timeout для RTSP соединений (медленные сети)
+        return self._req('open_rtsp', {'id': sid, 'url': url}, timeout=15.0)
 
     @retry_with_backoff(max_retries=2, base_delay=0.1, max_delay=1.0)
     def open_file(self, sid: str, path: str) -> Dict[str, Any]:
         # Оптимизированный timeout для локальных файлов
-        return self._req('open_file', {'id': sid, 'path': path}, timeout=3.0)
+        return self._req('open_file', {'id': sid, 'path': path}, timeout=15.0)
 
     def close(self, sid: str) -> None:
         try:
@@ -439,7 +440,7 @@ class AVIsolate:
         except Exception:
             return None
 
-    def seek_read_jpeg(self, sid: str, t: float, timeout: float = 3.0) -> Optional[Dict[str, Any]]:
+    def seek_read_jpeg(self, sid: str, t: float, timeout: float = 15.0) -> Optional[Dict[str, Any]]:
         try:
             return self._req('seek_read_jpeg', {'id': sid, 't': float(t)}, timeout=timeout)
         except Exception:
