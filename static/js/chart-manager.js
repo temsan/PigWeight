@@ -100,9 +100,6 @@ export class ChartManager extends EventEmitter {
                     mode: 'index'
                 },
                 plugins: {
-                    filler: {
-                        propagate: true
-                    },
                     legend: {
                         display: true,
                         position: 'top',
@@ -162,7 +159,15 @@ export class ChartManager extends EventEmitter {
     }
     
     updateChart(data) {
-        if (!this.chart || !data.count === undefined) return;
+        // Проверяем что график инициализирован и данные валидны
+        if (!this.chart || !this.chart.data || data.count === undefined) {
+            return;
+        }
+        
+        // Проверяем что Chart.js объект не разрушен
+        if (this.chart.ctx === null || !this.chartCanvas) {
+            return;
+        }
         
         const now = performance.now();
         
@@ -172,38 +177,61 @@ export class ChartManager extends EventEmitter {
         }
         this.lastChartUpdate = now;
         
-        const count = Number(data.count);
-        const timestamp = new Date().toLocaleTimeString();
-        
-        // Добавляем данные в историю
-        this.countHistory.push(count);
-        if (this.countHistory.length > 60) {
-            this.countHistory.shift();
+        try {
+            const count = Number(data.count);
+            if (isNaN(count)) {
+                return;
+            }
+            
+            const timestamp = new Date().toLocaleTimeString();
+            
+            // Добавляем данные в историю
+            this.countHistory.push(count);
+            if (this.countHistory.length > 60) {
+                this.countHistory.shift();
+            }
+            
+            // Вычисляем скользящее среднее
+            const start = Math.max(0, this.countHistory.length - this.avgWindow);
+            const slice = this.countHistory.slice(start);
+            const average = slice.length > 0 ? slice.reduce((a, b) => a + b, 0) / slice.length : count;
+            
+            // Проверяем что datasets существуют
+            if (!this.chart.data.datasets || this.chart.data.datasets.length < 2) {
+                return;
+            }
+            
+            // Обновляем данные графика
+            if (!this.chart.data.labels) {
+                this.chart.data.labels = [];
+            }
+            
+            this.chart.data.labels.push(timestamp);
+            this.chart.data.datasets[0].data.push(count);
+            this.chart.data.datasets[1].data.push(Number(average.toFixed(2)));
+            
+            // Ограничиваем количество точек на графике
+            const maxPoints = 60;
+            if (this.chart.data.labels.length > maxPoints) {
+                this.chart.data.labels.shift();
+                this.chart.data.datasets.forEach(dataset => {
+                    if (dataset.data && dataset.data.length > 0) {
+                        dataset.data.shift();
+                    }
+                });
+            }
+            
+            // Обновляем график без анимации для производительности
+            this.chart.update('none');
+            
+            this.emit('chart_updated', { count, average });
+        } catch (error) {
+            // Логируем только если это не известная проблема с Chart.js
+            const errorMessage = error?.message || String(error);
+            if (!errorMessage.includes('filter') && !errorMessage.includes('isPluginEnabled')) {
+                console.error('❌ Ошибка обновления графика:', error);
+            }
         }
-        
-        // Вычисляем скользящее среднее
-        const start = Math.max(0, this.countHistory.length - this.avgWindow);
-        const slice = this.countHistory.slice(start);
-        const average = slice.reduce((a, b) => a + b, 0) / slice.length;
-        
-        // Обновляем данные графика
-        this.chart.data.labels.push(timestamp);
-        this.chart.data.datasets[0].data.push(count);
-        this.chart.data.datasets[1].data.push(Number(average.toFixed(2)));
-        
-        // Ограничиваем количество точек на графике
-        const maxPoints = 60;
-        if (this.chart.data.labels.length > maxPoints) {
-            this.chart.data.labels.shift();
-            this.chart.data.datasets.forEach(dataset => {
-                dataset.data.shift();
-            });
-        }
-        
-        // Обновляем график без анимации для производительности
-        this.chart.update('none');
-        
-        this.emit('chart_updated', { count, average });
     }
     
     clearChart() {

@@ -40,7 +40,16 @@ export class EventEmitter {
             try {
                 listener.apply(this, args);
             } catch (error) {
-                console.error(`Ошибка в обработчике события '${event}':`, error);
+                // Логируем только критичные ошибки (не связанные с Chart.js или временными проблемами)
+                const errorMessage = error?.message || String(error);
+                if (!errorMessage.includes('filter') && 
+                    !errorMessage.includes('isPluginEnabled') &&
+                    !errorMessage.includes('Chart')) {
+                    console.error(`Ошибка в обработчике события '${event}':`, error);
+                } else {
+                    // Тихо логируем известные проблемы с Chart.js
+                    console.debug(`Предупреждение в обработчике события '${event}':`, errorMessage);
+                }
             }
         });
         

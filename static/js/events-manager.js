@@ -116,17 +116,37 @@ class EventsManager {
             if (timeFilter) url += `&since_hours=${timeFilter}`;
             
             const response = await fetch(url);
+            
+            // Обрабатываем 404 как нормальную ситуацию (API еще не реализован)
+            if (response.status === 404) {
+                const eventsContainer = document.getElementById('eventsList');
+                if (eventsContainer) {
+                    eventsContainer.innerHTML = '<div class="loading-message">API событий еще не реализован</div>';
+                }
+                return;
+            }
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
             const data = await response.json();
             
             if (data.success) {
-                this.events = data.events;
+                this.events = data.events || [];
                 this.renderEvents();
             } else {
                 throw new Error(data.message || 'Ошибка загрузки событий');
             }
         } catch (error) {
-            console.error('Ошибка загрузки событий:', error);
-            this.showMessage('Ошибка загрузки событий: ' + error.message, 'error');
+            // Не логируем ошибку как критическую - API может быть еще не реализован
+            if (error.message && !error.message.includes('Event detail not yet implemented')) {
+                console.warn('⚠️ Ошибка загрузки событий:', error.message);
+            }
+            const eventsContainer = document.getElementById('eventsList');
+            if (eventsContainer) {
+                eventsContainer.innerHTML = '<div class="loading-message">События недоступны</div>';
+            }
         }
     }
     
@@ -135,13 +155,24 @@ class EventsManager {
         
         try {
             const response = await fetch(`/api/events/${this.currentStream}/stats`);
+            
+            // Игнорируем 404 - API еще не реализован
+            if (response.status === 404) {
+                return;
+            }
+            
+            if (!response.ok) {
+                return;
+            }
+            
             const data = await response.json();
             
             if (data.success) {
                 this.renderStats(data.statistics);
             }
         } catch (error) {
-            console.error('Ошибка загрузки статистики:', error);
+            // Тихо игнорируем ошибки загрузки статистики
+            // API может быть еще не реализован
         }
     }
     

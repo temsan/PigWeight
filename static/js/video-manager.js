@@ -29,6 +29,10 @@ export class VideoManager extends EventEmitter {
         this.overlayMaxFps = 12;
         this.overlayBlockUntil = 0;
         
+        // Throttling для предупреждений
+        this.lastWarningTime = 0;
+        this.warningThrottle = 5000; // 5 секунд
+        
         // Worker для overlay
         this.maskWorker = null;
         this.offscreenCanvas = null;
@@ -350,8 +354,13 @@ export class VideoManager extends EventEmitter {
         // Возвращает реальную область отображения кадра внутри wrapper с учётом object-fit: contain
         const wrapper = document.getElementById('videoWrapper');
         if (!wrapper) {
-            console.warn('⚠️ videoWrapper не найден, используем размеры canvas');
-            return { x: 0, y: 0, w: this.overlayCanvas.width, h: this.overlayCanvas.height };
+            // Throttling для предупреждений
+            const now = performance.now();
+            if (now - this.lastWarningTime > this.warningThrottle) {
+                console.warn('⚠️ videoWrapper не найден, используем размеры canvas');
+                this.lastWarningTime = now;
+            }
+            return { x: 0, y: 0, w: this.overlayCanvas?.width || 0, h: this.overlayCanvas?.height || 0 };
         }
         
         const cw = wrapper.clientWidth;
@@ -359,8 +368,6 @@ export class VideoManager extends EventEmitter {
         
         const webrtcEl = document.getElementById('webrtcVideo');
         const webrtcVisible = webrtcEl && webrtcEl.style.display !== 'none';
-        
-        // Убрано избыточное логирование
         
         let videoEl = null;
         if (webrtcVisible) {
@@ -370,7 +377,12 @@ export class VideoManager extends EventEmitter {
         }
         
         if (!videoEl) {
-            console.warn('⚠️ Видео элемент не найден, используем размеры wrapper');
+            // Throttling для предупреждений
+            const now = performance.now();
+            if (now - this.lastWarningTime > this.warningThrottle) {
+                console.warn('⚠️ Видео элемент не найден, используем размеры wrapper');
+                this.lastWarningTime = now;
+            }
             return { x: 0, y: 0, w: cw, h: ch };
         }
         
@@ -379,7 +391,8 @@ export class VideoManager extends EventEmitter {
         const ih = videoEl.videoHeight || videoEl.naturalHeight || 0;
         
         if (!iw || !ih) {
-            console.warn('⚠️ Размеры видео не определены, используем размеры wrapper');
+            // Не логируем предупреждение - это нормальная ситуация до загрузки видео
+            // Используем размеры wrapper как fallback
             return { x: 0, y: 0, w: cw, h: ch };
         }
         
