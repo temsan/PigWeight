@@ -32,63 +32,9 @@ def get_db_manager() -> DatabaseManager:
     return _db_manager
 
 
-@router.post("/excel")
-async def export_to_excel(
-    start_date: str = Query(..., description="Дата начала (ISO format)"),
-    end_date: str = Query(..., description="Дата окончания (ISO format)"),
-    stream_id: Optional[str] = Query(None, description="ID потока")
-):
-    """
-    Экспорт актов взвешивания в Excel
-    
-    Соответствует спецификации: Требования 4.1-4.5
-    """
-    try:
-        db = get_db_manager()
-        
-        start = datetime.fromisoformat(start_date)
-        end = datetime.fromisoformat(end_date)
-        
-        # Получить акты
-        acts = db.get_acts_by_period(start, end)
-        
-        if stream_id:
-            acts = [a for a in acts if a.stream_id == stream_id]
-        
-        if not acts:
-            raise HTTPException(
-                status_code=404,
-                detail="Нет актов за указанный период"
-            )
-        
-        # Создать файл в uploads/
-        uploads_dir = Path("uploads")
-        uploads_dir.mkdir(exist_ok=True)
-        output_path = uploads_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
-        # Экспорт
-        exporter = ExcelExporter()
-        exporter.export_to_excel(acts, str(output_path), group_by_date=True)
-        
-        # Имя файла для скачивания
-        filename = f"weighing_acts_{start_date}_{end_date}.xlsx"
-        
-        return FileResponse(
-            path=str(output_path),
-            filename=filename,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
-            }
-        )
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Неверный формат даты: {e}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error exporting to Excel: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# УДАЛЕНО: Дублирование endpoint /api/export/excel
+# Используйте POST /api/export/excel из api/endpoints/export_excel.py (принимает Body)
+# Этот endpoint удален для избежания конфликтов
 
 
 @router.post("/compare")

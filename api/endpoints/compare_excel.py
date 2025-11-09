@@ -111,10 +111,14 @@ async def compare_with_excel(file: UploadFile = File(...)):
         
         # Выполняем сверку
         comparator = ExcelComparator(time_tolerance_minutes=5)
-        comparison = comparator.compare(
+        # Используем правильный метод match_acts_by_time
+        comparisons = comparator.match_acts_by_time(
             auto_acts=auto_acts,
-            manual_data=manual_data
+            manual_acts=manual_data
         )
+        
+        # Вычисляем метрики
+        metrics = comparator.calculate_metrics()
         
         # Генерируем отчёт
         export_dir = Path("exports")
@@ -124,22 +128,33 @@ async def compare_with_excel(file: UploadFile = File(...)):
         report_filename = f"comparison_{timestamp}.xlsx"
         report_path = export_dir / report_filename
         
-        comparator.generate_report(
-            comparison=comparison,
-            output_path=str(report_path)
-        )
+        # Генерируем отчет (метод принимает только output_path)
+        comparator.generate_report(str(report_path))
         
         logger.info(f"✅ Сверка завершена: {report_filename}")
         
-        # Формируем ответ
+        # Подсчитываем статистику из comparisons
+        matches = [c for c in comparisons if c.match_type in ['exact', 'close']]
+        discrepancies = [c for c in comparisons if c.match_type == 'mismatch']
+        missing_in_auto = [c for c in comparisons if c.match_type == 'missing']
+        missing_in_manual = [c for c in comparisons if c.match_type == 'extra_manual']
+        
+        # Формируем ответ в формате, ожидаемом дашбордом
         response = {
-            "matches": len(comparison.get("matches", [])),
-            "discrepancies": len(comparison.get("discrepancies", [])),
-            "missing_in_auto": len(comparison.get("missing_in_auto", [])),
-            "missing_in_manual": len(comparison.get("missing_in_manual", [])),
-            "accuracy": comparison.get("metrics", {}).get("accuracy", 0.0),
-            "metrics": comparison.get("metrics", {}),
-            "report_url": f"/exports/{report_filename}"
+            "matches": len(matches),
+            "discrepancies": len(discrepancies),
+            "missing_in_auto": len(missing_in_auto),
+            "missing_in_manual": len(missing_in_manual),
+            "accuracy": metrics.get("correlation", 0.0),  # Используем correlation как accuracy
+            "metrics": {
+                "recall": metrics.get("recall", 0.0),
+                "precision": metrics.get("precision", 0.0),
+                "f1_score": metrics.get("f1_score", 0.0),
+                "mae": metrics.get("mae", 0.0),
+                "mape": metrics.get("mape", 0.0),
+                "correlation": metrics.get("correlation", 0.0)
+            },
+            "report_url": f"/api/compare/reports/{report_filename}"
         }
         
         # Удаляем временный файл
