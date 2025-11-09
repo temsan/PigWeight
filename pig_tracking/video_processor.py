@@ -31,7 +31,8 @@ def _get_simple_tracker():
     """Ленивый импорт SimpleTracker для избежания циклических импортов"""
     global _SimpleTracker
     if _SimpleTracker is None:
-        from api.app import SimpleTracker as ST
+        # Используем отдельный модуль вместо api.app чтобы избежать инициализации БД
+        from pig_tracking.simple_tracker import SimpleTracker as ST
         _SimpleTracker = ST
     return _SimpleTracker
 
