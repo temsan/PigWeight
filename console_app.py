@@ -818,38 +818,88 @@ class PigTrackingApp:
     def run(self, args):
         """Основной метод запуска приложения (синхронная обертка)"""
         import asyncio
+        import threading
+        import queue
         
         # Проверяем, есть ли уже запущенный event loop
         try:
             loop = asyncio.get_running_loop()
-            # Если мы здесь, значит loop уже запущен
-            logger.error("❌ Event loop уже запущен. Консольное приложение не может работать в существующем event loop")
-            logger.info("💡 Попробуйте запустить приложение в новом терминале")
+            # Если мы здесь, значит loop уже запущен - это проблема
+            # В этом случае нужно запустить корутину в новом потоке
+            logger.debug("Обнаружен запущенный event loop, создаем новый поток для async кода")
+            
+            result_queue = queue.Queue()
+            exception_queue = queue.Queue()
+            
+            def run_in_thread():
+                """Запускаем async код в новом потоке с новым event loop"""
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result = new_loop.run_until_complete(self.run_async(args))
+                    result_queue.put(result)
+                except Exception as e:
+                    exception_queue.put(e)
+                finally:
+                    try:
+                        # Отменяем все оставшиеся задачи
+                        pending = asyncio.all_tasks(new_loop)
+                        for task in pending:
+                            task.cancel()
+                        # Даем задачам время завершиться
+                        if pending:
+                            new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            new_loop.close()
+                        except Exception:
+                            pass
+            
+            # Запускаем в отдельном потоке
+            thread = threading.Thread(target=run_in_thread, daemon=False)
+            thread.start()
+            thread.join()
+            
+            # Проверяем результат
+            if not exception_queue.empty():
+                exception = exception_queue.get()
+                logger.error(f"❌ Ошибка выполнения: {exception}")
+                # Не поднимаем исключение, а просто возвращаем False
+                # чтобы не прерывать работу приложения
+                import traceback
+                traceback.print_exception(type(exception), exception, exception.__traceback__)
+                return False
+            
+            if not result_queue.empty():
+                return result_queue.get()
+            
             return False
+            
         except RuntimeError:
             # Нет запущенного loop - создаем новый (нормальный случай)
-            pass
-        
-        # Создаем новый event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(self.run_async(args))
-        finally:
+            # Создаем новый event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                # Отменяем все оставшиеся задачи
-                pending = asyncio.all_tasks(loop)
-                for task in pending:
-                    task.cancel()
-                # Даем задачам время завершиться
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            except Exception:
-                pass
+                return loop.run_until_complete(self.run_async(args))
             finally:
                 try:
-                    loop.close()
+                    # Отменяем все оставшиеся задачи
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    # Даем задачам время завершиться
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 except Exception:
                     pass
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
     
     async def _run_test_mode_async(self, args):
         """Тестовый режим с автоматической сверкой"""
