@@ -19,11 +19,11 @@ PERFORMANCE_PROFILES = {
         'IMG_SIZE': '960',  # Максимальное качество
     },
     'RTX_OPTIMIZED': {
-        'TARGET_FPS': '35',  # Оптимально для RTX среднего класса
-        'BATCH_MAX_SIZE': '8',  # Универсально для разных RTX
-        'BATCH_TARGET_LATENCY_MS': '40',
+        'TARGET_FPS': '20',  # Оптимально для RTX бюджетного класса (2050, 3050)
+        'BATCH_MAX_SIZE': '4',  # Безопасно для 3-4GB VRAM
+        'BATCH_TARGET_LATENCY_MS': '60',
         'USE_HALF': 'true',
-        'IMG_SIZE': '832',  # Оптимально для 4-8GB VRAM
+        'IMG_SIZE': '640',  # Оптимально для 3-4GB VRAM
     },
     'BALANCED': {
         'TARGET_FPS': '25',  # Стабильно для большинства GPU
@@ -161,14 +161,19 @@ def detect_optimal_runtime() -> Dict[str, Any]:
                 runtime_info['reasons'].append('Высокопроизводительная GPU с большим объемом VRAM')
             
             # Современные RTX среднего класса с достаточной памятью
-            elif any(arch in gpu_lower for arch in ['rtx 40', 'rtx 30', 'rtx 20']) and gpu_memory >= 6:
+            elif any(arch in gpu_lower for arch in ['rtx 40', 'rtx 30']) and gpu_memory >= 6:
                 runtime_info['profile'] = 'ULTRA_PERFORMANCE' 
                 runtime_info['reasons'].append('Современная RTX архитектура с достаточной памятью')
             
-            # RTX бюджетного сегмента и средний класс (RTX x050, RTX x060, средние RTX)
-            elif any(arch in gpu_lower for arch in ['rtx']) and gpu_memory >= 3:
+            # RTX бюджетного сегмента (RTX 2050, 3050, 4050) - 3-4GB VRAM
+            elif any(arch in gpu_lower for arch in ['rtx 2050', 'rtx 3050', 'rtx 4050', 'rtx 20']) and gpu_memory <= 4:
                 runtime_info['profile'] = 'RTX_OPTIMIZED'
-                runtime_info['reasons'].append('RTX архитектура, оптимизированная для эффективной работы')
+                runtime_info['reasons'].append('RTX бюджетного класса, оптимизация для 3-4GB VRAM')
+            
+            # RTX среднего класса с хорошей памятью
+            elif any(arch in gpu_lower for arch in ['rtx']) and gpu_memory >= 6:
+                runtime_info['profile'] = 'ULTRA_PERFORMANCE'
+                runtime_info['reasons'].append('RTX архитектура с достаточной памятью')
             
             # Старшие GTX и профессиональные карты
             elif any(name in gpu_lower for name in ['gtx 1070', 'gtx 1080', 'gtx 1660', 'tesla', 'quadro']) or gpu_memory >= 6:

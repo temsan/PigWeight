@@ -989,12 +989,20 @@ async def _global_infer_loop(self):
                     # Используем timestamp вместо frame_time для лучшей стабильности
                     if not hasattr(self, '_last_frame_ts'):
                         self._last_frame_ts = timestamp
+                        self._slow_frame_count = 0
+                        self._last_slow_warning = 0
                     
                     frame_delta = timestamp - self._last_frame_ts
                     
-                    # Если кадры приходят слишком медленно (> 1 сек между кадрами), логируем
-                    if frame_delta > 1.0 and self._last_frame_ts > 0:
-                        logger.warning(f"⏱️ Медленные кадры: delta={frame_delta:.2f}s")
+                    # Если кадры приходят слишком медленно (> 1.5 сек между кадрами), логируем
+                    # Но не чаще чем раз в 10 секунд, чтобы не спамить логи
+                    if frame_delta > 1.5 and self._last_frame_ts > 0:
+                        self._slow_frame_count += 1
+                        current_time = time.time()
+                        if current_time - self._last_slow_warning > 10.0:
+                            logger.warning(f"⏱️ Медленная обработка: {self._slow_frame_count} кадров с задержкой >1.5s за последние 10с (последняя: {frame_delta:.2f}s)")
+                            self._slow_frame_count = 0
+                            self._last_slow_warning = current_time
                     
                     self._last_frame_ts = timestamp
 

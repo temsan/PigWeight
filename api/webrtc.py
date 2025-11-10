@@ -10,6 +10,17 @@ from av import VideoFrame as _VideoFrame
 from fastapi import APIRouter, Body, Query, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+# Подавляем InvalidStateError из aioice (race condition при закрытии соединений)
+def _suppress_aioice_errors(loop, context):
+    """Подавляет некритичные ошибки aioice при закрытии WebRTC соединений"""
+    exception = context.get('exception')
+    if exception and isinstance(exception, asyncio.exceptions.InvalidStateError):
+        # Это известная проблема с aioice при закрытии соединений
+        # Ошибка не критична и не влияет на работу системы
+        return
+    # Для остальных ошибок используем стандартный обработчик
+    loop.default_exception_handler(context)
+
 # aiortc components
 try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCIceCandidate
@@ -39,6 +50,13 @@ def init_webrtc(app: FastAPI, stream_manager: Any, frame_broker: Any, config: An
         logger.warning("⚠️  aiortc не установлена, WebRTC функционал отключен")
         logger.warning("   Установите: pip install aiortc av")
         return
+    
+    # Устанавливаем обработчик для подавления aioice ошибок
+    try:
+        loop = asyncio.get_event_loop()
+        loop.set_exception_handler(_suppress_aioice_errors)
+    except Exception as e:
+        logger.debug(f"Не удалось установить обработчик исключений asyncio: {e}")
     
     perf_logger = logging.getLogger("perf.webrtc")
 
@@ -137,7 +155,11 @@ def init_webrtc(app: FastAPI, stream_manager: Any, frame_broker: Any, config: An
             async def on_state():
                 if pc.connectionState == 'failed' or pc.connectionState == 'closed':
                     if peer_id in _PEER_CONNECTIONS:
-                        await _PEER_CONNECTIONS.pop(peer_id).close()
+                        try:
+                            conn = _PEER_CONNECTIONS.pop(peer_id)
+                            await conn.close()
+                        except Exception as e:
+                            logger.debug(f"Error closing peer connection {peer_id}: {e}")
 
             offer = RTCSessionDescription(sdp=sdp, type=typ)
             await pc.setRemoteDescription(offer)
@@ -179,7 +201,22 @@ def init_webrtc(app: FastAPI, stream_manager: Any, frame_broker: Any, config: An
         peer_id = body.get('peer_id')
         pc = _PEER_CONNECTIONS.pop(peer_id, None)
         if pc:
-            await pc.close()
+            try:
+                await pc.close()
+            except Exception as e:
+                logger.debug(f"Error closing peer connection {peer_id}: {e}")
         return {'status': 'stopped'}
 
+    @app.on_event("shutdown")
+    async def cleanup_webrtc():
+        """Очистка всех WebRTC соединений при завершении работы"""
+        logger.info(f"Закрытие {len(_PEER_CONNECTIONS)} WebRTC соединений...")
+        for peer_id, pc in list(_PEER_CONNECTIONS.items()):
+            try:
+                await pc.close()
+            except Exception as e:
+                logger.debug(f"Ошибка при закрытии соединения {peer_id}: {e}")
+        _PEER_CONNECTIONS.clear()
+        logger.info("WebRTC соединения закрыты")
+    
     app.include_router(router, prefix="/api/webrtc", tags=["webrtc"])
