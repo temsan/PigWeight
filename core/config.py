@@ -40,12 +40,22 @@ PERFORMANCE_PROFILES = {
         'IMG_SIZE': '640',
     },
     'CPU_ONLY': {
-        'TARGET_FPS': '15',
-        'BATCH_MAX_SIZE': '2',
-        'BATCH_TARGET_LATENCY_MS': '200',
+        'TARGET_FPS': '10',  # Снижено для слабых CPU (VM)
+        'BATCH_MAX_SIZE': '1',  # Минимальный батч для VM
+        'BATCH_TARGET_LATENCY_MS': '500',  # Увеличена задержка
         'DEVICE': 'cpu',
         'USE_HALF': 'false',
         'IMG_SIZE': '640',
+        'FRAME_SKIP': '5',  # Обрабатываем каждый 5-й кадр
+    },
+    'VM_OPTIMIZED': {
+        'TARGET_FPS': '8',  # Ещё ниже для очень слабых VM
+        'BATCH_MAX_SIZE': '1',
+        'BATCH_TARGET_LATENCY_MS': '1000',
+        'DEVICE': 'cpu',
+        'USE_HALF': 'false',
+        'IMG_SIZE': '480',  # Ещё меньше разрешение
+        'FRAME_SKIP': '7',  # Обрабатываем каждый 7-й кадр
     }
 }
 
@@ -237,13 +247,26 @@ def detect_optimal_runtime() -> Dict[str, Any]:
             cpu_count = psutil.cpu_count(logical=False)  # Физические ядра
             memory_gb = psutil.virtual_memory().total // (1024**3)
             
-            if cpu_count >= 8 and memory_gb >= 16:
+            # Проверяем виртуальную машину
+            is_vm = False
+            try:
+                cpu_name = platform.processor().lower()
+                if 'qemu' in cpu_name or 'virtual' in cpu_name or 'kvm' in cpu_name:
+                    is_vm = True
+            except:
+                pass
+            
+            if is_vm and cpu_count <= 2:
+                runtime_info['profile'] = 'VM_OPTIMIZED'
+                runtime_info['reasons'].append(f'Виртуальная машина: {cpu_count} ядер, {memory_gb}GB RAM - агрессивная оптимизация')
+            elif cpu_count >= 8 and memory_gb >= 16:
                 runtime_info['profile'] = 'BALANCED'
                 runtime_info['reasons'].append(f'Мощный CPU: {cpu_count} ядер, {memory_gb}GB RAM')
             elif cpu_count >= 4 and memory_gb >= 8:
                 runtime_info['profile'] = 'POWER_SAVING'
                 runtime_info['reasons'].append(f'Средний CPU: {cpu_count} ядер, {memory_gb}GB RAM')
             else:
+                runtime_info['profile'] = 'CPU_ONLY'
                 runtime_info['reasons'].append(f'Слабый CPU: {cpu_count} ядер, {memory_gb}GB RAM')
         except ImportError:
             runtime_info['reasons'].append('psutil недоступен, используем базовые настройки')
