@@ -640,7 +640,8 @@ class ModelAdapter:
                                 ]
 
                         else:
-                            logger.info(f"🎭 Model result has no masks - hasattr(r, 'masks'): {hasattr(r, 'masks')}, r.masks: {getattr(r, 'masks', None)}")
+                            # Нет масок - это нормально, не логируем каждый раз
+                            logger.debug(f"🎭 Model result has no masks - hasattr(r, 'masks'): {hasattr(r, 'masks')}, r.masks: {getattr(r, 'masks', None)}")
 
                         if hasattr(r, 'boxes') and r.boxes is not None:
                             # If no masks, use only boxes
