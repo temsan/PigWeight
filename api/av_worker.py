@@ -382,7 +382,16 @@ class AVIsolate:
             elapsed = time.time() - t0
             if elapsed > timeout:
                 self._consecutive_failures += 1
-                logger.error(f"av_worker timeout on {cmd} after {elapsed:.1f}s (timeout={timeout}s)")
+                # Логируем таймауты на разных уровнях в зависимости от команды
+                if cmd in ['read_jpeg', 'seek_read_jpeg']:
+                    # Таймауты чтения - это нормально, логируем DEBUG
+                    logger.debug(f"av_worker timeout on {cmd} after {elapsed:.1f}s (worker busy)")
+                elif cmd == 'close':
+                    # Таймауты закрытия - WARNING
+                    logger.warning(f"av_worker timeout on {cmd} after {elapsed:.1f}s")
+                else:
+                    # Остальные таймауты - ERROR
+                    logger.error(f"av_worker timeout on {cmd} after {elapsed:.1f}s (timeout={timeout}s)")
                 raise TimeoutError(f"av_worker timeout on {cmd} after {timeout}s")
         
         try:
@@ -439,20 +448,45 @@ class AVIsolate:
             raise
 
     def close(self, sid: str) -> None:
+        """Закрывает поток. Использует короткий таймаут чтобы не зависать."""
         try:
-            self._req('close', {'id': sid})
-        except Exception:
-            pass
+            self._req('close', {'id': sid}, timeout=5.0)  # Короткий таймаут
+        except TimeoutError:
+            logger.warning(f"Timeout closing {sid}, forcing cleanup")
+            # Принудительно удаляем из сессий если есть доступ
+        except Exception as e:
+            logger.debug(f"Error closing {sid}: {e}")
 
-    def read_jpeg(self, sid: str, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
+    def read_jpeg(self, sid: str, timeout: float = 3.0) -> Optional[Dict[str, Any]]:
+        """Читает JPEG кадр из потока. Увеличен таймаут для RTSP."""
         try:
             return self._req('read_jpeg', {'id': sid}, timeout=timeout)
-        except (TimeoutError, ConnectionError):
-            # Таймауты и ошибки соединения - это нормально при чтении кадров
+        except TimeoutError:
+            # Таймауты - это нормально при чтении кадров (worker занят)
+            # Не логируем чтобы не засорять логи
+            return None
+        except ConnectionError:
+            # Ошибки соединения - логируем как warning раз в N секунд
+            logger.warning(f"⚠️ Connection error reading from {sid}, stream may need reconnection")
             return None
         except RuntimeError as e:
-            # RuntimeError означает что worker вернул ошибку (нет кадров и т.д.)
-            # Это нормально, не логируем
+            # RuntimeError означает что worker вернул ошибку
+            error_msg = str(e)
+            if "10054" in error_msg or "Connection reset" in error_msg or "Errno -10054" in error_msg:
+                # Камера разорвала соединение - логируем раз, не спамим
+                if not hasattr(self, '_connection_reset_logged'):
+                    self._connection_reset_logged = {}
+                
+                import time
+                current_time = time.time()
+                last_log = self._connection_reset_logged.get(sid, 0)
+                
+                if current_time - last_log > 10.0:  # Логируем раз в 10 секунд
+                    logger.warning(f"⚠️ RTSP соединение разорвано камерой {sid}. Поток будет переподключен автоматически.")
+                    self._connection_reset_logged[sid] = current_time
+            else:
+                # Другие ошибки (нет кадров и т.д.) - это нормально, не логируем
+                pass
             return None
         except Exception as e:
             logger.debug(f"Unexpected error reading jpeg from {sid}: {e}")

@@ -1144,9 +1144,11 @@ class RtspStream(VideoStream):
             
             frame_counter = 0
             start_time = time.time()
+            last_frame_ts = time.time()
+            reconnect_backoff = 1.0
             
             while self.running:
-                frame_data = av_read_jpeg(self.stream_id, timeout=2.0)
+                frame_data = av_read_jpeg(self.stream_id, timeout=3.0)
                 if frame_data and isinstance(frame_data, dict) and frame_data.get('jpeg'):
                     async with self.lock:
                         self.last_frame_data = frame_data
@@ -1154,6 +1156,8 @@ class RtspStream(VideoStream):
                     # Calculate current time for RTSP stream
                     frame_counter += 1
                     self.current_time = (time.time() - start_time)
+                    last_frame_ts = time.time()
+                    reconnect_backoff = 1.0  # сброс бэкоффа при получении кадра
                     
                     jpeg = frame_data['jpeg']
                     frame_id = frame_counter
@@ -1163,12 +1167,31 @@ class RtspStream(VideoStream):
                             asyncio.create_task(FRAME_BROKER.publish(self.stream_id, frame_id, self.current_time, jpeg))
                     except Exception:
                         pass
-                    
-                    # Убрана задержка для максимальной производительности
-                    # await asyncio.sleep(1.0 / self.fps)
                 else:
-                    # Минимальная задержка для стабильности
-                    await asyncio.sleep(0.001)  # 1ms
+                    # Если долго нет кадров — пробуем переподключиться
+                    if (time.time() - last_frame_ts) > 5.0:
+                        try:
+                            ocv_close(self.stream_id)
+                        except Exception:
+                            pass
+                        try:
+                            logger.warning(f"Нет кадров >5s для {self.stream_id}, переподключение...")
+                            await asyncio.sleep(min(5.0, reconnect_backoff))
+                            meta = av_open_rtsp(self.stream_id, self.rtsp_url)
+                            self.fps = meta.get("fps", self.fps or 25.0)
+                            start_time = time.time()
+                            last_frame_ts = time.time()
+                            reconnect_backoff = min(5.0, reconnect_backoff * 1.5)
+                            continue
+                        except Exception as re_err:
+                            logger.error(f"Ошибка переподключения RTSP {self.stream_id}: {re_err}")
+                            # короткий отдых перед следующей попыткой
+                            await asyncio.sleep(min(5.0, reconnect_backoff))
+                            reconnect_backoff = min(5.0, reconnect_backoff * 1.5)
+                            continue
+                    
+                    # Небольшая задержка, чтобы не грузить CPU впустую
+                    await asyncio.sleep(0.01)
         except Exception as e:
             logger.error(f"RTSP stream {self.stream_id} error: {e}")
         finally:
@@ -1453,7 +1476,7 @@ class StreamManager:
         # Ждем завершения всех отправок с таймаутом
         if tasks:
             try:
-                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=0.1)
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=0.5)
             except asyncio.TimeoutError:
                 logger.warning(f"Таймаут отправки WebSocket данных для {stream_id}")
 

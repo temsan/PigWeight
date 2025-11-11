@@ -1035,8 +1035,14 @@ class PigTrackingApp:
             elif source['type'] == 'camera':
                 logger.info(f"🎥 Обработка с камеры: {source.get('name', 'Unknown')}")
                 logger.info(f"   URL: {source.get('url', 'Unknown')}")
-                logger.info("ℹ️ Используйте --mode monitor для фонового мониторинга камеры")
-                return False
+
+                # Автоматически переключаемся в режим мониторинга для живого потока
+                if not getattr(args, 'rtsp', None):
+                    args.rtsp = source.get('url')
+                args.continuous = True if source.get('continuous') is None else source.get('continuous')
+                args.mode = 'monitor'
+                logger.info("ℹ️ Авто-переход в режим фонового мониторинга для RTSP потока")
+                return await self.run_monitor_mode(args)
             
             return True
             
