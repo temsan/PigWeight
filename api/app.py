@@ -20,6 +20,15 @@ try:
 except ImportError:
     HAVE_EVENT_LOGGER = False
 
+# Импорт сервисных слоёв (Фаза 2 рефакторинга)
+try:
+    from api.services import StreamService, ActService, MetricsService
+    HAVE_SERVICES = True
+    logging.info("✅ Service layers available")
+except ImportError as e:
+    HAVE_SERVICES = False
+    logging.warning(f"⚠️ Service layers not available: {e}")
+
 # Импортируем новый единый процессор
 try:
     from core.processor import get_processor, ProcessingOptions, FrameResult
@@ -1493,8 +1502,23 @@ except Exception:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global stream_service, act_service, metrics_service
+    
     # Startup
     logger.info("🚀 PigWeight API starting up...")
+    
+    # Инициализация сервисов (Фаза 2 - 9 ноября 2025)
+    if HAVE_SERVICES:
+        try:
+            stream_service = StreamService(STREAM_MANAGER)
+            act_service = ActService(db_manager)
+            metrics_service = MetricsService(stream_service, act_service, db_manager)
+            logger.info("✅ Сервисные слои инициализированы (StreamService, ActService, MetricsService)")
+        except Exception as e:
+            logger.error(f"❌ Ошибка инициализации сервисов: {e}")
+            stream_service = None
+            act_service = None
+            metrics_service = None
     
     # Запускаем фоновую задачу очистки событий
     cleanup_task = None
@@ -1534,13 +1558,23 @@ async def lifespan(app: FastAPI):
             pass
     
     # Останавливаем потоки
-    for stream in list(STREAM_MANAGER.streams.values()):
-        await stream.stop()
+    if stream_service:
+        for stream_id in stream_service.get_active_streams():
+            await stream_service.stop_stream(stream_id)
+    else:
+        # Fallback на прямое обращение
+        for stream in list(STREAM_MANAGER.streams.values()):
+            await stream.stop()
     
     logger.info("✅ PigWeight API shutdown complete")
 
 _DEFAULT_RESPONSE = ORJSONResponse if _HAVE_ORJSON else JSONResponse
 app = FastAPI(title="PigWeight API v3.0 (Unified)", lifespan=lifespan, default_response_class=_DEFAULT_RESPONSE)
+
+# Глобальные сервисы (Фаза 2 рефакторинга - 9 ноября 2025)
+stream_service: Optional['StreamService'] = None
+act_service: Optional['ActService'] = None
+metrics_service: Optional['MetricsService'] = None
 
 # Initialize DatabaseManager
 # ОБНОВЛЕНО: 8 ноября 2025 - усиленная проверка критичности БД
@@ -1581,6 +1615,21 @@ except Exception as e:
 from api.dependencies import init_dependencies
 init_dependencies(STREAM_MANAGER, config.TARGET_FPS, FileStream, perf_logger, av_meta, RECORDS_DIR, db_manager)
 
+# Вспомогательные функции для работы с сервисами (Фаза 2 - 9 ноября 2025)
+def get_stream_safe(stream_id: str):
+    """Безопасное получение потока через сервис или напрямую"""
+    if stream_service and stream_service.stream_exists(stream_id):
+        return stream_service.get_stream(stream_id)
+    # Fallback на прямое обращение
+    return STREAM_MANAGER.streams.get(stream_id) if STREAM_MANAGER else None
+
+def get_active_streams_safe() -> List[str]:
+    """Безопасное получение списка активных потоков"""
+    if stream_service:
+        return stream_service.get_active_streams()
+    # Fallback
+    return list(STREAM_MANAGER.streams.keys()) if STREAM_MANAGER else []
+
 # Setup middleware
 from api.middleware import setup_cors, setup_error_handling, setup_request_logging, setup_security_headers
 setup_cors(app)
@@ -1596,6 +1645,7 @@ app.include_router(stream.router, tags=["stream"])
 app.include_router(files.router, tags=["files"])
 app.include_router(diagnostics.router, tags=["diagnostics"])
 app.include_router(events.router, tags=["events"])
+app.include_router(events.router, tags=["events"], prefix="/api")  # alias для /api/events/*
 app.include_router(records.router, tags=["records"])
 app.include_router(system.router, tags=["system"])
 app.include_router(verification.router, tags=["verification"])
@@ -1632,9 +1682,6 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 
-# Moved to api/endpoints/health.py
-# @app.get("/api/health")
-
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     index_path = STATIC_DIR / "index.html"
@@ -1658,18 +1705,6 @@ async def read_monitoring():
     """Страница мониторинга системы"""
     return FileResponse(STATIC_DIR / "monitoring.html")
 
-# Moved to api/endpoints/stream.py
-# @app.post("/api/stream/start")
-
-# Moved to api/endpoints/stream.py
-# @app.get("/api/stream/{stream_id}/stop")
-
-# Moved to api/endpoints/stream.py
-# @app.get("/api/stream/{stream_id}/snapshot")
-
-# Moved to api/endpoints/stream.py
-# mjpeg_generator and @app.get("/api/stream/{stream_id}/feed")
-
 @app.get("/api/cameras")
 async def api_cameras():
     """Return available cameras as defined in .env (env vars)."""
@@ -1677,10 +1712,6 @@ async def api_cameras():
     result = cameras_from_env()
     logger.info(f"📹 API возвращает камеры: {result}")
     return result
-
-# Moved to api/endpoints/stream.py
-# @app.get("/api/stream/{stream_id}/info")
-# @app.get("/api/stream/{stream_id}/seek") - moved to api/endpoints/stream.py
 
 @app.post("/api/lines")
 async def api_set_lines(data: Dict[str, float]):
@@ -1697,7 +1728,7 @@ async def api_set_lines(data: Dict[str, float]):
 async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Body(...)):
     """Сохранить позиции линий для конкретного видеофайла."""
     try:
-        stream = STREAM_MANAGER.streams.get(stream_id)
+        stream = get_stream_safe(stream_id)
         if not stream:
             return JSONResponse({"error": f"Stream {stream_id} not found"}, status_code=404)
         
@@ -1724,7 +1755,7 @@ async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Bod
 async def api_stream_optimize(stream_id: str, transport: str = Query("mjpeg")):
     """Optimize stream settings based on transport type"""
     try:
-        stream = STREAM_MANAGER.streams.get(stream_id)
+        stream = get_stream_safe(stream_id)
         if not stream:
             return JSONResponse({"error": "stream not found"}, status_code=404)
 
@@ -2089,45 +2120,6 @@ async def compare_with_measurements(file: UploadFile = File(...)):
         logger.error(f"Error comparing with measurements: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-@app.post("/api/stream/{stream_id}/line_positions")
-async def api_set_line_positions(stream_id: str, positions: Dict[str, Any] = Body(...)):
-    """Сохранить позиции линий для конкретного видеофайла."""
-    try:
-        stream = STREAM_MANAGER.streams.get(stream_id)
-        if not stream:
-            return JSONResponse({"error": f"Stream {stream_id} not found"}, status_code=404)
-        
-        # Определяем ключ для файла (без пути)
-        file_key = stream.file_path if isinstance(stream, FileStream) else stream_id
-        if "/" in file_key:
-            file_key = file_key.split("/")[-1]
-
-        # Загружаем, обновляем и сохраняем
-        all_positions = load_line_positions()
-        if 'files' not in all_positions:
-            all_positions['files'] = {}
-        all_positions['files'][file_key] = positions
-        save_line_positions(all_positions)
-
-        # Также обновляем в текущем стриме
-        stream.line_positions = positions
-        
-        # Обновляем позиции линий в процессоре для корректной детекции пересечений
-        try:
-            from core.processor import get_processor
-            processor = await get_processor(stream_id)
-            if processor and processor.is_active:
-                left_x = float(positions.get('left_x', config.LINE_LEFT_X))
-                right_x = float(positions.get('right_x', config.LINE_RIGHT_X))
-                processor.update_line_positions(left_x, right_x)
-                logger.info(f"[успешно] Позиции линий обновлены в процессоре: L={left_x:.3f}, R={right_x:.3f}")
-        except Exception as e:
-            logger.warning(f"[предупреждение] Не удалось обновить позиции линий в процессоре: {e}")
-        
-        return {"status": "success", "message": f"Line positions saved for {file_key}"}
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
 @app.get("/api/weighing/logs")
 async def get_weighing_logs(date_from: str = Query(...), date_to: str = Query(...)):
     """
@@ -2211,350 +2203,6 @@ async def export_weighing_logs(date_from: str = Query(...), date_to: str = Query
         
     except Exception as e:
         logger.error(f"Error exporting weighing logs: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-# === API для журнала взвешиваний ===
-
-@app.get("/api/journal/acts")
-async def get_weighing_acts(
-    date_from: str = None,
-    date_to: str = None,
-    camera: str = None,
-    limit: int = 100
-):
-    """Получить акты взвешивания с фильтрацией"""
-    try:
-        acts = load_weighing_acts()
-        
-        # Применяем фильтры
-        filtered_acts = []
-        for act in acts:
-            # Фильтр по дате
-            if date_from and act['date'] < date_from:
-                continue
-            if date_to and act['date'] > date_to:
-                continue
-            # Фильтр по камере
-            if camera and act.get('camera') != camera:
-                continue
-            
-            filtered_acts.append(act)
-        
-        # Сортируем по дате (новые сверху)
-        filtered_acts.sort(key=lambda x: (x['date'], x['time']), reverse=True)
-        
-        # Ограничиваем количество
-        filtered_acts = filtered_acts[:limit]
-        
-        # Добавляем статистику
-        total_count = sum(act['count'] for act in filtered_acts)
-        total_weight = sum(act['weight'] for act in filtered_acts)
-        avg_weight = total_weight / total_count if total_count > 0 else 0
-        
-        return {
-            "acts": filtered_acts,
-            "summary": {
-                "total_acts": len(filtered_acts),
-                "total_count": total_count,
-                "total_weight": round(total_weight, 1),
-                "avg_weight": round(avg_weight, 2)
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting weighing acts: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.post("/api/journal/save")
-async def save_weighing_act(request: Request):
-    """Сохранить новый акт взвешивания"""
-    try:
-        data = await request.json()
-        
-        # Валидация данных
-        count = data.get('count', 0)
-        weight = data.get('weight', 0)
-        camera = data.get('camera', 'cam1')
-        
-        if count <= 0:
-            return JSONResponse({"error": "Количество должно быть больше 0"}, status_code=400)
-        if weight <= 0:
-            return JSONResponse({"error": "Вес должен быть больше 0"}, status_code=400)
-        
-        # Создаем новый акт
-        from datetime import datetime
-        now = datetime.now()
-        
-        new_act = {
-            "date": now.strftime("%Y-%m-%d"),
-            "time": now.strftime("%H:%M"),
-            "count": int(count),
-            "weight": float(weight),
-            "camera": camera
-        }
-        
-        # Загружаем существующие акты
-        acts = load_weighing_acts()
-        
-        # Добавляем новый акт в начало
-        acts.insert(0, new_act)
-        
-        # Сохраняем обратно в файл
-        save_weighing_acts(acts)
-        
-        logger.info(f"Сохранен новый акт взвешивания: {count} шт., {weight} кг")
-        
-        return {"success": True, "act": new_act}
-        
-    except Exception as e:
-        logger.error(f"Error saving weighing act: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-# === API для сверки с файлами замеров ===
-
-@app.post("/api/journal/compare")
-async def compare_with_excel(file: UploadFile = File(...)):
-    """Простая сверка актов взвешивания с Excel файлом"""
-    try:
-        if not file.filename.endswith(('.xlsx', '.xls')):
-            return JSONResponse({"error": "Поддерживаются только Excel файлы (.xlsx, .xls)"}, status_code=400)
-        
-        # Сохраняем временный файл
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = tmp.name
-        
-        try:
-            import pandas as pd
-            # Читаем Excel файл
-            excel_df = pd.read_excel(tmp_path)
-            
-            # Загружаем наши акты
-            acts = load_weighing_acts()
-            
-            # Ищем столбцы с количеством и весом в Excel
-            count_cols = [col for col in excel_df.columns if any(word in col.lower() for word in ['количество', 'count', 'шт', 'голов'])]
-            weight_cols = [col for col in excel_df.columns if any(word in col.lower() for word in ['вес', 'weight', 'кг'])]
-            
-            if not count_cols or not weight_cols:
-                return JSONResponse({"error": "Не найдены столбцы с количеством или весом в Excel файле"}, status_code=400)
-            
-            # Суммируем данные из Excel
-            excel_total_count = int(excel_df[count_cols[0]].sum()) if count_cols else 0
-            excel_total_weight = float(excel_df[weight_cols[0]].sum()) if weight_cols else 0
-            
-            # Суммируем данные из наших актов
-            acts_total_count = sum(act['count'] for act in acts)
-            acts_total_weight = sum(act['weight'] for act in acts)
-            
-            # Вычисляем расхождения
-            count_diff = abs(acts_total_count - excel_total_count)
-            weight_diff = abs(acts_total_weight - excel_total_weight)
-            
-            count_diff_percent = (count_diff / max(acts_total_count, excel_total_count)) * 100 if max(acts_total_count, excel_total_count) > 0 else 0
-            weight_diff_percent = (weight_diff / max(acts_total_weight, excel_total_weight)) * 100 if max(acts_total_weight, excel_total_weight) > 0 else 0
-            
-            # Определяем статус сверки
-            matches = 0
-            differences = 0
-            
-            if count_diff_percent <= 5 and weight_diff_percent <= 5:  # Допуск 5%
-                matches = 1
-                status = "success"
-                message = "Данные соответствуют"
-            else:
-                differences = 1
-                status = "warning"
-                message = f"Расхождения: количество {count_diff_percent:.1f}%, вес {weight_diff_percent:.1f}%"
-            
-            return {
-                "status": status,
-                "message": message,
-                "matches": matches,
-                "differences": differences,
-                "comparison": {
-                    "excel": {
-                        "total_count": excel_total_count,
-                        "total_weight": round(excel_total_weight, 1),
-                        "rows": len(excel_df)
-                    },
-                    "acts": {
-                        "total_count": acts_total_count,
-                        "total_weight": round(acts_total_weight, 1),
-                        "rows": len(acts)
-                    },
-                    "differences": {
-                        "count_diff": count_diff,
-                        "weight_diff": round(weight_diff, 1),
-                        "count_diff_percent": round(count_diff_percent, 1),
-                        "weight_diff_percent": round(weight_diff_percent, 1)
-                    }
-                }
-            }
-            
-        finally:
-            # Удаляем временный файл
-            os.unlink(tmp_path)
-        
-    except Exception as e:
-        logger.error(f"Error comparing with Excel: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.post("/api/verification/compare")
-async def compare_with_measurements(file: UploadFile = File(...)):
-    """Сверка актов взвешивания с загруженным файлом замеров"""
-    try:
-        if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
-            return JSONResponse({"error": "Unsupported file format. Use .xlsx, .xls or .csv"}, status_code=400)
-        
-        # Сохраняем временный файл
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = tmp.name
-        
-        try:
-            # Читаем файл замеров
-            if file.filename.endswith('.csv'):
-                import pandas as pd
-                measurements_df = pd.read_csv(tmp_path)
-            else:
-                import pandas as pd
-                measurements_df = pd.read_excel(tmp_path, engine='openpyxl')
-            
-            # Загружаем наши акты
-            acts = load_weighing_acts()
-            
-            # Анализируем структуру файла замеров (используя наш анализ)
-            # Предполагаем, что в файле есть столбцы с датами, группами, весами и количеством
-            
-            matches = 0
-            differences = 0
-            missing = 0
-            details = []
-            
-            # Простая логика сверки (может быть улучшена)
-            for act in acts:
-                # Ищем соответствующую запись в файле замеров
-                found_match = False
-                for _, row in measurements_df.iterrows():
-                    # Пытаемся найти совпадение по дате и группе
-                    # Это упрощенная логика, может потребовать доработки
-                    if str(act['group']).lower() in str(row.values).lower():
-                        found_match = True
-                        # Сравниваем веса (с допуском 5%)
-                        file_weight = 0
-                        file_count = 0
-                        
-                        # Пытаемся извлечь числовые значения из строки
-                        for val in row.values:
-                            if isinstance(val, (int, float)) and 10 <= val <= 2000:  # Диапазон весов
-                                if abs(val - act['weight']) < abs(file_weight - act['weight']):
-                                    file_weight = val
-                            elif isinstance(val, (int, float)) and 1 <= val <= 500:  # Диапазон количества
-                                if abs(val - act['total']) < abs(file_count - act['total']):
-                                    file_count = val
-                        
-                        weight_diff = abs(act['weight'] - file_weight) / act['weight'] if act['weight'] > 0 else 1
-                        count_diff = abs(act['total'] - file_count) / act['total'] if act['total'] > 0 else 1
-                        
-                        if weight_diff <= 0.05 and count_diff <= 0.1:  # Допуск 5% по весу, 10% по количеству
-                            matches += 1
-                            status = 'match'
-                        else:
-                            differences += 1
-                            status = 'diff'
-                        
-                        details.append({
-                            'group': act['group'],
-                            'date': act['date'],
-                            'status': status,
-                            'system_weight': act['weight'],
-                            'system_count': act['total'],
-                            'file_weight': file_weight,
-                            'file_count': file_count
-                        })
-                        break
-                
-                if not found_match:
-                    missing += 1
-                    details.append({
-                        'group': act['group'],
-                        'date': act['date'],
-                        'status': 'missing',
-                        'system_weight': act['weight'],
-                        'system_count': act['total'],
-                        'file_weight': 0,
-                        'file_count': 0
-                    })
-            
-            return {
-                'matches': matches,
-                'differences': differences,
-                'missing': missing,
-                'total_acts': len(acts),
-                'details': details[:20]  # Ограничиваем количество деталей
-            }
-            
-        finally:
-            # Удаляем временный файл
-            os.unlink(tmp_path)
-            
-    except Exception as e:
-        logger.error(f"Error comparing with measurements: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-# === API для загрузки видеофайлов ===
-# ОТКЛЮЧЕН: используется модульный endpoint из api/endpoints/video.py
-
-# @app.post("/api/upload")
-async def upload_video_file(file: UploadFile = File(...)):
-    """Загрузка видеофайла для обработки"""
-    try:
-        # Валидация типа файла
-        allowed_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'}
-        file_extension = Path(file.filename).suffix.lower()
-        
-        if file_extension not in allowed_extensions:
-            return JSONResponse(
-                {"error": f"Неподдерживаемый формат файла. Разрешены: {', '.join(allowed_extensions)}"},
-                status_code=400
-            )
-        
-        # Проверка размера файла (максимум 500MB)
-        max_size = 500 * 1024 * 1024  # 500MB
-        file_content = await file.read()
-        
-        if len(file_content) > max_size:
-            return JSONResponse(
-                {"error": "Файл слишком большой. Максимальный размер: 500MB"},
-                status_code=400
-            )
-        
-        # Создание уникального имени файла
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_filename = f"{timestamp}_{file.filename}"
-        file_path = UPLOAD_DIR / safe_filename
-        
-        # Сохранение файла
-        with open(file_path, "wb") as f:
-            f.write(file_content)
-        
-        logger.info(f"Video file uploaded: {safe_filename}, size: {len(file_content)} bytes")
-        
-        return {
-            "status": "success",
-            "filename": safe_filename,
-            "path": str(file_path),
-            "size": len(file_content),
-            "message": "Файл успешно загружен"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error uploading video file: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # === API для управления актами взвешивания ===
@@ -2760,188 +2408,6 @@ async def export_weighing_data(
         
     except Exception as e:
         logger.error(f"Error exporting weighing data: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-# === API для загрузки видеофайлов ===
-# ОТКЛЮЧЕН: используется модульный endpoint из api/endpoints/video.py
-
-# @app.post("/api/upload")
-async def upload_video_file(file: UploadFile = File(...)):
-    """Загрузка видеофайла для обработки"""
-    try:
-        # Валидация типа файла
-        allowed_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'}
-        file_extension = Path(file.filename).suffix.lower()
-        
-        if file_extension not in allowed_extensions:
-            return JSONResponse(
-                {"error": f"Неподдерживаемый формат файла. Разрешены: {', '.join(allowed_extensions)}"},
-                status_code=400
-            )
-        
-        # Проверка размера файла (максимум 500MB)
-        max_size = 500 * 1024 * 1024  # 500MB
-        file_content = await file.read()
-        
-        if len(file_content) > max_size:
-            return JSONResponse(
-                {"error": "Файл слишком большой. Максимальный размер: 500MB"},
-                status_code=400
-            )
-        
-        # Создание безопасного имени файла без timestamp префикса
-        # Сохраняем оригинальное имя файла для предотвращения искажения
-        import re
-        
-        # Очищаем имя файла от потенциально опасных символов
-        safe_filename = re.sub(r'[^\w\-_\.]', '_', file.filename)
-        
-        # Если файл с таким именем уже существует, добавляем уникальный суффикс
-        file_path = UPLOAD_DIR / safe_filename
-        if file_path.exists():
-            name_part = file_path.stem
-            extension = file_path.suffix
-            counter = 1
-            while file_path.exists():
-                safe_filename = f"{name_part}_{counter}{extension}"
-                file_path = UPLOAD_DIR / safe_filename
-                counter += 1
-        
-        # Сохранение файла
-        with open(file_path, "wb") as f:
-            f.write(file_content)
-        
-        logger.info(f"Video file uploaded: {safe_filename}, size: {len(file_content)} bytes")
-        
-        return {
-            "status": "success",
-            "filename": safe_filename,
-            "path": str(file_path),
-            "size": len(file_content),
-            "message": "Файл успешно загружен"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error uploading video file: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-# === API для управления актами взвешивания ===
-
-@app.post("/api/weighing/manual/save")
-async def save_manual_weighing(data: Dict[str, Any]):
-    """Сохранение ручного акта взвешивания из Live панели"""
-    try:
-        # Валидация данных
-        required_fields = ['count', 'total_weight']
-        for field in required_fields:
-            if field not in data:
-                return JSONResponse(
-                    {"error": f"Отсутствует обязательное поле: {field}"},
-                    status_code=400
-                )
-        
-        count = int(data['count'])
-        total_weight = float(data['total_weight'])
-        
-        if count <= 0 or total_weight <= 0:
-            return JSONResponse(
-                {"error": "Количество и вес должны быть больше нуля"},
-                status_code=400
-            )
-        
-        # Создание записи акта
-        act_data = {
-            'id': f"manual_{int(time.time())}",
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'time': datetime.now().strftime('%H:%M:%S'),
-            'group': data.get('group', 'Ручной ввод'),
-            'total': count,
-            'weight': total_weight,
-            'avg_weight': round(total_weight / count, 2),
-            'source': 'manual',
-            'stream_id': data.get('stream_id', 'manual'),
-            'created_at': datetime.now().isoformat()
-        }
-        
-        # Сохранение в файл
-        acts_file = RECORDS_DIR / "weighing_acts.json"
-        acts = []
-        
-        if acts_file.exists():
-            try:
-                with open(acts_file, 'r', encoding='utf-8') as f:
-                    acts = json.load(f)
-            except Exception:
-                acts = []
-        
-        acts.append(act_data)
-        
-        with open(acts_file, 'w', encoding='utf-8') as f:
-            json.dump(acts, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"Manual weighing act saved: {act_data['id']}")
-        
-        return {
-            "status": "success",
-            "act_id": act_data['id'],
-            "message": "Акт взвешивания сохранен"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error saving manual weighing: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.get("/api/weighing/stats")
-async def get_weighing_stats(
-    date_from: str = Query(None),
-    date_to: str = Query(None),
-    stream_id: str = Query(None)
-):
-    """Получение статистики актов взвешивания"""
-    try:
-        acts_file = RECORDS_DIR / "weighing_acts.json"
-        if not acts_file.exists():
-            return {
-                "total_acts": 0,
-                "total_count": 0,
-                "total_weight": 0,
-                "avg_weight": 0
-            }
-        
-        with open(acts_file, 'r', encoding='utf-8') as f:
-            acts = json.load(f)
-        
-        # Фильтрация по датам
-        if date_from or date_to:
-            filtered_acts = []
-            for act in acts:
-                act_date = act.get('date', '')
-                if date_from and act_date < date_from:
-                    continue
-                if date_to and act_date > date_to:
-                    continue
-                filtered_acts.append(act)
-            acts = filtered_acts
-        
-        # Фильтрация по stream_id
-        if stream_id:
-            acts = [act for act in acts if act.get('stream_id') == stream_id]
-        
-        # Вычисление статистики
-        total_acts = len(acts)
-        total_count = sum(act.get('total', 0) for act in acts)
-        total_weight = sum(act.get('weight', 0) for act in acts)
-        avg_weight = round(total_weight / total_count, 2) if total_count > 0 else 0
-        
-        return {
-            "total_acts": total_acts,
-            "total_count": total_count,
-            "total_weight": round(total_weight, 2),
-            "avg_weight": avg_weight
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting weighing stats: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # === API для журнала актов взвешивания ===
@@ -3323,7 +2789,7 @@ async def debug_infer_status():
             },
             "stream_manager": {
                 "initialized": STREAM_MANAGER is not None,
-                "streams_count": len(STREAM_MANAGER.streams) if STREAM_MANAGER else 0
+                "streams_count": len(get_active_streams_safe())
             }
         })
     except Exception as e:

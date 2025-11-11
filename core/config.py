@@ -320,9 +320,17 @@ def setup_logging(debug: bool = False) -> logging.Logger:
     console_handler.setLevel(level)
     root_logger.addHandler(console_handler)
     
-    # File handler - в файл записываем все уровни для отладки
+    # File handler с ротацией — в файл пишем INFO+/DEBUG (в debug)
+    from logging.handlers import RotatingFileHandler
     file_level = logging.DEBUG if debug else logging.INFO
-    file_handler = logging.FileHandler(log_dir / "app.log", encoding="utf-8")
+    log_path = log_dir / "app.log"
+    # Ограничиваем до ~10MB на файл, храним 5 резервных копий
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8"
+    )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(file_level)
     root_logger.addHandler(file_handler)

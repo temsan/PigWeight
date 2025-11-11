@@ -409,7 +409,10 @@ class AVIsolate:
             else:
                 error_msg = str(data) if data else f"Unknown error for command {cmd}"
             
-            logger.warning(f"av_worker command {cmd} failed: {error_msg}")
+            # Не логируем ошибки 10054 здесь - они обрабатываются в read_jpeg с агрегацией
+            if not ("10054" in error_msg or "Errno -10054" in error_msg):
+                logger.warning(f"av_worker command {cmd} failed: {error_msg}")
+            
             self._consecutive_failures += 1
             raise RuntimeError(error_msg)
         
@@ -477,7 +480,6 @@ class AVIsolate:
                 if not hasattr(self, '_connection_reset_logged'):
                     self._connection_reset_logged = {}
                 
-                import time
                 current_time = time.time()
                 last_log = self._connection_reset_logged.get(sid, 0)
                 
